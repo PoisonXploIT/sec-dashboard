@@ -47,17 +47,17 @@ def get_aiohttp_proxy() -> str | None:
 
 def get_tor_status() -> dict:
     """Check if TOR is running and accessible."""
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.settimeout(3)
-        result = s.connect_ex(("127.0.0.1", 9050))
-        s.close()
-        if result == 0:
-            return {"available": True, "port": 9050, "message": "TOR SOCKS5 proxy detected on 127.0.0.1:9050"}
-        else:
-            return {"available": False, "port": 9050, "message": "TOR not running on 127.0.0.1:9050. Install TOR Browser or tor service."}
-    except Exception as e:
-        return {"available": False, "error": str(e)}
+    for port in [9050, 9150, 9151]:
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(3)
+            result = s.connect_ex(("127.0.0.1", port))
+            s.close()
+            if result == 0:
+                return {"available": True, "port": port, "message": f"TOR SOCKS5 proxy detected on 127.0.0.1:{port}"}
+        except Exception:
+            pass
+    return {"available": False, "port": 9050, "message": "TOR not running. Install TOR Browser or tor service."}
 
 
 def get_tor_ip() -> str | None:
