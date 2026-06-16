@@ -162,14 +162,14 @@ async def dir_fuzzer(url: str, wordlist: str = "common", threads: int = 50, **kw
     found = []
     sem = asyncio.Semaphore(threads)
 
-    async def check_path(path: str):
-        async with sem:
-            target = urljoin(url, path)
-            try:
-                async with aiohttp.ClientSession(
-                    timeout=aiohttp.ClientTimeout(total=10),
-                    connector=aiohttp.TCPConnector(ssl=False)
-                ) as session:
+    async with aiohttp.ClientSession(
+        timeout=aiohttp.ClientTimeout(total=10),
+        connector=aiohttp.TCPConnector(ssl=False, limit=threads)
+    ) as session:
+        async def check_path(path: str):
+            async with sem:
+                target = urljoin(url, path)
+                try:
                     async with session.get(target, allow_redirects=False) as resp:
                         if resp.status not in (404, 405, 502, 503):
                             size = resp.content_length or 0
@@ -180,11 +180,11 @@ async def dir_fuzzer(url: str, wordlist: str = "common", threads: int = 50, **kw
                                 "size": size,
                                 "content_type": resp.headers.get("Content-Type", ""),
                             })
-            except Exception:
-                pass
+                except Exception:
+                    pass
 
-    start = time.time()
-    await asyncio.gather(*[check_path(w) for w in paths])
+        start = time.time()
+        await asyncio.gather(*[check_path(w) for w in paths])
     elapsed = round(time.time() - start, 2)
 
     found.sort(key=lambda x: x["status"])
