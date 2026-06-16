@@ -107,6 +107,7 @@
         .cat-web { background: rgba(188,140,255,0.15); color: var(--purple); }
         .cat-vuln { background: rgba(248,81,73,0.15); color: var(--red); }
         .cat-system { background: rgba(63,185,80,0.15); color: var(--green); }
+        .cat-osint { background: rgba(247,120,186,0.15); color: var(--pink); }
 
         /* Target list */
         .target-item { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 8px; transition: var(--transition); }
@@ -280,7 +281,7 @@
                 <span class="icon"></span> Dashboard
             </a>
             <a class="nav-item" data-page="tools" onclick="navigate('tools')">
-                <span class="icon"></span> Tools <span class="badge" id="tools-count">22</span>
+                <span class="icon"></span> Tools <span class="badge" id="tools-count">27</span>
             </a>
             <a class="nav-item" data-page="pipeline" onclick="navigate('pipeline')">
                 <span class="icon"></span> Pipeline
@@ -308,14 +309,14 @@
                 <span class="icon"></span> Vulnerability
             </a>
             <a class="nav-item" onclick="filterCategory('System')">
+                <span class="icon"></span> System
+            </a>
             <a class="nav-item" onclick="filterCategory('OSINT')">
                 <span class="icon">OS</span> OSINT
             </a>
-                <span class="icon"></span> System
-            </a>
             <div style="flex:1"></div>
             <div style="padding: 16px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-muted);">
-                <div>27 tools • 4 categories</div>
+                <div>27 tools • 5 categories</div>
                 <div>Pure Python • No deps</div>
             </div>
         </nav>
@@ -393,8 +394,8 @@
     }
 
     function esc(str) { return String(str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-    function catIcon(cat) { return {'Network Recon':'','Web Security':'','Vulnerability':'','System':''}[cat]||''; }
-    function catClass(cat) { return {'Network Recon':'network','Web Security':'web','Vulnerability':'vuln','System':'system'}[cat]||'network'; }
+    function catIcon(cat) { return {'Network Recon':'','Web Security':'','Vulnerability':'','System':'','OSINT':'OS'}[cat]||''; }
+    function catClass(cat) { return {'Network Recon':'network','Web Security':'web','Vulnerability':'vuln','System':'system','OSINT':'osint'}[cat]||'network'; }
 
     // ── Dashboard ──────────────────────────────
     async function renderDashboard() {
@@ -458,7 +459,7 @@
         content.innerHTML = `
             <div class="tabs">
                 <div class="tab ${!state.categoryFilter?'active':''}" onclick="state.categoryFilter=null;renderTools()">All (${state.tools.length})</div>
-                ${['Network Recon','Web Security','Vulnerability','System'].map(c =>
+                ${['Network Recon','Web Security','Vulnerability','System','OSINT'].map(c =>
                     `<div class="tab ${state.categoryFilter===c?'active':''}" onclick="filterCategory('${c}')">${catIcon(c)} ${c} (${state.tools.filter(t=>t.category===c).length})</div>`
                 ).join('')}
             </div>
