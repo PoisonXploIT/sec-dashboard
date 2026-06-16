@@ -372,17 +372,30 @@ async def create_pipeline(body: PipelineCreate):
         )
 
         async def run_and_save():
-            result = await runner.run()
-            db2 = await get_db()
             try:
-                status = "completed" if result.get("status") == "completed" else "failed"
-                await db2.execute(
-                    "UPDATE pipelines SET status = ?, result = ?, progress = 100, finished_at = ? WHERE id = ?",
-                    (status, json.dumps(result), datetime.utcnow().isoformat(), pipeline_id)
-                )
-                await db2.commit()
-            finally:
-                await db2.close()
+                result = await runner.run()
+                db2 = await get_db()
+                try:
+                    status = "completed" if result.get("status") == "completed" else "failed"
+                    await db2.execute(
+                        "UPDATE pipelines SET status = ?, result = ?, progress = 100, finished_at = ? WHERE id = ?",
+                        (status, json.dumps(result), datetime.utcnow().isoformat(), pipeline_id)
+                    )
+                    await db2.commit()
+                finally:
+                    await db2.close()
+            except Exception as e:
+                # Mark as failed if anything goes wrong
+                try:
+                    db2 = await get_db()
+                    await db2.execute(
+                        "UPDATE pipelines SET status = 'failed', result = ?, finished_at = ? WHERE id = ?",
+                        (json.dumps({"error": str(e)}), datetime.utcnow().isoformat(), pipeline_id)
+                    )
+                    await db2.commit()
+                    await db2.close()
+                except Exception:
+                    pass
 
         asyncio.create_task(run_and_save())
         return {"pipeline_id": pipeline_id, "mode": body.mode, "status": "started"}
