@@ -207,7 +207,7 @@
         /* Search bar */
         .search-bar { position: relative; margin-bottom: 16px; }
         .search-bar input { padding-left: 36px; }
-        .search-bar::before { content: '🔍'; position: absolute; left: 10px; top: 50%; transform: translateY(-50%); font-size: 14px; z-index: 1; }
+        .search-bar::before { content: ''; position: absolute; left: 10px; top: 50%; transform: translateY(-50%); font-size: 14px; z-index: 1; }
 
         /* Formatted result cards */
         .kv-grid { display: grid; grid-template-columns: 140px 1fr; gap: 4px 12px; font-size: 13px; }
@@ -273,36 +273,36 @@
     <div class="app">
         <nav class="sidebar">
             <div class="sidebar-header">
-                <h1>🛡️ Sec-Dashboard <span class="version">v2.0</span></h1>
+                <h1> Sec-Dashboard <span class="version">v1.0</span></h1>
             </div>
             <div class="nav-section">Navigation</div>
             <a class="nav-item active" data-page="dashboard" onclick="navigate('dashboard')">
-                <span class="icon">📊</span> Dashboard
+                <span class="icon"></span> Dashboard
             </a>
             <a class="nav-item" data-page="tools" onclick="navigate('tools')">
-                <span class="icon">🔧</span> Tools <span class="badge" id="tools-count">22</span>
+                <span class="icon"></span> Tools <span class="badge" id="tools-count">22</span>
             </a>
             <a class="nav-item" data-page="pipeline" onclick="navigate('pipeline')">
-                <span class="icon">⚡</span> Pipeline
+                <span class="icon"></span> Pipeline
             </a>
             <a class="nav-item" data-page="targets" onclick="navigate('targets')">
-                <span class="icon">🎯</span> Targets
+                <span class="icon"></span> Targets
             </a>
             <a class="nav-item" data-page="history" onclick="navigate('history')">
-                <span class="icon">📜</span> History
+                <span class="icon"></span> History
             </a>
             <div class="nav-section" style="margin-top: 16px;">Categories</div>
             <a class="nav-item" onclick="filterCategory('Network Recon')">
-                <span class="icon">🌐</span> Network Recon
+                <span class="icon"></span> Network Recon
             </a>
             <a class="nav-item" onclick="filterCategory('Web Security')">
-                <span class="icon">🕸️</span> Web Security
+                <span class="icon"></span> Web Security
             </a>
             <a class="nav-item" onclick="filterCategory('Vulnerability')">
-                <span class="icon">🐛</span> Vulnerability
+                <span class="icon"></span> Vulnerability
             </a>
             <a class="nav-item" onclick="filterCategory('System')">
-                <span class="icon">💻</span> System
+                <span class="icon"></span> System
             </a>
             <div style="flex:1"></div>
             <div style="padding: 16px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-muted);">
@@ -348,9 +348,9 @@
     }
 
     function handleWSEvent(event) {
-        if (event.type === 'tool_start') toast(`🔧 Running ${event.tool}...`, 'info');
-        else if (event.type === 'tool_complete') { const s = event.success ? '✅' : '❌'; toast(`${s} ${event.tool} (${event.elapsed}s)`, event.success ? 'success' : 'error'); }
-        else if (event.type === 'pipeline_complete') { toast(`✅ Pipeline completed in ${event.elapsed}s`, 'success'); if (state.page === 'pipeline') renderPipelinePage(); }
+        if (event.type === 'tool_start') toast(` Running ${event.tool}...`, 'info');
+        else if (event.type === 'tool_complete') { const s = event.success ? '' : ''; toast(`${s} ${event.tool} (${event.elapsed}s)`, event.success ? 'success' : 'error'); }
+        else if (event.type === 'pipeline_complete') { toast(` Pipeline completed in ${event.elapsed}s`, 'success'); if (state.page === 'pipeline') renderPipelinePage(); }
         else if (event.type === 'phase_start') { /* handled by pollPipeline */ }
         else if (event.type === 'scan_complete') { if (state.page === 'history') renderHistoryPage(); }
     }
@@ -384,7 +384,7 @@
     }
 
     function esc(str) { return String(str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-    function catIcon(cat) { return {'Network Recon':'🌐','Web Security':'🕸️','Vulnerability':'🐛','System':'💻'}[cat]||'🔧'; }
+    function catIcon(cat) { return {'Network Recon':'','Web Security':'','Vulnerability':'','System':''}[cat]||''; }
     function catClass(cat) { return {'Network Recon':'network','Web Security':'web','Vulnerability':'vuln','System':'system'}[cat]||'network'; }
 
     // ── Dashboard ──────────────────────────────
@@ -403,12 +403,12 @@
                 <div class="stat-card"><div class="value">3</div><div class="label">Pipeline Modes</div></div>
             </div>
             <div class="card">
-                <div class="card-header"><div class="card-title">⚡ Quick Actions</div></div>
+                <div class="card-header"><div class="card-title"> Quick Actions</div></div>
                 <div class="flex gap-8" style="flex-wrap:wrap;">
-                    <button class="btn btn-primary" onclick="navigate('pipeline')">🚀 Run Pipeline</button>
-                    <button class="btn btn-accent" onclick="navigate('tools')">🔧 Browse Tools</button>
-                    <button class="btn" onclick="showAddTarget()">➕ Add Target</button>
-                    <button class="btn" onclick="navigate('history')">📜 View History</button>
+                    <button class="btn btn-primary" onclick="navigate('pipeline')"> Run Pipeline</button>
+                    <button class="btn btn-accent" onclick="navigate('tools')"> Browse Tools</button>
+                    <button class="btn" onclick="showAddTarget()"> Add Target</button>
+                    <button class="btn" onclick="navigate('history')"> View History</button>
                 </div>
             </div>
             <div class="grid grid-2">
@@ -423,7 +423,7 @@
             </div>
             ${targets.targets?.length ? `
                 <div class="card mt-16">
-                    <div class="card-header"><div class="card-title">🎯 Recent Targets</div><button class="btn btn-sm" onclick="navigate('targets')">View All</button></div>
+                    <div class="card-header"><div class="card-title"> Recent Targets</div><button class="btn btn-sm" onclick="navigate('targets')">View All</button></div>
                     ${targets.targets.slice(0,5).map(t => `
                         <div class="target-item">
                             <div><div class="name">${esc(t.name)}</div><div class="host">${esc(t.host)}</div></div>
@@ -459,7 +459,7 @@
             ${state.selectedTarget ? `
                 <div class="card" style="background:rgba(88,166,255,0.05);border-color:var(--accent);">
                     <div class="flex items-center justify-between">
-                        <div>🎯 Target: <strong>${esc(state.selectedTarget.name)}</strong> <code>${esc(state.selectedTarget.host)}</code></div>
+                        <div> Target: <strong>${esc(state.selectedTarget.name)}</strong> <code>${esc(state.selectedTarget.host)}</code></div>
                         <button class="btn btn-sm" onclick="state.selectedTarget=null;renderTools()">Clear</button>
                     </div>
                 </div>
@@ -496,9 +496,9 @@
 
         if (resultDiv) {
             if (result.success) {
-                resultDiv.innerHTML = `<div class="card"><div class="card-header"><div class="card-title">${result.success?'✅':'❌'} ${toolId}</div><span style="font-size:12px;color:var(--text-muted)">${result.elapsed_seconds}s</span></div>${formatResult(toolId, result.result)}</div>`;
+                resultDiv.innerHTML = `<div class="card"><div class="card-header"><div class="card-title">${result.success?'':''} ${toolId}</div><span style="font-size:12px;color:var(--text-muted)">${result.elapsed_seconds}s</span></div>${formatResult(toolId, result.result)}</div>`;
             } else {
-                resultDiv.innerHTML = `<div class="card"><div class="card-header"><div class="card-title">❌ ${toolId} — Error</div></div><div class="result-panel"><pre style="color:var(--red)">${esc(result.error)}</pre></div></div>`;
+                resultDiv.innerHTML = `<div class="card"><div class="card-header"><div class="card-title"> ${toolId} — Error</div></div><div class="result-panel"><pre style="color:var(--red)">${esc(result.error)}</pre></div></div>`;
             }
         }
         if (state.selectedTarget?.id) await api.post('/scans', { target_id: state.selectedTarget.id, tool: toolId });
@@ -537,49 +537,49 @@
     }
 
     function formatPortScanner(d) {
-        if (!d.open_ports?.length) return `<div class="finding-card safe"><strong>✅ No open ports found</strong> (scanned ${d.scanned_ports} ports in ${d.elapsed_seconds}s)</div>`;
-        return `<div class="result-section"><h4>🔌 Open Ports (${d.open_count}/${d.scanned_ports})</h4>
+        if (!d.open_ports?.length) return `<div class="finding-card safe"><strong> No open ports found</strong> (scanned ${d.scanned_ports} ports in ${d.elapsed_seconds}s)</div>`;
+        return `<div class="result-section"><h4> Open Ports (${d.open_count}/${d.scanned_ports})</h4>
             ${d.open_ports.map(p => `<div class="port-row"><span class="port-num">${p.port}</span><span class="port-state"><span class="tag tag-green">OPEN</span></span><span class="port-service">${esc(p.service)}</span></div>`).join('')}
         </div><div style="font-size:12px;color:var(--text-muted)">Scanned in ${d.elapsed_seconds}s</div>`;
     }
 
     function formatDnsRecon(d) {
-        let html = `<div class="result-section"><h4>🌐 DNS Records for ${esc(d.domain)}</h4>`;
+        let html = `<div class="result-section"><h4> DNS Records for ${esc(d.domain)}</h4>`;
         for (const [type, records] of Object.entries(d.records || {})) {
             html += `<div style="margin-bottom:8px"><span class="tag tag-accent">${type}</span></div>`;
             html += records.map(r => `<div style="font-family:monospace;font-size:12px;padding:2px 0 2px 24px;color:var(--text-secondary)">${esc(r)}</div>`).join('');
         }
         if (d.reverse_dns?.length) {
-            html += `<h4 style="margin-top:12px">🔄 Reverse DNS</h4>`;
+            html += `<h4 style="margin-top:12px"> Reverse DNS</h4>`;
             html += d.reverse_dns.map(r => `<div class="kv-grid"><span class="key">${esc(r.ip)}</span><span class="value">${esc(r.hostname)}</span></div>`).join('');
         }
         return html + '</div>';
     }
 
     function formatSubdomains(d) {
-        if (!d.subdomains_found?.length) return `<div class="finding-card safe">✅ No subdomains found (${d.wordlist_size} tested in ${d.elapsed_seconds}s)</div>`;
-        return `<div class="result-section"><h4>🔍 Subdomains (${d.count} found)</h4>
+        if (!d.subdomains_found?.length) return `<div class="finding-card safe"> No subdomains found (${d.wordlist_size} tested in ${d.elapsed_seconds}s)</div>`;
+        return `<div class="result-section"><h4> Subdomains (${d.count} found)</h4>
             ${d.subdomains_found.map(s => `<div class="port-row"><span style="font-family:monospace;font-weight:600;min-width:200px">${esc(s.subdomain)}</span><span class="port-service">${esc(s.ip)}</span></div>`).join('')}
         </div><div style="font-size:12px;color:var(--text-muted)">${d.wordlist_size} tested in ${d.elapsed_seconds}s</div>`;
     }
 
     function formatHttpProbe(d) {
         const p = d.probes?.[0]; if (!p) return '<p>No probe data</p>';
-        if (p.error) return `<div class="finding-card vuln"><strong>❌ Connection failed:</strong> ${esc(p.error)}</div>`;
-        return `<div class="result-section"><h4>📡 HTTP Probe</h4><div class="kv-grid">
+        if (p.error) return `<div class="finding-card vuln"><strong> Connection failed:</strong> ${esc(p.error)}</div>`;
+        return `<div class="result-section"><h4> HTTP Probe</h4><div class="kv-grid">
             <span class="key">URL</span><span class="value">${esc(p.url)}</span>
             <span class="key">Status</span><span class="value"><span class="tag ${p.status<400?'tag-green':'tag-red'}">${p.status}</span></span>
             <span class="key">Server</span><span class="value">${esc(p.server||'unknown')}</span>
             <span class="key">Content-Type</span><span class="value">${esc(p.content_type||'')}</span>
             <span class="key">Content Length</span><span class="value">${p.content_length||0} bytes</span>
         </div></div>
-        ${p.technologies?.length ? `<div class="result-section"><h4>🔧 Technologies</h4><div>${p.technologies.map(t=>`<span class="tag">${esc(t)}</span>`).join(' ')}</div></div>` : ''}`;
+        ${p.technologies?.length ? `<div class="result-section"><h4> Technologies</h4><div>${p.technologies.map(t=>`<span class="tag">${esc(t)}</span>`).join(' ')}</div></div>` : ''}`;
     }
 
     function formatWhois(d) {
-        if (d.error) return `<div class="finding-card vuln">❌ ${esc(d.error)}</div>`;
-        if (d.raw) return `<div class="result-section"><h4>📋 WHOIS Raw</h4><div class="result-panel"><pre>${esc(d.raw)}</pre></div></div>`;
-        return `<div class="result-section"><h4>📋 WHOIS ${esc(d.domain)}</h4><div class="kv-grid">
+        if (d.error) return `<div class="finding-card vuln"> ${esc(d.error)}</div>`;
+        if (d.raw) return `<div class="result-section"><h4> WHOIS Raw</h4><div class="result-panel"><pre>${esc(d.raw)}</pre></div></div>`;
+        return `<div class="result-section"><h4> WHOIS ${esc(d.domain)}</h4><div class="kv-grid">
             <span class="key">Registrar</span><span class="value">${esc(d.registrar||'N/A')}</span>
             <span class="key">Created</span><span class="value">${esc(d.creation_date||'N/A')}</span>
             <span class="key">Expires</span><span class="value">${esc(d.expiration_date||'N/A')}</span>
@@ -590,26 +590,26 @@
     }
 
     function formatPing(d) {
-        return `<div class="finding-card ${d.alive?'safe':'vuln'}"><strong>${d.alive?'✅ Host is alive':'❌ Host unreachable'}</strong> — ${esc(d.host)}</div>
+        return `<div class="finding-card ${d.alive?'safe':'vuln'}"><strong>${d.alive?' Host is alive':' Host unreachable'}</strong> — ${esc(d.host)}</div>
         ${d.stats?.summary ? `<div class="kv-grid mt-8"><span class="key">Summary</span><span class="value">${esc(d.stats.summary)}</span></div>` : ''}
         <div class="result-panel mt-8"><pre>${esc(d.output||'')}</pre></div>`;
     }
 
     function formatTraceroute(d) {
         if (!d.hops?.length) return `<div class="result-panel"><pre>${esc(d.raw_output||'No data')}</pre></div>`;
-        return `<div class="result-section"><h4>🗺️ Traceroute (${d.hop_count} hops)</h4>
+        return `<div class="result-section"><h4> Traceroute (${d.hop_count} hops)</h4>
             ${d.hops.map(h => `<div class="port-row"><span class="port-num">Hop ${h.hop}</span><span class="port-service">${h.ips?.join(', ')||'*'} ${h.times?.join(' ')||''}</span></div>`).join('')}
         </div>`;
     }
 
     function formatSSL(d) {
-        if (d.error) return `<div class="finding-card vuln">❌ ${esc(d.error)}</div>`;
-        return `<div class="result-section"><h4>🔒 SSL/TLS Certificate</h4><div class="kv-grid">
+        if (d.error) return `<div class="finding-card vuln"> ${esc(d.error)}</div>`;
+        return `<div class="result-section"><h4> SSL/TLS Certificate</h4><div class="kv-grid">
             <span class="key">Host</span><span class="value">${esc(d.host)}:${d.port}</span>
             <span class="key">TLS Version</span><span class="value"><span class="tag tag-green">${esc(d.tls_version)}</span></span>
             <span class="key">Cipher</span><span class="value">${esc(d.cipher_suite||'N/A')}</span>
             <span class="key">Bits</span><span class="value">${d.cipher_bits||'N/A'}</span>
-            <span class="key">Valid</span><span class="value">${d.valid?'<span class="tag tag-green">✅ Yes</span>':'<span class="tag tag-red">❌ No</span>'}</span>
+            <span class="key">Valid</span><span class="value">${d.valid?'<span class="tag tag-green"> Yes</span>':'<span class="tag tag-red"> No</span>'}</span>
             <span class="key">Not Before</span><span class="value">${esc(d.not_before||'')}</span>
             <span class="key">Not After</span><span class="value">${esc(d.not_after||'')}</span>
         </div></div>
@@ -619,21 +619,21 @@
     }
 
     function formatHeaders(d) {
-        if (d.error) return `<div class="finding-card vuln">❌ ${esc(d.error)}</div>`;
+        if (d.error) return `<div class="finding-card vuln"> ${esc(d.error)}</div>`;
         const gradeClass = d.grade?.startsWith('A')?'grade-A':d.grade==='B'?'grade-B':d.grade==='C'?'grade-C':d.grade==='D'?'grade-D':'grade-F';
         let html = `<div class="flex items-center gap-16 mb-16"><div class="grade-badge ${gradeClass}">${esc(d.grade)}</div><div><div style="font-size:18px;font-weight:700">Security Grade: ${esc(d.grade)}</div><div style="color:var(--text-secondary)">${esc(d.score)} headers present</div></div></div>`;
         if (d.security_headers_present?.length) {
-            html += `<div class="result-section"><h4>✅ Present (${d.security_headers_present.length})</h4>`;
+            html += `<div class="result-section"><h4> Present (${d.security_headers_present.length})</h4>`;
             html += d.security_headers_present.map(h => `<div class="finding-card safe"><strong>${esc(h.header)}</strong><div style="font-size:12px;color:var(--text-secondary)">${esc(h.description)}</div><div style="font-family:monospace;font-size:11px;margin-top:4px;color:var(--text-muted)">${esc(h.value)}</div></div>`).join('');
             html += '</div>';
         }
         if (d.security_headers_missing?.length) {
-            html += `<div class="result-section"><h4>❌ Missing (${d.security_headers_missing.length})</h4>`;
-            html += d.security_headers_missing.map(h => `<div class="finding-card vuln"><strong>${esc(h.header)}</strong><div style="font-size:12px;color:var(--text-secondary)">${esc(h.description)}</div><div style="font-size:11px;color:var(--yellow);margin-top:4px">💡 ${esc(h.recommendation)}</div></div>`).join('');
+            html += `<div class="result-section"><h4> Missing (${d.security_headers_missing.length})</h4>`;
+            html += d.security_headers_missing.map(h => `<div class="finding-card vuln"><strong>${esc(h.header)}</strong><div style="font-size:12px;color:var(--text-secondary)">${esc(h.description)}</div><div style="font-size:11px;color:var(--yellow);margin-top:4px"> ${esc(h.recommendation)}</div></div>`).join('');
             html += '</div>';
         }
         if (d.information_leakage?.length) {
-            html += `<div class="result-section"><h4>⚠️ Information Leakage</h4>`;
+            html += `<div class="result-section"><h4> Information Leakage</h4>`;
             html += d.information_leakage.map(h => `<div class="finding-card warn"><strong>${esc(h.header)}</strong>: ${esc(h.value)}<div style="font-size:12px;color:var(--text-secondary)">${esc(h.risk)}</div></div>`).join('');
             html += '</div>';
         }
@@ -641,8 +641,8 @@
     }
 
     function formatDirFuzzer(d) {
-        if (!d.found?.length) return `<div class="finding-card safe">✅ No directories found (${d.wordlist_size} paths tested in ${d.elapsed_seconds}s)</div>`;
-        return `<div class="result-section"><h4>📁 Found ${d.count} paths</h4>
+        if (!d.found?.length) return `<div class="finding-card safe"> No directories found (${d.wordlist_size} paths tested in ${d.elapsed_seconds}s)</div>`;
+        return `<div class="result-section"><h4> Found ${d.count} paths</h4>
             <table><thead><tr><th>Status</th><th>Path</th><th>Size</th><th>Type</th></tr></thead><tbody>
             ${d.found.map(f => `<tr><td><span class="tag ${f.status<300?'tag-green':f.status<400?'tag-yellow':'tag-red'}">${f.status}</span></td><td style="font-family:monospace">${esc(f.path)}</td><td>${f.size||0}</td><td style="font-size:12px;color:var(--text-muted)">${esc(f.content_type?.split(';')[0]||'')}</td></tr>`).join('')}
             </tbody></table>
@@ -650,26 +650,26 @@
     }
 
     function formatSQLi(d) {
-        if (d.reason) return `<div class="finding-card safe">ℹ️ ${esc(d.reason)}</div>`;
-        if (!d.vulnerable) return `<div class="finding-card safe">✅ No SQL injection vulnerabilities detected</div>`;
-        return `<div class="finding-card vuln"><strong>⚠️ Potential SQLi vulnerabilities found (${d.finding_count})</strong></div>
+        if (d.reason) return `<div class="finding-card safe">ℹ ${esc(d.reason)}</div>`;
+        if (!d.vulnerable) return `<div class="finding-card safe"> No SQL injection vulnerabilities detected</div>`;
+        return `<div class="finding-card vuln"><strong> Potential SQLi vulnerabilities found (${d.finding_count})</strong></div>
         <div class="result-section mt-8">${d.findings.map(f => `<div class="finding-card vuln"><strong>Parameter:</strong> ${esc(f.parameter)}<br><strong>Type:</strong> ${esc(f.type)}<br><strong>Payload:</strong> <code>${esc(f.payload)}</code><br><strong>Evidence:</strong> ${esc(f.evidence)}</div>`).join('')}</div>`;
     }
 
     function formatXSS(d) {
-        if (d.reason) return `<div class="finding-card safe">ℹ️ ${esc(d.reason)}</div>`;
-        if (!d.vulnerable) return `<div class="finding-card safe">✅ No reflected XSS detected</div>`;
-        return `<div class="finding-card vuln"><strong>⚠️ Reflected XSS found (${d.finding_count})</strong></div>
+        if (d.reason) return `<div class="finding-card safe">ℹ ${esc(d.reason)}</div>`;
+        if (!d.vulnerable) return `<div class="finding-card safe"> No reflected XSS detected</div>`;
+        return `<div class="finding-card vuln"><strong> Reflected XSS found (${d.finding_count})</strong></div>
         <div class="result-section mt-8">${d.findings.map(f => `<div class="finding-card vuln"><strong>Parameter:</strong> ${esc(f.parameter)}<br><strong>Payload:</strong> <code>${esc(f.payload)}</code></div>`).join('')}</div>`;
     }
 
     function formatCORS(d) {
-        return `<div class="finding-card ${d.vulnerable?'vuln':'safe'}"><strong>${d.vulnerable?'⚠️ CORS misconfigurations detected':'✅ CORS configuration looks safe'}</strong></div>
+        return `<div class="finding-card ${d.vulnerable?'vuln':'safe'}"><strong>${d.vulnerable?' CORS misconfigurations detected':' CORS configuration looks safe'}</strong></div>
         <div class="result-section mt-8">${(d.tests||[]).map(t => `<div class="finding-card ${t.vulnerable?'vuln':t.risk==='medium'?'warn':'safe'}"><strong>${esc(t.test)}</strong> — Origin: <code>${esc(t.origin_sent)}</code><br>ACAO: <code>${esc(t.acao)}</code> | ACAC: <code>${esc(t.acac)}</code>${t.vulnerable?`<br><span class="tag tag-red">VULNERABLE — ${esc(t.risk)} risk</span>`:''}</div>`).join('')}</div>`;
     }
 
     function formatTech(d) {
-        if (d.error) return `<div class="finding-card vuln">❌ ${esc(d.error)}</div>`;
+        if (d.error) return `<div class="finding-card vuln"> ${esc(d.error)}</div>`;
         let html = `<div class="kv-grid mb-16"><span class="key">Server</span><span class="value">${esc(d.server)}</span><span class="key">Technologies</span><span class="value">${d.total_detected} detected</span></div>`;
         for (const [cat, techs] of Object.entries(d.technologies || {})) {
             html += `<div class="result-section"><h4>${esc(cat)}</h4><div>${techs.map(t=>`<span class="tag tag-accent">${esc(t)}</span>`).join(' ')}</div></div>`;
@@ -678,25 +678,25 @@
     }
 
     function formatCSP(d) {
-        if (!d.has_csp) return `<div class="finding-card vuln"><strong>❌ No CSP header found</strong><div style="font-size:12px;color:var(--text-secondary);margin-top:4px">Content-Security-Policy header is missing</div></div>`;
+        if (!d.has_csp) return `<div class="finding-card vuln"><strong> No CSP header found</strong><div style="font-size:12px;color:var(--text-secondary);margin-top:4px">Content-Security-Policy header is missing</div></div>`;
         const gradeClass = d.grade?.startsWith('A')?'grade-A':d.grade==='B'?'grade-B':d.grade==='C'?'grade-C':'grade-F';
         let html = `<div class="flex items-center gap-16 mb-16"><div class="grade-badge ${gradeClass}">${esc(d.grade)}</div><div><div style="font-size:18px;font-weight:700">CSP Score: ${d.score}/100</div>${d.is_report_only?'<div class="tag tag-yellow">Report-Only</div>':''}</div></div>`;
-        if (d.issues?.length) html += `<div class="result-section"><h4>⚠️ Issues</h4>${d.issues.map(i=>`<div class="finding-card warn">${esc(i)}</div>`).join('')}</div>`;
+        if (d.issues?.length) html += `<div class="result-section"><h4> Issues</h4>${d.issues.map(i=>`<div class="finding-card warn">${esc(i)}</div>`).join('')}</div>`;
         if (d.policy) html += `<div class="result-section"><h4>Policy</h4><div class="result-panel"><pre style="font-size:11px">${esc(d.policy)}</pre></div></div>`;
         return html;
     }
 
     function formatRedirect(d) {
-        if (d.reason) return `<div class="finding-card safe">ℹ️ ${esc(d.reason)}</div>`;
-        if (!d.vulnerable) return `<div class="finding-card safe">✅ No open redirect vulnerabilities detected</div>`;
-        return `<div class="finding-card vuln"><strong>⚠️ Open redirect found (${d.finding_count})</strong></div>
+        if (d.reason) return `<div class="finding-card safe">ℹ ${esc(d.reason)}</div>`;
+        if (!d.vulnerable) return `<div class="finding-card safe"> No open redirect vulnerabilities detected</div>`;
+        return `<div class="finding-card vuln"><strong> Open redirect found (${d.finding_count})</strong></div>
         <div class="result-section mt-8">${d.findings.map(f => `<div class="finding-card vuln"><strong>Parameter:</strong> ${esc(f.parameter)}<br><strong>Payload:</strong> <code>${esc(f.payload)}</code><br><strong>Redirects to:</strong> <code style="color:var(--red)">${esc(f.redirect_to)}</code></div>`).join('')}</div>`;
     }
 
     function formatCVE(d) {
-        if (d.error) return `<div class="finding-card vuln">❌ ${esc(d.error)}</div>`;
+        if (d.error) return `<div class="finding-card vuln"> ${esc(d.error)}</div>`;
         if (!d.cves?.length) return `<div class="finding-card safe">No CVEs found for "${esc(d.query)}"</div>`;
-        return `<div class="result-section"><h4>🐛 CVE Results (${d.total_results} total, showing ${d.count})</h4>
+        return `<div class="result-section"><h4> CVE Results (${d.total_results} total, showing ${d.count})</h4>
             ${d.cves.map(c => {
                 const sevClass = c.severity==='CRITICAL'?'sev-critical':c.severity==='HIGH'?'sev-high':c.severity==='MEDIUM'?'sev-medium':'sev-low';
                 return `<div class="cve-card"><span class="cve-score ${sevClass}">${c.cvss_score||'N/A'}</span><span class="cve-id">${esc(c.id)}</span><span class="tag ${sevClass}" style="margin-left:8px">${esc(c.severity||'N/A')}</span><div class="cve-desc">${esc(c.description)}</div><div style="font-size:11px;color:var(--text-muted);margin-top:4px">Published: ${esc(c.published?.split('T')[0]||'')}</div></div>`;
@@ -709,7 +709,7 @@
         for (const [source, info] of Object.entries(d.sources || {})) {
             if (info.error) html += `<div class="finding-card warn"><strong>${esc(source)}</strong>: ${esc(info.error)}</div>`;
             else if (info.found === false) html += `<div class="finding-card safe"><strong>${esc(source)}</strong>: Not found</div>`;
-            else if (info.found) html += `<div class="finding-card vuln"><strong>${esc(source)}</strong>: ⚠️ Found! ${JSON.stringify(info.data||info).substring(0,200)}</div>`;
+            else if (info.found) html += `<div class="finding-card vuln"><strong>${esc(source)}</strong>:  Found! ${JSON.stringify(info.data||info).substring(0,200)}</div>`;
             else html += `<div class="finding-card"><strong>${esc(source)}</strong>: ${JSON.stringify(info)}</div>`;
         }
         return html;
@@ -729,17 +729,17 @@
         html += `<span class="key">Digits</span><span class="value">${a.has_digits?'<span class="tag tag-green">Yes</span>':'<span class="tag tag-red">No</span>'}</span>`;
         html += `<span class="key">Special</span><span class="value">${a.has_special?'<span class="tag tag-green">Yes</span>':'<span class="tag tag-red">No</span>'}</span>`;
         html += `<span class="key">Entropy</span><span class="value">${a.entropy} bits</span>`;
-        html += `<span class="key">Common</span><span class="value">${a.is_common?'<span class="tag tag-red">⚠️ Yes</span>':'<span class="tag tag-green">No</span>'}</span>`;
-        if (d.breached_count !== null) html += `<span class="key">Breached</span><span class="value">${d.breached?`<span class="tag tag-red">⚠️ ${d.breached_count.toLocaleString()} times</span>`:'<span class="tag tag-green">Not found</span>'}</span>`;
+        html += `<span class="key">Common</span><span class="value">${a.is_common?'<span class="tag tag-red"> Yes</span>':'<span class="tag tag-green">No</span>'}</span>`;
+        if (d.breached_count !== null) html += `<span class="key">Breached</span><span class="value">${d.breached?`<span class="tag tag-red"> ${d.breached_count.toLocaleString()} times</span>`:'<span class="tag tag-green">Not found</span>'}</span>`;
         html += '</div>';
-        if (d.recommendations?.length) html += `<div class="result-section"><h4>💡 Recommendations</h4>${d.recommendations.map(r=>`<div class="finding-card warn">${esc(r)}</div>`).join('')}</div>`;
+        if (d.recommendations?.length) html += `<div class="result-section"><h4> Recommendations</h4>${d.recommendations.map(r=>`<div class="finding-card warn">${esc(r)}</div>`).join('')}</div>`;
         return html;
     }
 
     function formatNetConn(d) {
         let html = `<div class="stats-row"><div class="stat-card accent"><div class="value">${d.total_connections}</div><div class="label">Total</div></div><div class="stat-card green"><div class="value">${d.listening}</div><div class="label">Listening</div></div><div class="stat-card yellow"><div class="value">${d.established}</div><div class="label">Established</div></div></div>`;
         if (d.listening_ports?.length) {
-            html += `<div class="result-section"><h4>🔌 Listening Ports</h4><table><thead><tr><th>Protocol</th><th>Local Address</th><th>PID</th></tr></thead><tbody>`;
+            html += `<div class="result-section"><h4> Listening Ports</h4><table><thead><tr><th>Protocol</th><th>Local Address</th><th>PID</th></tr></thead><tbody>`;
             html += d.listening_ports.map(c => `<tr><td>${esc(c.protocol)}</td><td style="font-family:monospace">${esc(c.local_address)}</td><td>${c.pid}</td></tr>`).join('');
             html += '</tbody></table></div>';
         }
@@ -749,12 +749,12 @@
     function formatProcesses(d) {
         let html = `<div class="stat-card accent mb-16" style="display:inline-block"><div class="value">${d.total_processes}</div><div class="label">Running Processes</div></div>`;
         if (d.processes_with_ports?.length) {
-            html += `<div class="result-section"><h4>🌐 Processes with Listening Ports</h4>`;
+            html += `<div class="result-section"><h4> Processes with Listening Ports</h4>`;
             html += d.processes_with_ports.map(p => `<div class="finding-card"><strong>${esc(p.name)}</strong> (PID: ${p.pid})<br><span style="font-family:monospace;font-size:12px">${(p.listening_ports||[]).join(', ')}</span></div>`).join('');
             html += '</div>';
         }
         if (d.top_by_memory?.length) {
-            html += `<div class="result-section"><h4>📊 Top by Memory</h4><table><thead><tr><th>Process</th><th>PID</th><th>Memory</th></tr></thead><tbody>`;
+            html += `<div class="result-section"><h4> Top by Memory</h4><table><thead><tr><th>Process</th><th>PID</th><th>Memory</th></tr></thead><tbody>`;
             html += d.top_by_memory.slice(0,15).map(p => `<tr><td>${esc(p.name)}</td><td>${p.pid}</td><td>${(p.memory_kb/1024).toFixed(1)} MB</td></tr>`).join('');
             html += '</tbody></table></div>';
         }
@@ -764,7 +764,7 @@
     function formatSystemInfo(d) {
         let html = '';
         if (d.os) {
-            html += `<div class="result-section"><h4>💻 Operating System</h4><div class="kv-grid">
+            html += `<div class="result-section"><h4> Operating System</h4><div class="kv-grid">
                 <span class="key">System</span><span class="value">${esc(d.os.system)} ${esc(d.os.release)}</span>
                 <span class="key">Version</span><span class="value">${esc(d.os.version)}</span>
                 <span class="key">Machine</span><span class="value">${esc(d.os.machine)}</span>
@@ -772,13 +772,13 @@
             </div></div>`;
         }
         if (d.network) {
-            html += `<div class="result-section"><h4>🌐 Network</h4><div class="kv-grid">`;
+            html += `<div class="result-section"><h4> Network</h4><div class="kv-grid">`;
             if (d.network.local_ip) { html += `<span class="key">Local IP</span><span class="value">${esc(d.network.local_ip)}</span>`; }
             if (d.network.public_ip) { html += `<span class="key">Public IP</span><span class="value">${esc(d.network.public_ip)}</span>`; }
             html += '</div></div>';
         }
         if (d.security) {
-            html += `<div class="result-section"><h4>🔒 Security Posture</h4><div class="kv-grid">`;
+            html += `<div class="result-section"><h4> Security Posture</h4><div class="kv-grid">`;
             html += `<span class="key">Firewall</span><span class="value">${d.security.firewall==='ON'?'<span class="tag tag-green">ON</span>':'<span class="tag tag-red">OFF</span>'}</span>`;
             if (d.security.defender_enabled !== undefined) html += `<span class="key">Defender</span><span class="value">${d.security.defender_enabled?'<span class="tag tag-green">Enabled</span>':'<span class="tag tag-red">Disabled</span>'}</span>`;
             if (d.security.realtime_protection !== undefined) html += `<span class="key">Real-time</span><span class="value">${d.security.realtime_protection?'<span class="tag tag-green">On</span>':'<span class="tag tag-red">Off</span>'}</span>`;
@@ -786,7 +786,7 @@
             html += '</div></div>';
         }
         if (d.disk) {
-            html += `<div class="result-section"><h4>💾 Disk</h4><div class="kv-grid">
+            html += `<div class="result-section"><h4> Disk</h4><div class="kv-grid">
                 <span class="key">Total</span><span class="value">${d.disk.total_gb} GB</span>
                 <span class="key">Used</span><span class="value">${d.disk.used_gb} GB (${d.disk.usage_percent}%)</span>
                 <span class="key">Free</span><span class="value">${d.disk.free_gb} GB</span>
@@ -807,7 +807,7 @@
         overlay.className = 'modal-overlay';
         overlay.innerHTML = `
             <div class="modal">
-                <h3>🎯 Select Target</h3>
+                <h3> Select Target</h3>
                 ${targets.map(t => `
                     <div class="target-item" style="cursor:pointer" onclick="selectTargetAndRun(${t.id},'${esc(t.name)}','${esc(t.host)}','${toolId}')">
                         <div><div class="name">${esc(t.name)}</div><div class="host">${esc(t.host)}</div></div>
@@ -835,31 +835,31 @@
 
         content.innerHTML = `
             <div class="card">
-                <div class="card-header"><div class="card-title">🚀 Pipeline Engine</div></div>
+                <div class="card-header"><div class="card-title"> Pipeline Engine</div></div>
                 <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px">Multi-phase automated security scans. Select a mode and target to start.</p>
                 <div class="grid grid-3 mb-16">
                     <div class="pipeline-card" data-mode="fast" onclick="selectPipeline('fast')">
-                        <div class="pip-icon">⚡</div><div class="pip-name">Fast</div><div class="pip-desc">Quick recon + port scan (~1 min)</div>
+                        <div class="pip-icon"></div><div class="pip-name">Fast</div><div class="pip-desc">Quick recon + port scan (~1 min)</div>
                     </div>
                     <div class="pipeline-card" data-mode="deep" onclick="selectPipeline('deep')">
-                        <div class="pip-icon">🔬</div><div class="pip-name">Deep</div><div class="pip-desc">Full recon + web analysis (~3 min)</div>
+                        <div class="pip-icon"></div><div class="pip-name">Deep</div><div class="pip-desc">Full recon + web analysis (~3 min)</div>
                     </div>
                     <div class="pipeline-card" data-mode="nuclear" onclick="selectPipeline('nuclear')">
-                        <div class="pip-icon">☢️</div><div class="pip-name">Nuclear</div><div class="pip-desc">Comprehensive security audit (~10 min)</div>
+                        <div class="pip-icon"></div><div class="pip-name">Nuclear</div><div class="pip-desc">Comprehensive security audit (~10 min)</div>
                     </div>
                 </div>
                 <div id="pipeline-phases" class="hidden"></div>
                 <div class="flex gap-8 items-center mt-16">
                     <select id="pipeline-target" style="flex:1"><option value="">Select target...</option>${(targets.targets||[]).map(t => `<option value="${t.id}">${esc(t.name)} (${esc(t.host)})</option>`).join('')}</select>
-                    <button class="btn btn-primary" id="run-pipeline-btn" onclick="startPipeline()" disabled>🚀 Start Pipeline</button>
+                    <button class="btn btn-primary" id="run-pipeline-btn" onclick="startPipeline()" disabled> Start Pipeline</button>
                 </div>
             </div>
             <div id="pipeline-progress" class="hidden"></div>
             ${history.pipelines?.length ? `
                 <div class="card mt-16">
-                    <div class="card-header"><div class="card-title">📜 Pipeline History</div></div>
+                    <div class="card-header"><div class="card-title"> Pipeline History</div></div>
                     <table><thead><tr><th>Mode</th><th>Target</th><th>Status</th><th>Started</th><th></th></tr></thead><tbody>
-                        ${history.pipelines.map(p => `<tr><td>${p.mode}</td><td>${esc(p.target_name||'')}</td><td><span class="badge-status badge-${p.status}">${p.status}</span></td><td>${p.started_at||''}</td><td><button class="btn btn-sm" onclick="viewPipelineResult(${p.id})">View</button> <button class="btn btn-sm btn-danger" onclick="deletePipeline(${p.id})">🗑</button></td></tr>`).join('')}
+                        ${history.pipelines.map(p => `<tr><td>${p.mode}</td><td>${esc(p.target_name||'')}</td><td><span class="badge-status badge-${p.status}">${p.status}</span></td><td>${p.started_at||''}</td><td><button class="btn btn-sm" onclick="viewPipelineResult(${p.id})">View</button> <button class="btn btn-sm btn-danger" onclick="deletePipeline(${p.id})"></button></td></tr>`).join('')}
                     </tbody></table>
                 </div>
             ` : ''}
@@ -895,7 +895,7 @@
     async function pollPipeline(id) {
         const progressDiv = document.getElementById('pipeline-progress');
         progressDiv.className = '';
-        progressDiv.innerHTML = `<div class="card"><div class="card-title mb-8">🔄 Pipeline Running...</div><div class="progress-bar"><div class="progress-fill" id="pip-progress" style="width:0%"></div></div><div id="pip-status" style="font-size:12px;color:var(--text-secondary);margin-top:8px">Starting...</div></div>`;
+        progressDiv.innerHTML = `<div class="card"><div class="card-title mb-8"> Pipeline Running...</div><div class="progress-bar"><div class="progress-fill" id="pip-progress" style="width:0%"></div></div><div id="pip-status" style="font-size:12px;color:var(--text-secondary);margin-top:8px">Starting...</div></div>`;
         const poll = setInterval(async () => {
             const data = await api.get(`/pipelines/${id}/result`);
             if (data.status === 'completed' || data.status === 'failed') {
@@ -929,17 +929,17 @@
         const data = await api.get('/targets');
         content.innerHTML = `
             <div class="card">
-                <div class="card-header"><div class="card-title">🎯 Targets</div><button class="btn btn-primary" onclick="showAddTarget()">➕ Add Target</button></div>
+                <div class="card-header"><div class="card-title"> Targets</div><button class="btn btn-primary" onclick="showAddTarget()"> Add Target</button></div>
                 ${data.targets?.length ? data.targets.map(t => `
                     <div class="target-item ${state.selectedTarget?.id===t.id?'active':''}">
                         <div><div class="name">${esc(t.name)}</div><div class="host">${esc(t.host)}</div></div>
                         <div style="font-size:12px;color:var(--text-muted)">${t.scan_count||0} scans</div>
                         <div class="actions">
                             <button class="btn btn-sm btn-accent" onclick="selectTarget(${t.id},'${esc(t.name)}','${esc(t.host)}')">Select</button>
-                            <button class="btn btn-sm btn-danger" onclick="deleteTarget(${t.id})">🗑</button>
+                            <button class="btn btn-sm btn-danger" onclick="deleteTarget(${t.id})"></button>
                         </div>
                     </div>
-                `).join('') : `<div class="empty-state"><div class="icon">🎯</div><h3>No targets yet</h3><p>Add a target (domain or IP) to start scanning</p></div>`}
+                `).join('') : `<div class="empty-state"><div class="icon"></div><h3>No targets yet</h3><p>Add a target (domain or IP) to start scanning</p></div>`}
             </div>`;
     }
 
@@ -948,7 +948,7 @@
     function showAddTarget() {
         const overlay = document.createElement('div');
         overlay.className = 'modal-overlay';
-        overlay.innerHTML = `<div class="modal"><h3>➕ Add Target</h3>
+        overlay.innerHTML = `<div class="modal"><h3> Add Target</h3>
             <div class="input-group"><label>Name</label><input type="text" id="new-target-name" placeholder="My Server"></div>
             <div class="input-group"><label>Host (domain or IP)</label><input type="text" id="new-target-host" placeholder="example.com or 192.168.1.1"></div>
             <div class="modal-actions"><button class="btn" onclick="this.closest('.modal-overlay').remove()">Cancel</button><button class="btn btn-primary" onclick="addTarget()">Add</button></div>
@@ -986,8 +986,8 @@
             </div>
             <div class="card">
                 ${scans.scans?.length ? `<table><thead><tr><th>Tool</th><th>Target</th><th>Status</th><th>Started</th><th></th></tr></thead><tbody>
-                    ${scans.scans.map(s => `<tr><td>${esc(s.tool)}</td><td>${esc(s.target_name||'')}</td><td><span class="badge-status badge-${s.status}">${s.status}</span></td><td>${s.started_at||''}</td><td>${s.result?`<button class="btn btn-sm" onclick="viewScanResult(${s.id})">View</button>`:''} <button class="btn btn-sm btn-danger" onclick="deleteScan(${s.id})">🗑</button></td></tr>`).join('')}
-                </tbody></table>` : `<div class="empty-state"><div class="icon">📜</div><h3>No scans yet</h3><p>Run a tool or pipeline to see results here</p></div>`}
+                    ${scans.scans.map(s => `<tr><td>${esc(s.tool)}</td><td>${esc(s.target_name||'')}</td><td><span class="badge-status badge-${s.status}">${s.status}</span></td><td>${s.started_at||''}</td><td>${s.result?`<button class="btn btn-sm" onclick="viewScanResult(${s.id})">View</button>`:''} <button class="btn btn-sm btn-danger" onclick="deleteScan(${s.id})"></button></td></tr>`).join('')}
+                </tbody></table>` : `<div class="empty-state"><div class="icon"></div><h3>No scans yet</h3><p>Run a tool or pipeline to see results here</p></div>`}
             </div>`;
     }
 

@@ -574,15 +574,15 @@ async def csp_analyzer(url: str, **kw) -> dict:
                 # Check for dangerous patterns
                 for directive, sources in directives.items():
                     if "'unsafe-inline'" in sources:
-                        issues.append(f"⚠️ {directive}: 'unsafe-inline' weakens XSS protection")
+                        issues.append(f" {directive}: 'unsafe-inline' weakens XSS protection")
                     if "'unsafe-eval'" in sources:
-                        issues.append(f"⚠️ {directive}: 'unsafe-eval' allows code injection")
+                        issues.append(f" {directive}: 'unsafe-eval' allows code injection")
                     if "*" in sources:
-                        issues.append(f"🔴 {directive}: wildcard '*' allows any origin")
+                        issues.append(f" {directive}: wildcard '*' allows any origin")
                     if "data:" in sources:
-                        issues.append(f"⚠️ {directive}: 'data:' URI can be exploited")
+                        issues.append(f" {directive}: 'data:' URI can be exploited")
                     if "blob:" in sources:
-                        issues.append(f"⚠️ {directive}: 'blob:' URI may bypass restrictions")
+                        issues.append(f" {directive}: 'blob:' URI may bypass restrictions")
 
                 # Score
                 important_directives = ["default-src", "script-src", "style-src", "img-src", "connect-src"]

@@ -241,7 +241,7 @@ def _password_recommendations(analysis: dict, pwned: int | None) -> list:
     if not analysis["has_special"]:
         recs.append("Add special characters (!@#$%...)")
     if analysis["is_common"]:
-        recs.append("❌ This is a commonly used password — avoid it!")
+        recs.append(" This is a commonly used password — avoid it!")
     if pwned and pwned > 0:
-        recs.append(f"❌ Found in {pwned:,} data breaches — do NOT use!")
+        recs.append(f" Found in {pwned:,} data breaches — do NOT use!")
     return recs

@@ -17,7 +17,7 @@ from backend.models import init_db, get_db
 from backend.scanner import run_tool, run_parallel
 from backend.pipeline import PipelineRunner
 
-app = FastAPI(title="Sec-Dashboard", version="2.0.0")
+app = FastAPI(title="Sec-Dashboard", version="1.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -70,7 +70,7 @@ async def startup():
 async def status():
     return {
         "status": "ok",
-        "version": "2.0.0",
+        "version": "1.0.0",
         "tools_count": len(TOOLS),
         "categories": CATEGORIES,
         "uptime": time.time(),
