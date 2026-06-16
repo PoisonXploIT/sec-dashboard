@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 
 import aiohttp
 
-from backend.proxy import get_aiohttp_proxy
+from backend.proxy import get_aiohttp_connector
 
 
 # -- 1. IP/ASN Lookup (bgpview.io - free, no key) ----------------
@@ -24,7 +24,7 @@ async def asn_lookup(target: str, **kw) -> dict:
 
     # bgpview.io - free API, no key
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15), proxy=get_aiohttp_proxy()) as session:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15), connector=get_aiohttp_connector()) as session:
             async with session.get(f"https://api.bgpview.io/ip/{ip}") as resp:
                 if resp.status == 200:
                     data = await resp.json()
@@ -47,7 +47,7 @@ async def asn_lookup(target: str, **kw) -> dict:
     asn_num = results.get("sources", {}).get("bgpview", {}).get("asn", "")
     if asn_num:
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15), proxy=get_aiohttp_proxy()) as session:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15), connector=get_aiohttp_connector()) as session:
                 async with session.get(f"https://api.bgpview.io/asn/{asn_num}") as resp:
                     if resp.status == 200:
                         asn_data = (await resp.json()).get("data", {})
@@ -117,7 +117,7 @@ async def ct_logs(target: str, **kw) -> dict:
 
     # crt.sh - free CT log search
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20), proxy=get_aiohttp_proxy()) as session:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20), connector=get_aiohttp_connector()) as session:
             async with session.get(f"https://crt.sh/?q=%.{domain}&output=json") as resp:
                 if resp.status == 200:
                     certs = await resp.json(content_type=None)
@@ -153,7 +153,7 @@ async def shodan_lookup(target: str, **kw) -> dict:
     if not shodan_key:
         # Free tier: internetdb.shodan.io (no key needed)
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15), proxy=get_aiohttp_proxy()) as session:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15), connector=get_aiohttp_connector()) as session:
                 async with session.get(f"https://internetdb.shodan.io/{ip}") as resp:
                     if resp.status == 200:
                         data = await resp.json()
@@ -175,7 +175,7 @@ async def shodan_lookup(target: str, **kw) -> dict:
 
     # Paid API with key
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15), proxy=get_aiohttp_proxy()) as session:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15), connector=get_aiohttp_connector()) as session:
             async with session.get(f"https://api.shodan.io/shodan/host/{ip}?key={shodan_key}") as resp:
                 if resp.status == 200:
                     data = await resp.json()
@@ -214,7 +214,7 @@ async def ip_geolocation(target: str, **kw) -> dict:
 
     # ip-api.com (free, no key)
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10), proxy=get_aiohttp_proxy()) as session:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10), connector=get_aiohttp_connector()) as session:
             async with session.get(f"http://ip-api.com/json/{ip}?fields=status,message,country,countryCode,region,regionName,city,zip,lat,lon,timezone,isp,org,as,asname,reverse,mobile,proxy,hosting,query") as resp:
                 if resp.status == 200:
                     data = await resp.json()

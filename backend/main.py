@@ -61,13 +61,14 @@ async def update_proxy(body: ProxyConfig):
 
 @app.get("/api/proxy/tor-ip")
 async def get_tor_exit_ip():
-    proxy = get_aiohttp_proxy()
-    if not proxy:
+    from backend.proxy import get_aiohttp_connector
+    connector = get_aiohttp_connector()
+    if not connector:
         return {"error": "Proxy not enabled or TOR not running"}
     try:
         import aiohttp
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
-            async with session.get("https://httpbin.org/ip", proxy=proxy) as resp:
+        async with aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=15)) as session:
+            async with session.get("https://httpbin.org/ip") as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     return {"tor_ip": data.get("origin", "unknown"), "status": "connected"}

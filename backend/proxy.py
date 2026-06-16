@@ -24,6 +24,20 @@ def set_proxy_config(config: dict):
     _proxy_config.update(config)
 
 
+def get_aiohttp_connector():
+    """Return an aiohttp connector with or without proxy."""
+    if not _proxy_config["enabled"]:
+        return None
+    proxy_url = get_aiohttp_proxy()
+    if not proxy_url:
+        return None
+    try:
+        from aiohttp_socks import ProxyConnector
+        return ProxyConnector.from_url(proxy_url, ssl=False)
+    except ImportError:
+        return None
+
+
 def get_aiohttp_proxy() -> str | None:
     """Return proxy URL for aiohttp, or None if disabled."""
     if not _proxy_config["enabled"]:
@@ -33,11 +47,7 @@ def get_aiohttp_proxy() -> str | None:
     port = _proxy_config["port"]
     user = _proxy_config.get("username", "")
     pwd = _proxy_config.get("password", "")
-
-    if ptype == "tor":
-        auth = f"{user}:{pwd}@" if user else ""
-        return f"socks5://{auth}{host}:{port}"
-    elif ptype == "socks5":
+    if ptype in ("tor", "socks5"):
         auth = f"{user}:{pwd}@" if user else ""
         return f"socks5://{auth}{host}:{port}"
     elif ptype == "socks4":
@@ -47,7 +57,7 @@ def get_aiohttp_proxy() -> str | None:
 
 def get_tor_status() -> dict:
     """Check if TOR is running and accessible."""
-    for port in [9050, 9150, 9151]:
+    for port in [9150, 9050, 9151]:
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             s.settimeout(3)
