@@ -858,8 +858,8 @@
             ${history.pipelines?.length ? `
                 <div class="card mt-16">
                     <div class="card-header"><div class="card-title"> Pipeline History</div></div>
-                    <table><thead><tr><th>Mode</th><th>Target</th><th>Status</th><th>Started</th><th></th></tr></thead><tbody>
-                        ${history.pipelines.map(p => `<tr><td>${p.mode}</td><td>${esc(p.target_name||'')}</td><td><span class="badge-status badge-${p.status}">${p.status}</span></td><td>${p.started_at||''}</td><td><button class="btn btn-sm" onclick="viewPipelineResult(${p.id})">View</button> <button class="btn btn-sm btn-danger" onclick="deletePipeline(${p.id})"></button></td></tr>`).join('')}
+                    <table><thead><tr><th>Mode</th><th>Target</th><th>Status</th><th>Started</th><th>Actions</th></tr></thead><tbody>
+                        ${history.pipelines.map(p => `<tr><td>${p.mode}</td><td>${esc(p.target_name||'')}</td><td><span class="badge-status badge-${p.status}">${p.status}</span></td><td>${p.started_at||''}</td><td class="flex gap-8"><button class="btn btn-sm" onclick="viewPipelineResult(${p.id})">View</button> <button class="btn btn-sm" onclick="downloadJSON('/api/pipelines/${p.id}/export/json', 'pipeline_${p.id}.json')">JSON</button> <button class="btn btn-sm" onclick="downloadPDF('/api/pipelines/${p.id}/export/pdf', 'pipeline_${p.id}.pdf')">PDF</button> <button class="btn btn-sm btn-danger" onclick="deletePipeline(${p.id})">Del</button></td></tr>`).join('')}
                     </tbody></table>
                 </div>
             ` : ''}
@@ -911,8 +911,8 @@
     async function viewPipelineResult(id) {
         const data = await api.get(`/pipelines/${id}/result`);
         const content = document.getElementById('content');
-        content.innerHTML = `<button class="btn mb-16" onclick="renderPipelinePage()">← Back</button>
-            <div class="card"><div class="card-header"><div class="card-title">Pipeline #${id} Result</div><span class="badge-status badge-${data.status}">${data.status}</span></div>
+        content.innerHTML = `<button class="btn mb-16" onclick="renderPipelinePage()">Back</button>
+            <div class="card"><div class="card-header"><div class="card-title">Pipeline #${id} Result</div><div class="flex gap-8"><span class="badge-status badge-${data.status}">${data.status}</span> <button class="btn btn-sm" onclick="downloadJSON('/api/pipelines/${id}/export/json', 'pipeline_${id}.json')">JSON</button> <button class="btn btn-sm" onclick="downloadPDF('/api/pipelines/${id}/export/pdf', 'pipeline_${id}.pdf')">PDF</button> <button class="btn btn-sm btn-danger" onclick="deletePipeline(${id})">Delete</button></div></div>
             <div class="result-panel" style="max-height:80vh"><pre>${esc(JSON.stringify(data.result, null, 2))}</pre></div></div>`;
     }
 
@@ -980,14 +980,19 @@
         const content = document.getElementById('content');
         const [scans, pipelines] = await Promise.all([api.get('/scans'), api.get('/pipelines/history')]);
         content.innerHTML = `
-            <div class="tabs">
-                <div class="tab active">Scans (${scans.scans?.length||0})</div>
-                <div class="tab">Pipelines (${pipelines.pipelines?.length||0})</div>
+            <div class="flex items-center justify-between mb-16">
+                <div class="tabs" style="margin-bottom:0;border-bottom:none">
+                    <div class="tab active">Scans (${scans.scans?.length||0})</div>
+                    <div class="tab">Pipelines (${pipelines.pipelines?.length||0})</div>
+                </div>
+                <div class="flex gap-8">
+                    <button class="btn btn-sm" onclick="downloadJSON('/api/export/all/json', 'sec-dashboard-export.json')">Export All (JSON)</button>
+                </div>
             </div>
             <div class="card">
-                ${scans.scans?.length ? `<table><thead><tr><th>Tool</th><th>Target</th><th>Status</th><th>Started</th><th></th></tr></thead><tbody>
-                    ${scans.scans.map(s => `<tr><td>${esc(s.tool)}</td><td>${esc(s.target_name||'')}</td><td><span class="badge-status badge-${s.status}">${s.status}</span></td><td>${s.started_at||''}</td><td>${s.result?`<button class="btn btn-sm" onclick="viewScanResult(${s.id})">View</button>`:''} <button class="btn btn-sm btn-danger" onclick="deleteScan(${s.id})"></button></td></tr>`).join('')}
-                </tbody></table>` : `<div class="empty-state"><div class="icon"></div><h3>No scans yet</h3><p>Run a tool or pipeline to see results here</p></div>`}
+                ${scans.scans?.length ? `<table><thead><tr><th>Tool</th><th>Target</th><th>Status</th><th>Started</th><th>Actions</th></tr></thead><tbody>
+                    ${scans.scans.map(s => `<tr><td>${esc(s.tool)}</td><td>${esc(s.target_name||'')}</td><td><span class="badge-status badge-${s.status}">${s.status}</span></td><td>${s.started_at||''}</td><td class="flex gap-8">${s.result?`<button class="btn btn-sm" onclick="viewScanResult(${s.id})">View</button>`:''} <button class="btn btn-sm" onclick="downloadJSON('/api/scans/${s.id}/export/json', 'scan_${s.id}.json')">JSON</button> <button class="btn btn-sm" onclick="downloadPDF('/api/scans/${s.id}/export/pdf', 'scan_${s.id}.pdf')">PDF</button> <button class="btn btn-sm btn-danger" onclick="deleteScan(${s.id})">Del</button></td></tr>`).join('')}
+                </tbody></table>` : `<div class="empty-state"><h3>No scans yet</h3><p>Run a tool or pipeline to see results here</p></div>`}
             </div>`;
     }
 
@@ -997,13 +1002,36 @@
         if (!scan) return;
         const content = document.getElementById('content');
         const result = JSON.parse(scan.result||'{}');
-        content.innerHTML = `<button class="btn mb-16" onclick="renderHistoryPage()">← Back</button>
-            <div class="card"><div class="card-header"><div class="card-title">${esc(scan.tool)} — ${esc(scan.target_name||'')}</div><span class="badge-status badge-${scan.status}">${scan.status}</span></div>
+        content.innerHTML = `<button class="btn mb-16" onclick="renderHistoryPage()">Back</button>
+            <div class="card"><div class="card-header"><div class="card-title">${esc(scan.tool)} -- ${esc(scan.target_name||'')}</div><div class="flex gap-8"><span class="badge-status badge-${scan.status}">${scan.status}</span> <button class="btn btn-sm" onclick="downloadJSON('/api/scans/${id}/export/json', 'scan_${id}.json')">JSON</button> <button class="btn btn-sm" onclick="downloadPDF('/api/scans/${id}/export/pdf', 'scan_${id}.pdf')">PDF</button> <button class="btn btn-sm btn-danger" onclick="deleteScan(${id})">Delete</button></div></div>
             ${result.success ? formatResult(scan.tool, result.result) : `<div class="result-panel"><pre style="color:var(--red)">${esc(result.error||'Unknown error')}</pre></div>`}
             </div>`;
     }
 
-    async function deleteScan(id) { await api.del(`/scans/${id}`); toast('Scan deleted', 'success'); renderHistoryPage(); }
+    async function deleteScan(id) {
+        if (!confirm('Delete this scan?')) return;
+        await api.del(`/scans/${id}`);
+        toast('Scan deleted', 'success');
+        renderHistoryPage();
+    }
+
+    function downloadJSON(url, filename) {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+    }
+
+    function downloadPDF(url, filename) {
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+    }
 
     // Init
     connectWS();

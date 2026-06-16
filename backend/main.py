@@ -16,6 +16,10 @@ from backend.config import TOOLS, CATEGORIES, PIPELINES, RESULTS_DIR
 from backend.models import init_db, get_db
 from backend.scanner import run_tool, run_parallel
 from backend.pipeline import PipelineRunner
+from backend.report import (
+    generate_scan_json, generate_pipeline_json, generate_all_json,
+    generate_scan_pdf, generate_pipeline_pdf,
+)
 
 app = FastAPI(title="Sec-Dashboard", version="1.0.0")
 
@@ -25,6 +29,108 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+
+# -- Export / Reports ------------------------------------------
+from fastapi.responses import Response as FastResponse
+
+@app.get("/api/scans/{scan_id}/export/json")
+async def export_scan_json(scan_id: int):
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT * FROM scans WHERE id = ?", (scan_id,))
+        scan = await cursor.fetchone()
+        if not scan:
+            raise HTTPException(404, "Scan not found")
+        scan = dict(scan)
+        target = None
+        if scan.get("target_id"):
+            cur2 = await db.execute("SELECT * FROM targets WHERE id = ?", (scan["target_id"],))
+            row = await cur2.fetchone()
+            if row: target = dict(row)
+        content = generate_scan_json(scan, target)
+        return HTMLResponse(content=content, media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="scan_{scan_id}.json"'})
+    finally:
+        await db.close()
+
+@app.get("/api/scans/{scan_id}/export/pdf")
+async def export_scan_pdf(scan_id: int):
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT * FROM scans WHERE id = ?", (scan_id,))
+        scan = await cursor.fetchone()
+        if not scan:
+            raise HTTPException(404, "Scan not found")
+        scan = dict(scan)
+        target = None
+        if scan.get("target_id"):
+            cur2 = await db.execute("SELECT * FROM targets WHERE id = ?", (scan["target_id"],))
+            row = await cur2.fetchone()
+            if row: target = dict(row)
+        pdf_bytes = generate_scan_pdf(scan, target)
+        return FastResponse(content=pdf_bytes, media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="scan_{scan_id}.pdf"'})
+    finally:
+        await db.close()
+
+@app.get("/api/pipelines/{pipeline_id}/export/json")
+async def export_pipeline_json(pipeline_id: int):
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT * FROM pipelines WHERE id = ?", (pipeline_id,))
+        pipeline = await cursor.fetchone()
+        if not pipeline:
+            raise HTTPException(404, "Pipeline not found")
+        pipeline = dict(pipeline)
+        target = None
+        if pipeline.get("target_id"):
+            cur2 = await db.execute("SELECT * FROM targets WHERE id = ?", (pipeline["target_id"],))
+            row = await cur2.fetchone()
+            if row: target = dict(row)
+        content = generate_pipeline_json(pipeline, target)
+        return HTMLResponse(content=content, media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="pipeline_{pipeline_id}.json"'})
+    finally:
+        await db.close()
+
+@app.get("/api/pipelines/{pipeline_id}/export/pdf")
+async def export_pipeline_pdf_endpoint(pipeline_id: int):
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT * FROM pipelines WHERE id = ?", (pipeline_id,))
+        pipeline = await cursor.fetchone()
+        if not pipeline:
+            raise HTTPException(404, "Pipeline not found")
+        pipeline = dict(pipeline)
+        target = None
+        if pipeline.get("target_id"):
+            cur2 = await db.execute("SELECT * FROM targets WHERE id = ?", (pipeline["target_id"],))
+            row = await cur2.fetchone()
+            if row: target = dict(row)
+        pdf_bytes = generate_pipeline_pdf(pipeline, target)
+        return FastResponse(content=pdf_bytes, media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="pipeline_{pipeline_id}.pdf"'})
+    finally:
+        await db.close()
+
+@app.get("/api/export/all/json")
+async def export_all_json_endpoint():
+    db = await get_db()
+    try:
+        cur_s = await db.execute("SELECT * FROM scans ORDER BY started_at DESC")
+        scans = [dict(r) for r in await cur_s.fetchall()]
+        cur_p = await db.execute("SELECT * FROM pipelines ORDER BY started_at DESC")
+        pipelines = [dict(r) for r in await cur_p.fetchall()]
+        cur_t = await db.execute("SELECT * FROM targets")
+        targets = [dict(r) for r in await cur_t.fetchall()]
+        content = generate_all_json(scans, pipelines, targets)
+        return HTMLResponse(content=content, media_type="application/json",
+            headers={"Content-Disposition": 'attachment; filename="sec-dashboard-export.json"'})
+    finally:
+        await db.close()
+
 
 # ── WebSocket connections ──────────────────────────────────────
 ws_clients: set[WebSocket] = set()
