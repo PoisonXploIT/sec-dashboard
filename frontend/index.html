@@ -1060,10 +1060,11 @@
             <div class="card">
                 <div class="card-header"><div class="card-title">Tools Reference</div></div>
                 <div class="tabs mb-16">
-                    <div class="tab active" onclick="document.getElementById('guide-network').style.display='';document.getElementById('guide-web').style.display='none';document.getElementById('guide-vuln').style.display='none';document.getElementById('guide-sys').style.display='none'">Network (8)</div>
-                    <div class="tab" onclick="document.getElementById('guide-network').style.display='none';document.getElementById('guide-web').style.display='';document.getElementById('guide-vuln').style.display='none';document.getElementById('guide-sys').style.display='none'">Web (8)</div>
-                    <div class="tab" onclick="document.getElementById('guide-network').style.display='none';document.getElementById('guide-web').style.display='none';document.getElementById('guide-vuln').style.display='';document.getElementById('guide-sys').style.display='none'">Vuln (3)</div>
-                    <div class="tab" onclick="document.getElementById('guide-network').style.display='none';document.getElementById('guide-web').style.display='none';document.getElementById('guide-vuln').style.display='none';document.getElementById('guide-sys').style.display=''">System (3)</div>
+                    <div class="tab active" onclick="document.getElementById('guide-network').style.display='';document.getElementById('guide-web').style.display='none';document.getElementById('guide-vuln').style.display='none';document.getElementById('guide-sys').style.display='none';document.getElementById('guide-osint').style.display='none'">Network (8)</div>
+                    <div class="tab" onclick="document.getElementById('guide-network').style.display='none';document.getElementById('guide-web').style.display='';document.getElementById('guide-vuln').style.display='none';document.getElementById('guide-sys').style.display='none';document.getElementById('guide-osint').style.display='none'">Web (8)</div>
+                    <div class="tab" onclick="document.getElementById('guide-network').style.display='none';document.getElementById('guide-web').style.display='none';document.getElementById('guide-vuln').style.display='';document.getElementById('guide-sys').style.display='none';document.getElementById('guide-osint').style.display='none'">Vuln (3)</div>
+                    <div class="tab" onclick="document.getElementById('guide-network').style.display='none';document.getElementById('guide-web').style.display='none';document.getElementById('guide-vuln').style.display='none';document.getElementById('guide-sys').style.display='';document.getElementById('guide-osint').style.display='none'">System (3)</div>
+                    <div class="tab" onclick="document.getElementById('guide-network').style.display='none';document.getElementById('guide-web').style.display='none';document.getElementById('guide-vuln').style.display='none';document.getElementById('guide-sys').style.display='none';document.getElementById('guide-osint').style.display=''">OSINT (5)</div>
                 </div>
 
                 <div id="guide-network">
@@ -1106,6 +1107,31 @@
                         <tr><td>Process Monitor</td><td>Lists running processes correlated with ports</td><td>None (local system)</td><td>Process table with memory and port info</td></tr>
                         <tr><td>System Info</td><td>Shows OS, network, firewall, disk, RAM</td><td>None (local system)</td><td>System overview with security posture</td></tr>
                     </tbody></table>
+                </div>
+                <div id="guide-osint" style="display:none">
+                    <table><thead><tr><th>Tool</th><th>What it does</th><th>Input</th><th>Output</th></tr></thead><tbody>
+                        <tr><td>ASN/BGP Lookup</td><td>Network operator, ASN, BGP prefix</td><td>Domain or IP</td><td>ASN, operator name, country</td></tr>
+                        <tr><td>Reverse DNS</td><td>PTR records and reverse DNS chain</td><td>Domain or IP</td><td>PTR records, shared hosting detection</td></tr>
+                        <tr><td>CT Logs</td><td>Certificate Transparency subdomain discovery</td><td>Domain</td><td>Subdomains found via SSL certificates</td></tr>
+                        <tr><td>Shodan Lookup</td><td>Ports, vulns, services via Shodan InternetDB</td><td>Domain or IP</td><td>Open ports, CVEs, hostnames, OS</td></tr>
+                        <tr><td>IP Geolocation</td><td>Geolocation, ISP, proxy/hosting detection</td><td>Domain or IP</td><td>Country, city, ISP, proxy flag</td></tr>
+                    </tbody></table>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><div class="card-title">Proxy / Anonymity</div></div>
+                <div style="font-size:13px;line-height:1.8">
+                    <p><strong>Before scanning through TOR:</strong></p>
+                    <p>1. Open <strong>TOR Browser</strong> (download from torproject.org)</p>
+                    <p>2. Go to <strong>Proxy</strong> in the sidebar</p>
+                    <p>3. Select <strong>TOR (SOCKS5)</strong>, port <strong>9150</strong></p>
+                    <p>4. Click <strong>Save</strong></p>
+                    <p>5. Click <strong>Test TOR IP</strong> to verify connection</p>
+                    <p>6. Now run your tools -- OSINT and web tools route through TOR automatically</p>
+                    <p style="margin-top:8px"><strong>Note:</strong> System tools (netstat, tasklist) and port scanner use direct connections, not TOR.</p>
+                    <p><strong>SOCKS5:</strong> Use with any VPN that provides SOCKS5 proxy (Mullvad, NordVPN, etc.)</p>
+                    <p><strong>Cloudflare Tunnel:</strong> <code>cloudflared tunnel --url http://localhost:8444</code> to expose dashboard with HTTPS</p>
                 </div>
             </div>
 
