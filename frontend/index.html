@@ -291,6 +291,9 @@
             <a class="nav-item" data-page="history" onclick="navigate('history')">
                 <span class="icon"></span> History
             </a>
+            <a class="nav-item" data-page="guide" onclick="navigate('guide')">
+                <span class="icon">?</span> Guide
+            </a>
             <div class="nav-section" style="margin-top: 16px;">Categories</div>
             <a class="nav-item" onclick="filterCategory('Network Recon')">
                 <span class="icon"></span> Network Recon
@@ -361,9 +364,9 @@
         document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
         const navEl = document.querySelector(`[data-page="${page}"]`);
         if (navEl) navEl.classList.add('active');
-        const titles = {dashboard:'Dashboard',tools:'Security Tools',pipeline:'Pipeline Engine',targets:'Targets',history:'Scan History'};
+        const titles = {dashboard:'Dashboard',tools:'Security Tools',pipeline:'Pipeline Engine',targets:'Targets',history:'Scan History',guide:'User Guide'};
         document.getElementById('page-title').textContent = titles[page] || page;
-        const renderers = {dashboard:renderDashboard,tools:renderTools,pipeline:renderPipelinePage,targets:renderTargets,history:renderHistoryPage};
+        const renderers = {dashboard:renderDashboard,tools:renderTools,pipeline:renderPipelinePage,targets:renderTargets,history:renderHistoryPage,guide:renderGuide};
         (renderers[page] || renderDashboard)();
     }
 
@@ -1031,6 +1034,117 @@
         document.body.appendChild(a);
         a.click();
         a.remove();
+    }
+
+    async function renderGuide() {
+        const content = document.getElementById('content');
+        content.innerHTML = `
+            <div class="card">
+                <div class="card-header"><div class="card-title">Quick Start</div></div>
+                <div style="font-size:13px;line-height:1.8">
+                    <p><strong>1. Add a target</strong> -- Go to <strong>Targets</strong> and click <strong>Add Target</strong>. Enter a name and a domain or IP (e.g. <code>example.com</code>).</p>
+                    <p><strong>2. Run a tool</strong> -- Go to <strong>Tools</strong>, click any tool card, select your target from the popup. Results appear instantly below the tools grid.</p>
+                    <p><strong>3. Run a pipeline</strong> -- Go to <strong>Pipeline</strong>, pick a mode (Fast / Deep / Nuclear), select a target, click <strong>Start Pipeline</strong>. Progress updates in real time.</p>
+                    <p><strong>4. View results</strong> -- Go to <strong>History</strong> to see all past scans and pipelines. Click <strong>View</strong> to see formatted results.</p>
+                    <p><strong>5. Export</strong> -- Every scan and pipeline has <strong>JSON</strong> and <strong>PDF</strong> export buttons. Use <strong>Export All (JSON)</strong> in History for bulk export (Splunk/SIEM compatible).</p>
+                    <p><strong>6. Delete</strong> -- Each row has a <strong>Del</strong> button with confirmation. You can delete scans, pipelines, and targets individually.</p>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><div class="card-title">Tools Reference</div></div>
+                <div class="tabs mb-16">
+                    <div class="tab active" onclick="document.getElementById('guide-network').style.display='';document.getElementById('guide-web').style.display='none';document.getElementById('guide-vuln').style.display='none';document.getElementById('guide-sys').style.display='none'">Network (8)</div>
+                    <div class="tab" onclick="document.getElementById('guide-network').style.display='none';document.getElementById('guide-web').style.display='';document.getElementById('guide-vuln').style.display='none';document.getElementById('guide-sys').style.display='none'">Web (8)</div>
+                    <div class="tab" onclick="document.getElementById('guide-network').style.display='none';document.getElementById('guide-web').style.display='none';document.getElementById('guide-vuln').style.display='';document.getElementById('guide-sys').style.display='none'">Vuln (3)</div>
+                    <div class="tab" onclick="document.getElementById('guide-network').style.display='none';document.getElementById('guide-web').style.display='none';document.getElementById('guide-vuln').style.display='none';document.getElementById('guide-sys').style.display=''">System (3)</div>
+                </div>
+
+                <div id="guide-network">
+                    <table><thead><tr><th>Tool</th><th>What it does</th><th>Input</th><th>Output</th></tr></thead><tbody>
+                        <tr><td>Port Scanner</td><td>Scans TCP ports for open services</td><td>Domain or IP</td><td>Open ports table with service names</td></tr>
+                        <tr><td>DNS Recon</td><td>Enumerates DNS records (A, AAAA, MX, NS, TXT, SOA, CNAME, SRV, CAA)</td><td>Domain</td><td>Records grouped by type, reverse DNS</td></tr>
+                        <tr><td>Subdomain Enum</td><td>Discovers subdomains via DNS brute-force (81 names)</td><td>Domain</td><td>List of subdomains with IPs</td></tr>
+                        <tr><td>HTTP Probe</td><td>Probes HTTP/HTTPS, detects technologies</td><td>Domain or URL</td><td>Status, server, tech stack, headers</td></tr>
+                        <tr><td>Whois Lookup</td><td>Retrieves domain registration info</td><td>Domain</td><td>Registrar, dates, nameservers, country</td></tr>
+                        <tr><td>Ping Sweep</td><td>Checks host reachability via ICMP</td><td>Domain or IP</td><td>Alive status, latency stats</td></tr>
+                        <tr><td>Traceroute</td><td>Traces network path to target</td><td>Domain or IP</td><td>Hop list with IPs and times</td></tr>
+                        <tr><td>SSL/TLS Analyzer</td><td>Analyzes certificate and cipher details</td><td>Domain or IP</td><td>TLS version, cipher, cert validity, SAN</td></tr>
+                    </tbody></table>
+                </div>
+
+                <div id="guide-web" style="display:none">
+                    <table><thead><tr><th>Tool</th><th>What it does</th><th>Input</th><th>Output</th></tr></thead><tbody>
+                        <tr><td>Header Analyzer</td><td>Audits HTTP security headers (HSTS, CSP, etc.)</td><td>URL</td><td>Grade (A+ to F), present/missing headers</td></tr>
+                        <tr><td>Directory Fuzzer</td><td>Brute-forces common web paths (133 paths)</td><td>URL</td><td>Found paths with status codes</td></tr>
+                        <tr><td>SQLi Scanner</td><td>Detects SQL injection (error-based + boolean)</td><td>URL with params</td><td>Vulnerabilities with payloads and evidence</td></tr>
+                        <tr><td>XSS Scanner</td><td>Detects reflected XSS in URL parameters</td><td>URL with params</td><td>Reflected payloads per parameter</td></tr>
+                        <tr><td>CORS Checker</td><td>Tests CORS misconfigurations (4 tests)</td><td>URL</td><td>Origin reflection, wildcard, credentials</td></tr>
+                        <tr><td>Tech Detector</td><td>Fingerprints CMS, frameworks, CDN, analytics</td><td>URL</td><td>Categorized technology list</td></tr>
+                        <tr><td>CSP Analyzer</td><td>Analyzes Content Security Policy strength</td><td>URL</td><td>Score 0-100, grade, issues, policy text</td></tr>
+                        <tr><td>Open Redirect</td><td>Tests for open redirect in URL parameters</td><td>URL with params</td><td>Redirect chains to malicious URLs</td></tr>
+                    </tbody></table>
+                </div>
+
+                <div id="guide-vuln" style="display:none">
+                    <table><thead><tr><th>Tool</th><th>What it does</th><th>Input</th><th>Output</th></tr></thead><tbody>
+                        <tr><td>CVE Search</td><td>Searches NIST NVD by keyword or CVE ID</td><td>Keyword or CVE-YYYY-NNNN</td><td>CVEs with CVSS scores and severity</td></tr>
+                        <tr><td>Hash Lookup</td><td>Checks file hash reputation via MalwareBazaar</td><td>MD5 / SHA-1 / SHA-256</td><td>Malware detection results</td></tr>
+                        <tr><td>Password Audit</td><td>Analyzes password strength + HIBP breach check</td><td>Password (as target)</td><td>Score 0-11, entropy, breach count</td></tr>
+                    </tbody></table>
+                </div>
+
+                <div id="guide-sys" style="display:none">
+                    <table><thead><tr><th>Tool</th><th>What it does</th><th>Input</th><th>Output</th></tr></thead><tbody>
+                        <tr><td>Net Connections</td><td>Lists active network connections and listening ports</td><td>None (local system)</td><td>Listening/established connections table</td></tr>
+                        <tr><td>Process Monitor</td><td>Lists running processes correlated with ports</td><td>None (local system)</td><td>Process table with memory and port info</td></tr>
+                        <tr><td>System Info</td><td>Shows OS, network, firewall, disk, RAM</td><td>None (local system)</td><td>System overview with security posture</td></tr>
+                    </tbody></table>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><div class="card-title">Pipeline Modes</div></div>
+                <table><thead><tr><th>Mode</th><th>Phases</th><th>Duration</th><th>Use case</th></tr></thead><tbody>
+                    <tr><td><strong>Fast</strong></td><td>Recon + Scan</td><td>~1 min</td><td>Quick overview of a target</td></tr>
+                    <tr><td><strong>Deep</strong></td><td>Recon + Scan + Web</td><td>~3 min</td><td>Recon + web security analysis</td></tr>
+                    <tr><td><strong>Nuclear</strong></td><td>Recon + Scan + Web + Vuln + System</td><td>~10 min</td><td>Full security audit</td></tr>
+                </tbody></table>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><div class="card-title">Export Formats</div></div>
+                <div style="font-size:13px;line-height:1.8">
+                    <p><strong>JSON (per scan/pipeline)</strong> -- Splunk-compatible format with <code>event</code>, <code>timestamp</code>, <code>target</code>, <code>result</code> fields. Ready for SIEM ingestion.</p>
+                    <p><strong>JSON (Export All)</strong> -- Bulk export of all scans and pipelines. Single file with <code>events[]</code> array. Use for backup or batch import into Splunk/ELK.</p>
+                    <p><strong>PDF (per scan/pipeline)</strong> -- Formatted report with metadata, results summary, and raw JSON appendix. For documentation or sharing with stakeholders.</p>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><div class="card-title">API Reference</div></div>
+                <div style="font-size:12px">
+                    <table><thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead><tbody>
+                        <tr><td>GET</td><td><code>/api/status</code></td><td>Health check</td></tr>
+                        <tr><td>GET</td><td><code>/api/tools</code></td><td>List all tools</td></tr>
+                        <tr><td>POST</td><td><code>/api/tools/{id}/run</code></td><td>Run a tool (body: target, params)</td></tr>
+                        <tr><td>GET/POST</td><td><code>/api/targets</code></td><td>List/create targets</td></tr>
+                        <tr><td>DELETE</td><td><code>/api/targets/{id}</code></td><td>Delete target</td></tr>
+                        <tr><td>GET/POST</td><td><code>/api/scans</code></td><td>List/create scans</td></tr>
+                        <tr><td>DELETE</td><td><code>/api/scans/{id}</code></td><td>Delete scan</td></tr>
+                        <tr><td>GET</td><td><code>/api/scans/{id}/export/json</code></td><td>Export scan as JSON</td></tr>
+                        <tr><td>GET</td><td><code>/api/scans/{id}/export/pdf</code></td><td>Export scan as PDF</td></tr>
+                        <tr><td>POST</td><td><code>/api/pipelines</code></td><td>Start pipeline (body: target_id, mode)</td></tr>
+                        <tr><td>GET</td><td><code>/api/pipelines/history</code></td><td>Pipeline history</td></tr>
+                        <tr><td>GET</td><td><code>/api/pipelines/{id}/result</code></td><td>Pipeline result</td></tr>
+                        <tr><td>GET</td><td><code>/api/pipelines/{id}/export/json</code></td><td>Export pipeline as JSON</td></tr>
+                        <tr><td>GET</td><td><code>/api/pipelines/{id}/export/pdf</code></td><td>Export pipeline as PDF</td></tr>
+                        <tr><td>GET</td><td><code>/api/export/all/json</code></td><td>Bulk export all data</td></tr>
+                        <tr><td>DELETE</td><td><code>/api/reset</code></td><td>Reset all data</td></tr>
+                    </tbody></table>
+                </div>
+            </div>
+        `;
     }
 
     // Init
