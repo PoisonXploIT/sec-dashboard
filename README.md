@@ -1,6 +1,6 @@
 # Sec-Dashboard
 
-A lightweight, pure-Python security dashboard with 22 built-in tools for network reconnaissance, web security analysis, vulnerability assessment, and system monitoring.
+Security dashboard with 27 pure-Python tools for network reconnaissance, web security analysis, vulnerability assessment, OSINT, and system monitoring.
 
 ![Python](https://img.shields.io/badge/Python-3.11+-blue?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green?logo=fastapi&logoColor=white)
@@ -8,137 +8,124 @@ A lightweight, pure-Python security dashboard with 22 built-in tools for network
 
 ## Features
 
-- **22 Security Tools** — Network recon, web security, vulnerability scanning, system monitoring
-- **3 Pipeline Modes** — Fast (~1min), Deep (~3min), Nuclear (~10min) automated multi-phase scans
-- **Real-time Updates** — WebSocket-powered live scan progress
-- **Formatted Results** — Beautiful, human-readable result visualization (not raw JSON dumps)
-- **Pure Python** — No nmap, no external binaries required. Just Python + pip
-- **Dark Theme UI** — Modern GitHub-inspired interface with search and category filters
-- **SQLite Storage** — Persistent target/scan/pipeline history with zero config
-- **Windows Compatible** — All tools work on Windows without admin privileges
+- **27 Security Tools** -- Network recon, web security, vulnerability scanning, OSINT, system monitoring
+- **3 Pipeline Modes** -- Fast (~1min), Deep (~3min), Nuclear (~10min) automated multi-phase scans
+- **Real-time Updates** -- WebSocket-powered live scan progress
+- **Formatted Results** -- Human-readable result visualization (not raw JSON dumps)
+- **Export** -- JSON (Splunk-compatible) and PDF reports, per-scan or bulk
+- **Proxy/TOR** -- Integrated SOCKS5 proxy support for anonymous scanning
+- **OSINT** -- Passive recon via Shodan, Certificate Transparency, ASN/BGP, geolocation
+- **Pure Python** -- No nmap, no external binaries required
+- **Dark Theme UI** -- Modern interface with search, category filters, and built-in guide
+- **SQLite Storage** -- Persistent target/scan/pipeline history
 
 ## Quick Start
 
 ```bash
-# Clone
 git clone https://github.com/YOUR_USER/sec-dashboard.git
 cd sec-dashboard
-
-# Setup
 python -m venv .venv
-source .venv/Scripts/activate # Windows: .venv\Scripts\activate
+source .venv/Scripts/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-
-# Run
 python -m uvicorn backend.main:app --host 127.0.0.1 --port 8444
-
 # Open http://127.0.0.1:8444
 ```
 
-## Tools
+## Tools (27)
 
-### Network Recon (8 tools)
-| Tool | Description |
-|------|-------------|
-| Port Scanner | Fast async TCP port scanner with service detection |
-| DNS Recon | DNS records enumeration (A, AAAA, MX, NS, TXT, SOA, CNAME, SRV, CAA) |
-| Subdomain Enum | Subdomain discovery via DNS brute-force |
-| HTTP Probe | HTTP/HTTPS probing with tech detection |
-| Whois Lookup | Domain WHOIS registration information |
-| Ping Sweep | ICMP reachability check |
-| Traceroute | Network path tracing |
-| SSL/TLS Analyzer | Certificate and cipher analysis |
+### Network Recon (8)
+Port Scanner, DNS Recon, Subdomain Enum, HTTP Probe, Whois Lookup, Ping Sweep, Traceroute, SSL/TLS Analyzer
 
-### Web Security (8 tools)
-| Tool | Description |
-|------|-------------|
-| Header Analyzer | HTTP security headers audit with grading |
-| Directory Fuzzer | Web directory brute-force discovery |
-| SQLi Scanner | SQL injection detection (error-based + boolean-based) |
-| XSS Scanner | Reflected XSS detection |
-| CORS Checker | CORS misconfiguration detection |
-| Tech Detector | Web technology stack fingerprinting |
-| CSP Analyzer | Content Security Policy strength analysis |
-| ↩ Open Redirect | Open redirect vulnerability detection |
+### Web Security (8)
+Header Analyzer, Directory Fuzzer, SQLi Scanner (GET+POST), XSS Scanner, CORS Checker, Tech Detector, CSP Analyzer, Open Redirect
 
-### Vulnerability (3 tools)
-| Tool | Description |
-|------|-------------|
-| CVE Search | NIST NVD search by keyword or CVE ID |
-| Hash Lookup | File hash reputation (MalwareBazaar + VirusTotal) |
-| Password Audit | Password strength + Have I Been Pwned check |
+### Vulnerability (3)
+CVE Search (NIST NVD), Hash Lookup (MalwareBazaar), Password Audit (HIBP)
 
-### System (3 tools)
-| Tool | Description |
-|------|-------------|
-| Net Connections | Active connections and listening ports |
-| Process Monitor | Running processes with network correlation |
-| System Info | OS, network, firewall, security posture |
+### System (3)
+Net Connections, Process Monitor, System Info
+
+### OSINT (5) -- Passive recon, no packets to target
+ASN/BGP Lookup, Reverse DNS, CT Logs (subdomain discovery), Shodan Lookup (InternetDB), IP Geolocation
+
+## Proxy / Anonymity
+
+- **TOR**: SOCKS5 proxy on 127.0.0.1:9150 (TOR Browser) or 9050 (expert bundle)
+- **SOCKS5/4**: Compatible with any VPN provider (Mullvad, NordVPN, etc.)
+- **Cloudflare Tunnel**: `cloudflared tunnel --url http://localhost:8444` for public HTTPS access
+
+## Export
+
+- **JSON per scan/pipeline**: Splunk-compatible format with `event`, `timestamp`, `target`, `result`
+- **JSON bulk**: Export all data for SIEM ingestion
+- **PDF**: Formatted report with tables, grades, and raw JSON appendix
 
 ## API
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/status` | GET | Health check |
-| `/api/tools` | GET | List all tools |
-| `/api/tools/{id}/run` | POST | Run a tool |
-| `/api/targets` | GET/POST | List/create targets |
-| `/api/targets/{id}` | DELETE | Delete target |
-| `/api/scans` | GET/POST | List/create scans |
-| `/api/pipelines` | GET/POST | List/start pipelines |
-| `/api/pipelines/history` | GET | Pipeline history |
-| `/api/pipelines/{id}/result` | GET | Pipeline result |
-| `/api/reset` | DELETE | Reset all data |
-| `/ws` | WebSocket | Real-time events |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/status` | Health check |
+| GET | `/api/tools` | List all tools |
+| POST | `/api/tools/{id}/run` | Run a tool |
+| GET/POST | `/api/targets` | CRUD targets |
+| GET/POST | `/api/scans` | CRUD scans |
+| GET | `/api/scans/{id}/export/json` | Export scan JSON |
+| GET | `/api/scans/{id}/export/pdf` | Export scan PDF |
+| POST | `/api/pipelines` | Start pipeline |
+| GET | `/api/pipelines/history` | Pipeline history |
+| GET | `/api/export/all/json` | Bulk export |
+| GET/POST | `/api/proxy` | Proxy config |
+| GET | `/api/proxy/tor-ip` | Verify TOR exit IP |
+| WS | `/ws` | Real-time events |
 
 ## Architecture
 
 ```
 sec-dashboard/
- backend/
- main.py # FastAPI app + REST API + WebSocket
- config.py # Tool registry + pipeline definitions
- scanner.py # Tool dispatcher with timeout handling
- pipeline.py # Multi-phase pipeline engine
- models.py # SQLite models (aiosqlite)
- tools/
- network.py # Network recon tools
- web.py # Web security tools
- vuln.py # Vulnerability tools
- system.py # System monitoring tools
- frontend/
- index.html # Single-file SPA (inline CSS/JS)
- data/ # SQLite DB + results (gitignored)
- requirements.txt
- .gitignore
- README.md
+├── backend/
+│   ├── main.py          # FastAPI + REST + WebSocket
+│   ├── config.py        # Tool registry + pipelines
+│   ├── scanner.py       # Tool dispatcher
+│   ├── pipeline.py      # Multi-phase engine
+│   ├── models.py        # SQLite models
+│   ├── report.py        # JSON/PDF report generator
+│   ├── proxy.py         # TOR/SOCKS5 proxy config
+│   └── tools/
+│       ├── network.py   # 8 network tools
+│       ├── web.py       # 8 web security tools
+│       ├── vuln.py      # 3 vulnerability tools
+│       ├── system.py    # 3 system tools
+│       └── osint.py     # 5 OSINT tools
+├── frontend/
+│   └── index.html       # Single-file SPA
+├── requirements.txt
+└── README.md
 ```
 
-## Pipeline Modes
+## Deployment
 
-| Mode | Phases | Duration |
-|------|--------|----------|
-| **Fast** | Recon → Scan | ~1 min |
-| **Deep** | Recon → Scan → Web | ~3 min |
-| **Nuclear** | Recon → Scan → Web → Vuln → System | ~10 min |
-
-## Optional API Keys
-
-Set these environment variables for enhanced functionality:
-
+### Local
 ```bash
-# VirusTotal hash lookups
-export VIRUSTOTAL_API_KEY=your_key
+python -m uvicorn backend.main:app --host 127.0.0.1 --port 8444
+```
 
-# That's it! All other tools work without API keys.
+### Cloudflare Tunnel (free, no account needed)
+```bash
+cloudflared tunnel --url http://localhost:8444
+```
+
+### VPS
+```bash
+pip install -r requirements.txt
+python -m uvicorn backend.main:app --host 0.0.0.0 --port 8444
 ```
 
 ## Requirements
 
 - Python 3.11+
-- No external binaries (no nmap, no whois CLI, etc.)
+- No external binaries
 - ~50MB disk space
 
 ## License
 
-MIT License — use it however you want.
+MIT
