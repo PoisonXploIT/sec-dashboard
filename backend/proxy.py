@@ -9,7 +9,7 @@ _proxy_config = {
     "enabled": False,
     "type": "none",       # "none", "tor", "socks5", "socks4"
     "host": "127.0.0.1",
-    "port": 9050,         # TOR default
+    "port": 9150,         # TOR Browser default
     "username": "",
     "password": "",
 }

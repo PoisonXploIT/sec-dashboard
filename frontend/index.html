@@ -1181,7 +1181,7 @@
                     </select>
                 </div>
                 <div class="input-group"><label>Host</label><input type="text" id="proxy-host" value="${esc(config.host||'127.0.0.1')}"></div>
-                <div class="input-group"><label>Port</label><input type="number" id="proxy-port" value="${config.port||9050}"></div>
+                <div class="input-group"><label>Port</label><input type="number" id="proxy-port" value="${config.port||tor.port||9150}"></div>
                 <div class="input-group"><label>Username (optional)</label><input type="text" id="proxy-user" value="${esc(config.username||'')}"></div>
                 <div class="input-group"><label>Password (optional)</label><input type="text" id="proxy-pass" value="${esc(config.password||'')}"></div>
                 <div class="flex gap-8 mt-16">
