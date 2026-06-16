@@ -206,8 +206,23 @@ async def sqli_scanner(url: str, **kw) -> dict:
     parsed = urlparse(url)
     params = parse_qs(parsed.query)
 
-    if not params:
-        return {"url": url, "vulnerable": False, "reason": "No URL parameters found to test"}
+    # Also detect forms in the page for POST testing
+    post_params = {}
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10), connector=aiohttp.TCPConnector(ssl=False)) as detect_sess:
+            async with detect_sess.get(url) as resp:
+                body = await resp.text()
+                import re
+                forms = re.findall(r'<form[^>]*>(.*?)</form>', body, re.S | re.I)
+                for form in forms:
+                    inputs = re.findall(r'<input[^>]*name=["\']([^"\']+)["\']', form, re.I)
+                    for inp in inputs:
+                        post_params[inp] = "test"
+    except Exception:
+        pass
+
+    if not params and not post_params:
+        return {"url": url, "vulnerable": False, "reason": "No URL parameters or form fields found to test"}
 
     sqli_payloads = [
         ("'", "single quote"),
@@ -247,6 +262,7 @@ async def sqli_scanner(url: str, **kw) -> dict:
                 base_status = resp.status
                 base_len = len(base_text)
 
+            # Test GET parameters
             for param_name in params:
                 for payload, ptype in sqli_payloads:
                     test_params = {k: v[0] if isinstance(v, list) else v for k, v in params.items()}
@@ -282,6 +298,29 @@ async def sqli_scanner(url: str, **kw) -> dict:
                                         "evidence": f"Response length diff: {len_diff} bytes",
                                         "status": resp.status,
                                     })
+                    except Exception:
+                        pass
+
+            # Test POST parameters (form fields)
+            for param_name in post_params:
+                for payload, ptype in sqli_payloads[:6]:  # Fewer payloads for POST
+                    test_data = dict(post_params)
+                    test_data[param_name] = payload
+                    try:
+                        async with session.post(url, data=test_data, allow_redirects=False) as resp:
+                            text = await resp.text()
+                            text_lower = text.lower()
+                            for error in sqli_errors:
+                                if error in text_lower and error not in base_text.lower():
+                                    findings.append({
+                                        "parameter": param_name,
+                                        "payload": payload,
+                                        "type": "error-based (POST)",
+                                        "payload_type": ptype,
+                                        "evidence": error,
+                                        "status": resp.status,
+                                    })
+                                    break
                     except Exception:
                         pass
 

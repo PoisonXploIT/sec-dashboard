@@ -37,20 +37,33 @@ async def port_scanner(host: str, ports: str = "top100", timeout: float = 1.0, *
         11211: "Memcached", 27017: "MongoDB", 50000: "SAP",
     }
 
+    # Detect if host is IPv6
+    is_ipv6 = ":" in host
     sem = asyncio.Semaphore(200)
 
     async def check_port(port: int):
         async with sem:
+            # Try IPv4 first, then IPv6 if host resolves to it
+            families = []
             try:
-                _, writer = await asyncio.wait_for(
-                    asyncio.open_connection(host, port), timeout=timeout
-                )
-                writer.close()
-                await writer.wait_closed()
-                service = service_map.get(port, "unknown")
-                open_ports.append({"port": port, "state": "open", "service": service})
-            except (asyncio.TimeoutError, ConnectionRefusedError, OSError):
-                pass
+                infos = await asyncio.get_event_loop().getaddrinfo(host, port, family=socket.AF_UNSPEC, type=socket.SOCK_STREAM)
+                families = list(set(i[0] for i in infos))
+            except socket.gaierror:
+                families = [socket.AF_INET6 if is_ipv6 else socket.AF_INET]
+
+            for family in families:
+                try:
+                    _, writer = await asyncio.wait_for(
+                        asyncio.open_connection(host, port, family=family), timeout=timeout
+                    )
+                    writer.close()
+                    await writer.wait_closed()
+                    service = service_map.get(port, "unknown")
+                    ip_ver = "IPv6" if family == socket.AF_INET6 else "IPv4"
+                    open_ports.append({"port": port, "state": "open", "service": service, "ip_version": ip_ver})
+                    return  # Port open, no need to try other family
+                except (asyncio.TimeoutError, ConnectionRefusedError, OSError):
+                    pass
 
     start = time.time()
     await asyncio.gather(*[check_port(p) for p in port_list])
