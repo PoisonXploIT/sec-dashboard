@@ -16,6 +16,7 @@ from backend.config import TOOLS, CATEGORIES, PIPELINES, RESULTS_DIR
 from backend.models import init_db, get_db
 from backend.scanner import run_tool, run_parallel
 from backend.pipeline import PipelineRunner
+from backend.proxy import get_proxy_config, set_proxy_config, get_tor_status, get_aiohttp_proxy
 from backend.report import (
     generate_scan_json, generate_pipeline_json, generate_all_json,
     generate_scan_pdf, generate_pipeline_pdf,
@@ -35,6 +36,72 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+
+
+# -- Proxy / Anonymity -----------------------------------------
+class ProxyConfig(BaseModel):
+    enabled: bool = False
+    type: str = "none"  # none, tor, socks5, socks4
+    host: str = "127.0.0.1"
+    port: int = 9050
+    username: str = ""
+    password: str = ""
+
+@app.get("/api/proxy")
+async def get_proxy():
+    config = get_proxy_config()
+    tor = get_tor_status()
+    return {"config": config, "tor_status": tor}
+
+@app.post("/api/proxy")
+async def update_proxy(body: ProxyConfig):
+    set_proxy_config(body.dict())
+    return {"status": "updated", "config": get_proxy_config()}
+
+@app.get("/api/proxy/tor-ip")
+async def get_tor_exit_ip():
+    proxy = get_aiohttp_proxy()
+    if not proxy:
+        return {"error": "Proxy not enabled or TOR not running"}
+    try:
+        import aiohttp
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+            async with session.get("https://httpbin.org/ip", proxy=proxy) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return {"tor_ip": data.get("origin", "unknown"), "status": "connected"}
+                return {"error": f"Status {resp.status}"}
+    except Exception as e:
+        return {"error": str(e)[:100]}
+
+@app.get("/api/proxy/tor-install")
+async def tor_install_guide():
+    return {
+        "platform": "Windows",
+        "options": [
+            {
+                "name": "TOR Browser (easiest)",
+                "steps": [
+                    "Download from https://www.torproject.org/download/",
+                    "Install and run TOR Browser",
+                    "SOCKS5 proxy will be available on 127.0.0.1:9150",
+                    "Set proxy port to 9150 in sec-dashboard proxy settings",
+                ],
+                "note": "TOR Browser must be running for proxy to work",
+            },
+            {
+                "name": "TOR Expert Bundle (headless)",
+                "steps": [
+                    "Download from https://www.torproject.org/download/tor/",
+                    "Extract and run tor.exe",
+                    "SOCKS5 proxy on 127.0.0.1:9050 (default)",
+                    "Works without TOR Browser",
+                ],
+            },
+        ],
+        "after_install": "Go to Proxy settings in sec-dashboard and enable TOR",
+    }
 
 
 # -- Export / Reports ------------------------------------------

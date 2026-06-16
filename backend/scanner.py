@@ -15,6 +15,7 @@ from backend.tools.web import (
 )
 from backend.tools.vuln import cve_search, hash_checker, password_audit
 from backend.tools.system import network_connections, process_monitor, system_info
+from backend.tools.osint import asn_lookup, reverse_dns, ct_logs, shodan_lookup, ip_geolocation
 
 # ── Tool → Handler mapping ─────────────────────────────────────
 HANDLERS: dict[str, Callable] = {
@@ -44,6 +45,12 @@ HANDLERS: dict[str, Callable] = {
     "network_connections": network_connections,
     "process_monitor": process_monitor,
     "system_info": system_info,
+    # OSINT
+    "asn_lookup": asn_lookup,
+    "reverse_dns": reverse_dns,
+    "ct_logs": ct_logs,
+    "shodan_lookup": shodan_lookup,
+    "ip_geolocation": ip_geolocation,
 }
 
 

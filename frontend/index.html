@@ -294,6 +294,9 @@
             <a class="nav-item" data-page="guide" onclick="navigate('guide')">
                 <span class="icon">?</span> Guide
             </a>
+            <a class="nav-item" data-page="proxy" onclick="navigate('proxy')">
+                <span class="icon">Px</span> Proxy
+            </a>
             <div class="nav-section" style="margin-top: 16px;">Categories</div>
             <a class="nav-item" onclick="filterCategory('Network Recon')">
                 <span class="icon"></span> Network Recon
@@ -305,11 +308,14 @@
                 <span class="icon"></span> Vulnerability
             </a>
             <a class="nav-item" onclick="filterCategory('System')">
+            <a class="nav-item" onclick="filterCategory('OSINT')">
+                <span class="icon">OS</span> OSINT
+            </a>
                 <span class="icon"></span> System
             </a>
             <div style="flex:1"></div>
             <div style="padding: 16px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-muted);">
-                <div>22 tools • 4 categories</div>
+                <div>27 tools • 4 categories</div>
                 <div>Pure Python • No deps</div>
             </div>
         </nav>
@@ -364,9 +370,9 @@
         document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
         const navEl = document.querySelector(`[data-page="${page}"]`);
         if (navEl) navEl.classList.add('active');
-        const titles = {dashboard:'Dashboard',tools:'Security Tools',pipeline:'Pipeline Engine',targets:'Targets',history:'Scan History',guide:'User Guide'};
+        const titles = {dashboard:'Dashboard',tools:'Security Tools',pipeline:'Pipeline Engine',targets:'Targets',history:'Scan History',guide:'User Guide',proxy:'Proxy / Anonymity'};
         document.getElementById('page-title').textContent = titles[page] || page;
-        const renderers = {dashboard:renderDashboard,tools:renderTools,pipeline:renderPipelinePage,targets:renderTargets,history:renderHistoryPage,guide:renderGuide};
+        const renderers = {dashboard:renderDashboard,tools:renderTools,pipeline:renderPipelinePage,targets:renderTargets,history:renderHistoryPage,guide:renderGuide,proxy:renderProxy};
         (renderers[page] || renderDashboard)();
     }
 
@@ -1145,6 +1151,92 @@
                 </div>
             </div>
         `;
+    }
+
+    async function renderProxy() {
+        const content = document.getElementById('content');
+        const data = await api.get('/proxy');
+        const config = data.config || {};
+        const tor = data.tor_status || {};
+
+        content.innerHTML = `
+            <div class="card">
+                <div class="card-header"><div class="card-title">TOR Status</div></div>
+                <div class="kv-grid">
+                    <span class="key">TOR Detected</span>
+                    <span class="value">${tor.available ? '<span class="tag tag-green">Yes</span>' : '<span class="tag tag-red">No</span>'}</span>
+                    <span class="key">Message</span>
+                    <span class="value">${esc(tor.message || '')}</span>
+                </div>
+                ${!tor.available ? '<div class="finding-card warn mt-16">TOR not detected. Install TOR Browser from <a href="https://www.torproject.org/download/" target="_blank" style="color:var(--accent)">torproject.org</a>, then enable below. Default port: 9150 (TOR Browser) or 9050 (expert bundle).</div>' : ''}
+            </div>
+            <div class="card">
+                <div class="card-header"><div class="card-title">Proxy Configuration</div></div>
+                <div class="input-group"><label>Proxy Type</label>
+                    <select id="proxy-type">
+                        <option value="none" ${config.type==='none'?'selected':''}>Disabled</option>
+                        <option value="tor" ${config.type==='tor'?'selected':''}>TOR (SOCKS5)</option>
+                        <option value="socks5" ${config.type==='socks5'?'selected':''}>SOCKS5 (VPN/Custom)</option>
+                        <option value="socks4" ${config.type==='socks4'?'selected':''}>SOCKS4</option>
+                    </select>
+                </div>
+                <div class="input-group"><label>Host</label><input type="text" id="proxy-host" value="${esc(config.host||'127.0.0.1')}"></div>
+                <div class="input-group"><label>Port</label><input type="number" id="proxy-port" value="${config.port||9050}"></div>
+                <div class="input-group"><label>Username (optional)</label><input type="text" id="proxy-user" value="${esc(config.username||'')}"></div>
+                <div class="input-group"><label>Password (optional)</label><input type="text" id="proxy-pass" value="${esc(config.password||'')}"></div>
+                <div class="flex gap-8 mt-16">
+                    <button class="btn btn-primary" onclick="saveProxy()">Save</button>
+                    <button class="btn" onclick="testTorIP()">Test TOR IP</button>
+                </div>
+                <div id="proxy-result" class="mt-16"></div>
+            </div>
+            <div class="card">
+                <div class="card-header"><div class="card-title">How it works</div></div>
+                <div style="font-size:13px;line-height:1.8">
+                    <p>When proxy is <strong>enabled</strong>, all HTTP-based tools (web, OSINT, vuln) route through the configured proxy.</p>
+                    <p><strong>TOR</strong>: Routes through the TOR network. Requires TOR Browser or tor service running.</p>
+                    <p><strong>SOCKS5</strong>: Use with any VPN that provides SOCKS5 (Mullvad, NordVPN, etc.).</p>
+                    <p><strong>Note</strong>: System tools (port scanner, ping, netstat) use direct connections.</p>
+                    <p><strong>Tip</strong>: For full traffic isolation like network namespaces (Linux), run sec-dashboard inside a VM or container routed through VPN.</p>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header"><div class="card-title">Cloudflare Tunnel (expose dashboard)</div></div>
+                <div style="font-size:13px;line-height:1.8">
+                    <p>To expose this dashboard securely without opening ports:</p>
+                    <p><strong>1.</strong> Install: <code>winget install Cloudflare.cloudflared</code></p>
+                    <p><strong>2.</strong> Run: <code>cloudflared tunnel --url http://localhost:8444</code></p>
+                    <p><strong>3.</strong> You get a public HTTPS URL like <code>https://random-name.trycloudflare.com</code></p>
+                    <p>Free tunnel with HTTPS. No account needed for quick tunnels.</p>
+                    <p>For persistent tunnels: <code>cloudflared tunnel login</code> then configure in Cloudflare Zero Trust.</p>
+                </div>
+            </div>
+        `;
+    }
+
+    async function saveProxy() {
+        const config = {
+            enabled: document.getElementById('proxy-type').value !== 'none',
+            type: document.getElementById('proxy-type').value,
+            host: document.getElementById('proxy-host').value,
+            port: parseInt(document.getElementById('proxy-port').value) || 9050,
+            username: document.getElementById('proxy-user').value,
+            password: document.getElementById('proxy-pass').value,
+        };
+        await api.post('/proxy', config);
+        toast('Proxy settings saved', 'success');
+        renderProxy();
+    }
+
+    async function testTorIP() {
+        const resultDiv = document.getElementById('proxy-result');
+        resultDiv.innerHTML = '<div class="skeleton" style="width:200px"></div>';
+        const data = await api.get('/proxy/tor-ip');
+        if (data.tor_ip) {
+            resultDiv.innerHTML = '<div class="finding-card safe">TOR Exit IP: <strong>' + esc(data.tor_ip) + '</strong></div>';
+        } else {
+            resultDiv.innerHTML = '<div class="finding-card vuln">Error: ' + esc(data.error || 'Could not connect') + '</div>';
+        }
     }
 
     // Init

@@ -176,9 +176,45 @@ TOOLS = {
         "icon": "hw",
         "timeout": 10,
     },
+    # -- OSINT (Passive) --
+    "asn_lookup": {
+        "name": "ASN/BGP Lookup",
+        "category": "OSINT",
+        "description": "ASN, BGP prefix, and network operator identification",
+        "icon": "AS",
+        "timeout": 15,
+    },
+    "reverse_dns": {
+        "name": "Reverse DNS",
+        "category": "OSINT",
+        "description": "PTR records and reverse DNS chain for IP addresses",
+        "icon": "rD",
+        "timeout": 10,
+    },
+    "ct_logs": {
+        "name": "CT Logs",
+        "category": "OSINT",
+        "description": "Certificate Transparency log search -- discovers subdomains via SSL certs",
+        "icon": "CT",
+        "timeout": 20,
+    },
+    "shodan_lookup": {
+        "name": "Shodan Lookup",
+        "category": "OSINT",
+        "description": "Shodan internet intelligence -- ports, vulns, services (free InternetDB)",
+        "icon": "Sh",
+        "timeout": 15,
+    },
+    "ip_geolocation": {
+        "name": "IP Geolocation",
+        "category": "OSINT",
+        "description": "IP geolocation, ISP, org, proxy/hosting detection",
+        "icon": "Gp",
+        "timeout": 10,
+    },
 }
 
-CATEGORIES = ["Network Recon", "Web Security", "Vulnerability", "System"]
+CATEGORIES = ["Network Recon", "Web Security", "Vulnerability", "System", "OSINT"]
 
 # ── Pipeline modes ─────────────────────────────────────────────
 PIPELINES = {
