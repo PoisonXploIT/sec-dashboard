@@ -229,12 +229,13 @@ PIPELINES = {
     },
     "deep": {
         "name": "Deep Scan",
-        "description": "Full recon + web analysis (~3 min)",
+        "description": "Full recon + web + OSINT (~5 min)",
         "icon": "",
         "phases": [
             {"name": "Recon", "tools": ["whois_lookup", "dns_recon", "subdomain_enum", "http_probe"]},
             {"name": "Scan", "tools": ["port_scanner", "ssl_analyzer"]},
-            {"name": "Web", "tools": ["header_analyzer", "tech_detector", "dir_fuzzer"]},
+            {"name": "Web", "tools": ["header_analyzer", "tech_detector", "dir_fuzzer", "cors_checker", "csp_analyzer"]},
+            {"name": "OSINT", "tools": ["reverse_dns", "ct_logs", "ip_geolocation"]},
         ],
     },
     "nuclear": {
@@ -246,6 +247,7 @@ PIPELINES = {
             {"name": "Scan", "tools": ["port_scanner", "ssl_analyzer"]},
             {"name": "Web", "tools": ["header_analyzer", "tech_detector", "dir_fuzzer", "sqli_scanner", "xss_scanner", "cors_checker", "csp_analyzer", "open_redirect"]},
             {"name": "Vuln", "tools": ["cve_search", "password_audit"]},
+            {"name": "OSINT", "tools": ["asn_lookup", "reverse_dns", "ct_logs", "shodan_lookup", "ip_geolocation"]},
             {"name": "System", "tools": ["network_connections", "process_monitor", "system_info"]},
         ],
     },
