@@ -675,7 +675,7 @@
     }
 
     // ── Run Tool ───────────────────────────────
-    async function runTool(toolId) {
+    async function runTool(toolId, params = {}) {
         if (!state.selectedTarget) {
             const targets = await api.get('/targets');
             if (!targets.targets?.length) { showAddTarget(); toast('Add a target first', 'error'); return; }
@@ -687,17 +687,20 @@
         const resultDiv = document.getElementById('tool-result');
         if (resultDiv) resultDiv.innerHTML = `<div class="card"><div class="skeleton" style="width:60%"></div><div class="skeleton" style="width:80%"></div><div class="skeleton" style="width:40%"></div></div>`;
 
-        const result = await api.post(`/tools/${toolId}/run`, { target: state.selectedTarget.host, params: {} });
-        if (card) { card.className = `tool-card ${result.success ? 'success' : 'error'}`; const elapsed = card.querySelector('.elapsed'); if (!elapsed) { const e = document.createElement('span'); e.className='elapsed'; e.textContent=`${result.elapsed_seconds}s`; card.appendChild(e); } else { elapsed.textContent=`${result.elapsed_seconds}s`; } }
+        // Single call: creates scan record + runs tool + returns result
+        const result = await api.post('/scans', { target_id: state.selectedTarget.id, tool: toolId, params: params });
+        const toolResult = result.result || {};
+        if (card) { card.className = `tool-card ${toolResult.success ? 'success' : 'error'}`; const elapsed = card.querySelector('.elapsed'); if (!elapsed) { const e = document.createElement('span'); e.className='elapsed'; e.textContent=`${toolResult.elapsed_seconds}s`; card.appendChild(e); } else { elapsed.textContent=`${toolResult.elapsed_seconds}s`; } }
 
         if (resultDiv) {
-            if (result.success) {
-                resultDiv.innerHTML = `<div class="card"><div class="card-header"><div class="card-title">${result.success?'':''} ${toolId}</div><span style="font-size:12px;color:var(--text-muted)">${result.elapsed_seconds}s</span></div>${formatResult(toolId, result.result)}</div>`;
+            if (toolResult.success) {
+                resultDiv.innerHTML = `<div class="card"><div class="card-header"><div class="card-title">${toolResult.success?'':''} ${toolId}</div><span style="font-size:12px;color:var(--text-muted)">${toolResult.elapsed_seconds}s</span></div>${formatResult(toolId, toolResult.result)}</div>`;
             } else {
-                resultDiv.innerHTML = `<div class="card"><div class="card-header"><div class="card-title"> ${toolId} — Error</div></div><div class="result-panel"><pre style="color:var(--red)">${esc(result.error)}</pre></div></div>`;
+                resultDiv.innerHTML = `<div class="card"><div class="card-header"><div class="card-title"> ${toolId} -- Error</div></div><div class="result-panel"><pre style="color:var(--red)">${esc(toolResult.error || 'Unknown error')}</pre></div></div>`;
             }
         }
-        if (state.selectedTarget?.id) await api.post('/scans', { target_id: state.selectedTarget.id, tool: toolId });
+        // Refresh scan history in background
+        if (state.currentPage === 'history') loadHistory();
     }
 
     // ── Result Formatter ───────────────────────

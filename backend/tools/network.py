@@ -21,6 +21,19 @@ async def port_scanner(host: str, ports: str = "top100", timeout: float = 1.0, *
     port_list = common_ports.get(ports, common_ports["top100"])
     if ports.isdigit():
         port_list = [int(ports)]
+    elif "," in ports or "-" in ports:
+        # Parse custom port spec: "80,443,8080" or "1-1024" or mix
+        port_list = []
+        for part in ports.split(","):
+            part = part.strip()
+            if "-" in part:
+                try:
+                    lo, hi = part.split("-", 1)
+                    port_list.extend(range(int(lo), int(hi) + 1))
+                except ValueError:
+                    pass
+            elif part.isdigit():
+                port_list.append(int(part))
 
     open_ports = []
     service_map = {

@@ -245,6 +245,7 @@ class TargetCreate(BaseModel):
 class ScanCreate(BaseModel):
     target_id: int
     tool: str
+    params: dict = {}
 
 class PipelineCreate(BaseModel):
     target_id: int
@@ -472,7 +473,7 @@ async def create_scan(body: ScanCreate):
 
         # Run tool
         await broadcast({"type": "scan_start", "scan_id": scan_id, "tool": body.tool})
-        result = await run_tool(body.tool, target["host"])
+        result = await run_tool(body.tool, target["host"], **body.params)
 
         # Update scan record
         status = "completed" if result.get("success") else "failed"
