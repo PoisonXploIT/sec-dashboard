@@ -256,6 +256,78 @@ async def status():
     }
 
 
+# -- Dashboard Stats -------------------------------------------
+START_TIME = time.time()
+
+@app.get("/api/dashboard/stats")
+async def dashboard_stats():
+    db = await get_db()
+    try:
+        # Total counts
+        cur = await db.execute("SELECT COUNT(*) as c FROM targets")
+        total_targets = (await cur.fetchone())["c"]
+
+        cur = await db.execute("SELECT COUNT(*) as c FROM scans")
+        total_scans = (await cur.fetchone())["c"]
+
+        cur = await db.execute("SELECT COUNT(*) as c FROM pipelines")
+        total_pipelines = (await cur.fetchone())["c"]
+
+        # Scans by status
+        cur = await db.execute("SELECT status, COUNT(*) as c FROM scans GROUP BY status")
+        scans_by_status = {r["status"]: r["c"] for r in await cur.fetchall()}
+
+        # Scans by tool (top 10)
+        cur = await db.execute(
+            "SELECT tool, COUNT(*) as c FROM scans GROUP BY tool ORDER BY c DESC LIMIT 10"
+        )
+        scans_by_tool = [{"tool": r["tool"], "count": r["c"]} for r in await cur.fetchall()]
+
+        # Recent scans (last 10)
+        cur = await db.execute(
+            "SELECT s.id, s.tool, s.status, s.started_at, s.finished_at, "
+            "t.name as target_name, t.host as target_host "
+            "FROM scans s JOIN targets t ON s.target_id = t.id "
+            "ORDER BY s.started_at DESC LIMIT 10"
+        )
+        recent_scans = [dict(r) for r in await cur.fetchall()]
+
+        # Recent pipelines (last 5)
+        cur = await db.execute(
+            "SELECT p.id, p.mode, p.status, p.started_at, p.finished_at, p.progress, "
+            "t.name as target_name, t.host as target_host "
+            "FROM pipelines p JOIN targets t ON p.target_id = t.id "
+            "ORDER BY p.started_at DESC LIMIT 5"
+        )
+        recent_pipelines = [dict(r) for r in await cur.fetchall()]
+
+        # Success rate
+        completed = scans_by_status.get("completed", 0)
+        failed = scans_by_status.get("failed", 0)
+        total_finished = completed + failed
+        success_rate = round(completed / total_finished * 100, 1) if total_finished > 0 else 0
+
+        # Proxy status
+        proxy = get_proxy_config()
+
+        return {
+            "total_targets": total_targets,
+            "total_scans": total_scans,
+            "total_pipelines": total_pipelines,
+            "scans_by_status": scans_by_status,
+            "scans_by_tool": scans_by_tool,
+            "recent_scans": recent_scans,
+            "recent_pipelines": recent_pipelines,
+            "success_rate": success_rate,
+            "tools_count": len(TOOLS),
+            "categories_count": len(CATEGORIES),
+            "proxy": {"enabled": proxy.get("enabled", False), "type": proxy.get("type", "none")},
+            "uptime_seconds": int(time.time() - START_TIME),
+        }
+    finally:
+        await db.close()
+
+
 # ── Tools ──────────────────────────────────────────────────────
 @app.get("/api/tools")
 async def list_tools():

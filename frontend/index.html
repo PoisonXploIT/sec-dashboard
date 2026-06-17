@@ -258,6 +258,11 @@
         @keyframes skeleton-pulse { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 
         .hidden { display: none !important; }
+
+        /* Dashboard responsive */
+        @media (max-width: 1000px) {
+            .dash-grid { grid-template-columns: 1fr !important; }
+        }
         .flex { display: flex; }
         .gap-8 { gap: 8px; }
         .gap-16 { gap: 16px; }
@@ -362,7 +367,7 @@
         else if (event.type === 'tool_complete') { const s = event.success ? '' : ''; toast(`${s} ${event.tool} (${event.elapsed}s)`, event.success ? 'success' : 'error'); }
         else if (event.type === 'pipeline_complete') { toast(` Pipeline completed in ${event.elapsed}s`, 'success'); if (state.page === 'pipeline') renderPipelinePage(); }
         else if (event.type === 'phase_start') { /* handled by pollPipeline */ }
-        else if (event.type === 'scan_complete') { if (state.page === 'history') renderHistoryPage(); }
+        else if (event.type === 'scan_complete') { if (state.page === 'history') renderHistoryPage(); if (state.page === 'dashboard') renderDashboard(); }
     }
 
     // Navigation
@@ -398,51 +403,232 @@
     function catClass(cat) { return {'Network Recon':'network','Web Security':'web','Vulnerability':'vuln','System':'system','OSINT':'osint'}[cat]||'network'; }
 
     // ── Dashboard ──────────────────────────────
+    function timeAgo(ts) {
+        if (!ts) return '-';
+        const d = new Date(ts.includes && ts.includes('T') ? ts : ts.replace(' ', 'T') + 'Z');
+        const diff = (Date.now() - d.getTime()) / 1000;
+        if (diff < 60) return 'just now';
+        if (diff < 3600) return Math.floor(diff/60) + 'm ago';
+        if (diff < 86400) return Math.floor(diff/3600) + 'h ago';
+        return Math.floor(diff/86400) + 'd ago';
+    }
+    function fmtUptime(sec) {
+        if (sec < 60) return sec + 's';
+        if (sec < 3600) return Math.floor(sec/60) + 'm';
+        const h = Math.floor(sec/3600), m = Math.floor((sec%3600)/60);
+        return h + 'h ' + m + 'm';
+    }
+    function statusBadge(s) {
+        const m = {completed:'badge-completed',running:'badge-running',pending:'badge-pending',failed:'badge-failed'};
+        return `<span class="badge-status ${m[s]||'badge-pending'}">${s}</span>`;
+    }
+
     async function renderDashboard() {
         const content = document.getElementById('content');
-        const [targets, toolsData] = await Promise.all([api.get('/targets'), api.get('/tools')]);
-        state.tools = toolsData.tools || [];
+        content.innerHTML = '<div class="skeleton" style="height:200px;margin-bottom:16px"></div>'.repeat(3);
+
+        const stats = await api.get('/dashboard/stats');
+        const targets = await api.get('/targets');
         const catCounts = {};
-        state.tools.forEach(t => { catCounts[t.category] = (catCounts[t.category]||0)+1; });
+        if (stats.scans_by_tool) {
+            stats.scans_by_tool.forEach(t => { /* tool-level data */ });
+        }
+
+        const s = stats;
+        const maxToolCount = s.scans_by_tool?.length ? Math.max(...s.scans_by_tool.map(t=>t.count)) : 1;
 
         content.innerHTML = `
+            <!-- Stats Row -->
             <div class="stats-row">
-                <div class="stat-card accent"><div class="value">${state.tools.length}</div><div class="label">Security Tools</div></div>
-                <div class="stat-card green"><div class="value">${targets.targets?.length || 0}</div><div class="label">Targets</div></div>
-                <div class="stat-card yellow"><div class="value">${Object.keys(catCounts).length}</div><div class="label">Categories</div></div>
-                <div class="stat-card"><div class="value">3</div><div class="label">Pipeline Modes</div></div>
+                <div class="stat-card accent"><div class="value">${s.tools_count}</div><div class="label">Tools</div></div>
+                <div class="stat-card green"><div class="value">${s.total_targets}</div><div class="label">Targets</div></div>
+                <div class="stat-card"><div class="value">${s.total_scans}</div><div class="label">Total Scans</div></div>
+                <div class="stat-card ${s.success_rate >= 80 ? 'green' : s.success_rate >= 50 ? 'yellow' : 'red'}"><div class="value">${s.success_rate}%</div><div class="label">Success Rate</div></div>
+                <div class="stat-card"><div class="value">${fmtUptime(s.uptime_seconds)}</div><div class="label">Uptime</div></div>
             </div>
-            <div class="card">
-                <div class="card-header"><div class="card-title"> Quick Actions</div></div>
-                <div class="flex gap-8" style="flex-wrap:wrap;">
-                    <button class="btn btn-primary" onclick="navigate('pipeline')"> Run Pipeline</button>
-                    <button class="btn btn-accent" onclick="navigate('tools')"> Browse Tools</button>
-                    <button class="btn" onclick="showAddTarget()"> Add Target</button>
-                    <button class="btn" onclick="navigate('history')"> View History</button>
-                </div>
-            </div>
-            <div class="grid grid-2">
-                ${Object.entries(catCounts).map(([cat, count]) => `
-                    <div class="card" style="cursor:pointer" onclick="filterCategory('${cat}')">
-                        <div class="flex items-center gap-8">
-                            <span style="font-size:24px">${catIcon(cat)}</span>
-                            <div><div style="font-weight:600">${cat}</div><div style="font-size:12px;color:var(--text-secondary)">${count} tools</div></div>
+
+            <!-- Main grid: two columns -->
+            <div class="dash-grid" style="display:grid;grid-template-columns:1fr 340px;gap:16px;">
+
+                <!-- Left column -->
+                <div>
+                    <!-- Quick Actions -->
+                    <div class="card">
+                        <div class="card-header"><div class="card-title">Quick Actions</div></div>
+                        <div class="flex gap-8" style="flex-wrap:wrap;">
+                            <button class="btn btn-primary" onclick="navigate('pipeline')">Run Pipeline</button>
+                            <button class="btn btn-accent" onclick="navigate('tools')">Browse Tools</button>
+                            <button class="btn" onclick="showAddTarget()">Add Target</button>
+                            <button class="btn" onclick="navigate('history')">View History</button>
+                            <button class="btn" onclick="navigate('proxy')">Proxy Settings</button>
                         </div>
                     </div>
-                `).join('')}
-            </div>
-            ${targets.targets?.length ? `
-                <div class="card mt-16">
-                    <div class="card-header"><div class="card-title"> Recent Targets</div><button class="btn btn-sm" onclick="navigate('targets')">View All</button></div>
-                    ${targets.targets.slice(0,5).map(t => `
-                        <div class="target-item">
-                            <div><div class="name">${esc(t.name)}</div><div class="host">${esc(t.host)}</div></div>
-                            <div style="margin-left:auto;font-size:12px;color:var(--text-muted)">${t.scan_count||0} scans</div>
+
+                    <!-- Recent Scans -->
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="card-title">Recent Scans</div>
+                            <button class="btn btn-sm" onclick="navigate('history')">View All</button>
                         </div>
-                    `).join('')}
+                        ${s.recent_scans?.length ? `
+                            <table>
+                                <thead><tr><th>Tool</th><th>Target</th><th>Status</th><th>Time</th></tr></thead>
+                                <tbody>
+                                    ${s.recent_scans.map(sc => `
+                                        <tr style="cursor:pointer" onclick="navigate('history')">
+                                            <td><strong>${esc(sc.tool)}</strong></td>
+                                            <td>${esc(sc.target_name)} <span style="color:var(--text-muted);font-size:11px">${esc(sc.target_host)}</span></td>
+                                            <td>${statusBadge(sc.status)}</td>
+                                            <td style="color:var(--text-muted);font-size:12px">${timeAgo(sc.started_at)}</td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        ` : '<div class="empty-state" style="padding:24px"><div class="icon" style="font-size:32px">No scans yet</div><p>Run a tool or pipeline to see results here</p></div>'}
+                    </div>
+
+                    <!-- Recent Pipelines -->
+                    ${s.recent_pipelines?.length ? `
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="card-title">Recent Pipelines</div>
+                            <button class="btn btn-sm" onclick="navigate('pipeline')">New Pipeline</button>
+                        </div>
+                        ${s.recent_pipelines.map(p => `
+                            <div class="target-item" style="cursor:pointer" onclick="navigate('pipeline')">
+                                <div>
+                                    <div class="name">${esc(p.mode)} Pipeline</div>
+                                    <div class="host">${esc(p.target_name)} ${esc(p.target_host)}</div>
+                                </div>
+                                <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
+                                    ${statusBadge(p.status)}
+                                    <span style="color:var(--text-muted);font-size:12px">${timeAgo(p.started_at)}</span>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                    ` : ''}
+
+                    <!-- Most Used Tools -->
+                    ${s.scans_by_tool?.length ? `
+                    <div class="card">
+                        <div class="card-header"><div class="card-title">Most Used Tools</div></div>
+                        ${s.scans_by_tool.map(t => `
+                            <div style="display:flex;align-items:center;gap:12px;padding:6px 0;font-size:13px">
+                                <span style="min-width:140px;font-weight:500">${esc(t.tool)}</span>
+                                <div style="flex:1;height:8px;background:var(--bg-tertiary);border-radius:4px;overflow:hidden">
+                                    <div style="height:100%;width:${Math.round(t.count/maxToolCount*100)}%;background:var(--accent);border-radius:4px;transition:width 0.5s"></div>
+                                </div>
+                                <span style="min-width:30px;text-align:right;color:var(--text-muted);font-family:monospace">${t.count}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                    ` : ''}
                 </div>
-            ` : ''}
+
+                <!-- Right column -->
+                <div>
+                    <!-- System Status -->
+                    <div class="card">
+                        <div class="card-header"><div class="card-title">System Status</div></div>
+                        <div style="display:grid;gap:10px;font-size:13px">
+                            <div style="display:flex;justify-content:space-between;align-items:center">
+                                <span style="color:var(--text-secondary)">WebSocket</span>
+                                <span style="display:flex;align-items:center;gap:6px">
+                                    <span class="ws-dot" style="width:8px;height:8px;border-radius:50%;${state.ws?.readyState===1?'background:var(--green)':'background:var(--red)'}"></span>
+                                    ${state.ws?.readyState===1 ? 'Connected' : 'Disconnected'}
+                                </span>
+                            </div>
+                            <div style="display:flex;justify-content:space-between;align-items:center">
+                                <span style="color:var(--text-secondary)">Proxy</span>
+                                <span>${s.proxy.enabled
+                                    ? '<span class="badge-status badge-running">' + esc(s.proxy.type) + '</span>'
+                                    : '<span style="color:var(--text-muted)">Disabled</span>'
+                                }</span>
+                            </div>
+                            <div style="display:flex;justify-content:space-between;align-items:center">
+                                <span style="color:var(--text-secondary)">Pipelines Run</span>
+                                <span style="font-family:monospace">${s.total_pipelines}</span>
+                            </div>
+                            <div style="display:flex;justify-content:space-between;align-items:center">
+                                <span style="color:var(--text-secondary)">Server Uptime</span>
+                                <span style="font-family:monospace">${fmtUptime(s.uptime_seconds)}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Scan Status Breakdown -->
+                    <div class="card">
+                        <div class="card-header"><div class="card-title">Scan Breakdown</div></div>
+                        ${s.total_scans > 0 ? `
+                            <div style="display:grid;gap:8px;font-size:13px">
+                                ${s.scans_by_status.completed !== undefined ? `
+                                <div style="display:flex;align-items:center;gap:8px">
+                                    <span style="width:10px;height:10px;border-radius:50%;background:var(--green);flex-shrink:0"></span>
+                                    <span style="flex:1">Completed</span>
+                                    <span style="font-family:monospace;color:var(--green)">${s.scans_by_status.completed}</span>
+                                </div>` : ''}
+                                ${s.scans_by_status.running !== undefined ? `
+                                <div style="display:flex;align-items:center;gap:8px">
+                                    <span style="width:10px;height:10px;border-radius:50%;background:var(--yellow);flex-shrink:0"></span>
+                                    <span style="flex:1">Running</span>
+                                    <span style="font-family:monospace;color:var(--yellow)">${s.scans_by_status.running}</span>
+                                </div>` : ''}
+                                ${s.scans_by_status.pending !== undefined ? `
+                                <div style="display:flex;align-items:center;gap:8px">
+                                    <span style="width:10px;height:10px;border-radius:50%;background:var(--text-muted);flex-shrink:0"></span>
+                                    <span style="flex:1">Pending</span>
+                                    <span style="font-family:monospace">${s.scans_by_status.pending}</span>
+                                </div>` : ''}
+                                ${s.scans_by_status.failed !== undefined ? `
+                                <div style="display:flex;align-items:center;gap:8px">
+                                    <span style="width:10px;height:10px;border-radius:50%;background:var(--red);flex-shrink:0"></span>
+                                    <span style="flex:1">Failed</span>
+                                    <span style="font-family:monospace;color:var(--red)">${s.scans_by_status.failed}</span>
+                                </div>` : ''}
+                                <!-- Progress bar -->
+                                <div class="progress-bar" style="margin-top:4px">
+                                    <div class="progress-fill" style="width:${s.success_rate}%;background:linear-gradient(90deg,var(--green),${s.success_rate<50?'var(--yellow)':'var(--accent)'})"></div>
+                                </div>
+                                <div style="text-align:center;color:var(--text-muted);font-size:11px">${s.success_rate}% success rate</div>
+                            </div>
+                        ` : '<div style="color:var(--text-muted);font-size:13px;text-align:center;padding:16px">No scans recorded yet</div>'}
+                    </div>
+
+                    <!-- Targets -->
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="card-title">Targets</div>
+                            <button class="btn btn-sm" onclick="navigate('targets')">All</button>
+                        </div>
+                        ${targets.targets?.length ? targets.targets.slice(0,5).map(t => `
+                            <div class="target-item" style="cursor:pointer" onclick="state.selectedTarget={id:${t.id},name:'${esc(t.name)}',host:'${esc(t.host)}'};navigate('tools')">
+                                <div><div class="name">${esc(t.name)}</div><div class="host">${esc(t.host)}</div></div>
+                                <div style="margin-left:auto;font-size:12px;color:var(--text-muted)">${t.scan_count||0}</div>
+                            </div>
+                        `).join('') : '<div style="color:var(--text-muted);font-size:13px;padding:12px 0">No targets yet</div>'}
+                    </div>
+
+                    <!-- Categories -->
+                    <div class="card">
+                        <div class="card-header"><div class="card-title">Categories</div></div>
+                        ${['Network Recon','Web Security','Vulnerability','System','OSINT'].map(cat => `
+                            <div style="display:flex;align-items:center;gap:10px;padding:6px 0;cursor:pointer" onclick="filterCategory('${cat}')">
+                                <span style="font-size:16px">${catIcon(cat)}</span>
+                                <span style="flex:1;font-size:13px">${cat}</span>
+                                <span class="cat-${catClass(cat)}" style="font-size:11px;padding:2px 6px;border-radius:4px">${(state.tools||[]).filter(t=>t.category===cat).length || '-'}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            </div>
         `;
+
+        // Load tools count if not cached
+        if (!state.tools.length) {
+            const toolsData = await api.get('/tools');
+            state.tools = toolsData.tools || [];
+        }
     }
 
     // ── Tools ──────────────────────────────────
