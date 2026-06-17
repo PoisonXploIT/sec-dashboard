@@ -1,0 +1,11 @@
+version: "3.8"
+
+services:
+  sec-dashboard:
+    build: .
+    container_name: sec-dashboard
+    ports:
+      - "8444:8444"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

@@ -346,16 +346,27 @@
         pipelines: {}, ws: null, categoryFilter: null, toolSearch: '',
     };
 
+    // API base: same-origin by default, override via window.API_BASE for remote deployments
+    const API_BASE = window.API_BASE || '';
+    const WS_BASE = window.WS_BASE || '';
+
     const api = {
-        async get(path) { const r = await fetch(`/api${path}`); return r.json(); },
-        async post(path, data) { const r = await fetch(`/api${path}`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) }); return r.json(); },
-        async del(path) { const r = await fetch(`/api${path}`, { method: 'DELETE' }); return r.json(); },
+        async get(path) { const r = await fetch(`${API_BASE}/api${path}`); return r.json(); },
+        async post(path, data) { const r = await fetch(`${API_BASE}/api${path}`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) }); return r.json(); },
+        async del(path) { const r = await fetch(`${API_BASE}/api${path}`, { method: 'DELETE' }); return r.json(); },
     };
 
     // WebSocket
     function connectWS() {
-        const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-        state.ws = new WebSocket(`${proto}//${location.host}/ws`);
+        let wsUrl;
+        if (WS_BASE) {
+            const proto = WS_BASE.startsWith('https') ? 'wss:' : 'ws:';
+            wsUrl = `${proto}//${new URL(WS_BASE).host}/ws`;
+        } else {
+            const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            wsUrl = `${proto}//${location.host}/ws`;
+        }
+        state.ws = new WebSocket(wsUrl);
         state.ws.onopen = () => { document.getElementById('ws-dot').className = 'ws-dot'; document.getElementById('ws-label').textContent = 'Connected'; };
         state.ws.onclose = () => { document.getElementById('ws-dot').className = 'ws-dot disconnected'; document.getElementById('ws-label').textContent = 'Disconnected'; setTimeout(connectWS, 3000); };
         state.ws.onmessage = (e) => { try { handleWSEvent(JSON.parse(e.data)); } catch {} };

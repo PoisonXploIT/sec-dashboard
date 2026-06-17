@@ -1,131 +1,155 @@
 # Sec-Dashboard
 
-Security dashboard with 27 pure-Python tools for network reconnaissance, web security analysis, vulnerability assessment, OSINT, and system monitoring.
+Local-first security dashboard for reconnaissance, vulnerability assessment, and monitoring. 27 tools across 5 categories, multi-phase pipeline engine, real-time WebSocket updates, and export in JSON/PDF.
 
-![Python](https://img.shields.io/badge/Python-3.11+-blue?logo=python&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-green?logo=fastapi&logoColor=white)
-![License](https://img.shields.io/badge/License-MIT-yellow)
+Built with FastAPI + vanilla JS. No cloud dependencies, no accounts — runs entirely on your machine.
+
+---
 
 ## Features
 
-- **27 Security Tools** -- Network recon, web security, vulnerability scanning, OSINT, system monitoring
-- **3 Pipeline Modes** -- Fast (~1min), Deep (~3min), Nuclear (~10min) automated multi-phase scans
-- **Real-time Updates** -- WebSocket-powered live scan progress
-- **Formatted Results** -- Human-readable result visualization (not raw JSON dumps)
-- **Export** -- JSON (Splunk-compatible) and PDF reports, per-scan or bulk
-- **Proxy/TOR** -- Integrated SOCKS5 proxy support for anonymous scanning
-- **OSINT** -- Passive recon via Shodan, Certificate Transparency, ASN/BGP, geolocation
-- **Pure Python** -- No nmap, no external binaries required
-- **Dark Theme UI** -- Modern interface with search, category filters, and built-in guide
-- **SQLite Storage** -- Persistent target/scan/pipeline history
+**27 Security Tools** organized in 5 categories:
+
+| Category | Tools |
+|----------|-------|
+| Network Recon | Port Scanner, DNS Recon, Subdomain Enum, HTTP Probe, Whois Lookup, Ping Sweep, Traceroute, SSL Analyzer |
+| Web Security | Header Analyzer, Dir Fuzzer, SQLi Scanner, XSS Scanner, CORS Checker, CSP Analyzer, Tech Detector, Open Redirect |
+| Vulnerability | CVE Search, Hash Checker, Password Audit |
+| System | Network Connections, Process Monitor, System Info |
+| OSINT | ASN Lookup, Reverse DNS, Certificate Transparency, Shodan Lookup, IP Geolocation |
+
+**Pipeline Engine** — Multi-phase automated scans:
+- **Fast** (4 tools) — Quick recon + port scan
+- **Deep** (14 tools) — Full recon + web + OSINT
+- **Nuclear** (24 tools) — Comprehensive security audit
+
+**Additional features:**
+- Real-time WebSocket updates during scans
+- Export individual scans or full history as JSON (Splunk/SIEM compatible) or PDF
+- TOR/SOCKS5 proxy integration
+- Target management with persistent scan history
+- Dark theme responsive UI
+- Built-in integrated guide and API reference
+
+---
 
 ## Quick Start
 
 ```bash
-git clone https://github.com/YOUR_USER/sec-dashboard.git
+# Clone
+git clone https://github.com/PoisonXploIT/sec-dashboard.git
 cd sec-dashboard
+
+# Install dependencies
 python -m venv .venv
-source .venv/Scripts/activate  # Windows: .venv\Scripts\activate
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-python -m uvicorn backend.main:app --host 127.0.0.1 --port 8444
-# Open http://127.0.0.1:8444
+
+# Run
+uvicorn backend.main:app --host 127.0.0.1 --port 8444
 ```
 
-## Tools (27)
+Open http://127.0.0.1:8444 in your browser.
 
-### Network Recon (8)
-Port Scanner, DNS Recon, Subdomain Enum, HTTP Probe, Whois Lookup, Ping Sweep, Traceroute, SSL/TLS Analyzer
-
-### Web Security (8)
-Header Analyzer, Directory Fuzzer, SQLi Scanner (GET+POST), XSS Scanner, CORS Checker, Tech Detector, CSP Analyzer, Open Redirect
-
-### Vulnerability (3)
-CVE Search (NIST NVD), Hash Lookup (MalwareBazaar), Password Audit (HIBP)
-
-### System (3)
-Net Connections, Process Monitor, System Info
-
-### OSINT (5) -- Passive recon, no packets to target
-ASN/BGP Lookup, Reverse DNS, CT Logs (subdomain discovery), Shodan Lookup (InternetDB), IP Geolocation
-
-## Proxy / Anonymity
-
-- **TOR**: SOCKS5 proxy on 127.0.0.1:9150 (TOR Browser) or 9050 (expert bundle)
-- **SOCKS5/4**: Compatible with any VPN provider (Mullvad, NordVPN, etc.)
-- **Cloudflare Tunnel**: `cloudflared tunnel --url http://localhost:8444` for public HTTPS access
-
-## Export
-
-- **JSON per scan/pipeline**: Splunk-compatible format with `event`, `timestamp`, `target`, `result`
-- **JSON bulk**: Export all data for SIEM ingestion
-- **PDF**: Formatted report with tables, grades, and raw JSON appendix
-
-## API
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/status` | Health check |
-| GET | `/api/tools` | List all tools |
-| POST | `/api/tools/{id}/run` | Run a tool |
-| GET/POST | `/api/targets` | CRUD targets |
-| GET/POST | `/api/scans` | CRUD scans |
-| GET | `/api/scans/{id}/export/json` | Export scan JSON |
-| GET | `/api/scans/{id}/export/pdf` | Export scan PDF |
-| POST | `/api/pipelines` | Start pipeline |
-| GET | `/api/pipelines/history` | Pipeline history |
-| GET | `/api/export/all/json` | Bulk export |
-| GET/POST | `/api/proxy` | Proxy config |
-| GET | `/api/proxy/tor-ip` | Verify TOR exit IP |
-| WS | `/ws` | Real-time events |
+---
 
 ## Architecture
 
 ```
 sec-dashboard/
 ├── backend/
-│   ├── main.py          # FastAPI + REST + WebSocket
-│   ├── config.py        # Tool registry + pipelines
-│   ├── scanner.py       # Tool dispatcher
-│   ├── pipeline.py      # Multi-phase engine
-│   ├── models.py        # SQLite models
-│   ├── report.py        # JSON/PDF report generator
-│   ├── proxy.py         # TOR/SOCKS5 proxy config
+│   ├── main.py          # FastAPI app, routes, WebSocket
+│   ├── config.py        # Tool definitions, pipeline configs, categories
+│   ├── scanner.py       # Tool dispatcher and executor
+│   ├── pipeline.py      # Multi-phase pipeline engine
+│   ├── report.py        # JSON and PDF report generators
+│   ├── proxy.py         # TOR/SOCKS5 proxy management
+│   ├── models.py        # SQLite schema
 │   └── tools/
-│       ├── network.py   # 8 network tools
-│       ├── web.py       # 8 web security tools
-│       ├── vuln.py      # 3 vulnerability tools
-│       ├── system.py    # 3 system tools
-│       └── osint.py     # 5 OSINT tools
+│       ├── network.py   # Port scanner, DNS, subdomain, SSL, etc.
+│       ├── web.py       # Headers, tech detection, SQLi, XSS, etc.
+│       ├── vuln.py      # CVE search, hash checker, password audit
+│       ├── system.py    # Network connections, processes, system info
+│       └── osint.py     # ASN, reverse DNS, CT logs, Shodan, geolocation
 ├── frontend/
-│   └── index.html       # Single-file SPA
+│   ├── index.html       # Single-page application (vanilla JS)
+│   └── static/          # Icons, assets
+├── data/
+│   └── sec.db           # SQLite database (auto-created)
 ├── requirements.txt
 └── README.md
 ```
 
+---
+
+## API Reference
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/status` | Health check and version |
+| GET | `/api/dashboard/stats` | Dashboard overview stats |
+| GET | `/api/tools` | List all available tools |
+| POST | `/api/tools/{id}/run` | Run a single tool |
+| GET | `/api/targets` | List targets |
+| POST | `/api/targets` | Create target |
+| DELETE | `/api/targets/{id}` | Delete target and its scans |
+| GET | `/api/scans` | List scan history |
+| POST | `/api/scans` | Create and execute a scan |
+| DELETE | `/api/scans/{id}` | Delete a scan |
+| GET | `/api/scans/{id}/export/json` | Export scan as JSON |
+| GET | `/api/scans/{id}/export/pdf` | Export scan as PDF |
+| GET | `/api/pipelines` | List pipeline configurations |
+| POST | `/api/pipelines` | Execute a pipeline |
+| GET | `/api/pipelines/history` | Pipeline execution history |
+| GET | `/api/export/all/json` | Bulk JSON export |
+| GET | `/api/export/all/pdf` | Bulk PDF report |
+| WS | `/ws` | Real-time scan events |
+| DELETE | `/api/reset` | Reset all data |
+
+---
+
 ## Deployment
 
-### Local
-```bash
-python -m uvicorn backend.main:app --host 127.0.0.1 --port 8444
-```
+### Option 1: VPS + Cloudflare
 
-### Cloudflare Tunnel (free, no account needed)
-```bash
-cloudflared tunnel --url http://localhost:8444
-```
+Deploy the backend on a VPS and use Cloudflare as DNS/proxy:
 
-### VPS
 ```bash
+# On your VPS
+git clone https://github.com/PoisonXploIT/sec-dashboard.git
+cd sec-dashboard
 pip install -r requirements.txt
-python -m uvicorn backend.main:app --host 0.0.0.0 --port 8444
+uvicorn backend.main:app --host 0.0.0.0 --port 8444
 ```
 
-## Requirements
+Point `api.yourdomain.com` to your VPS IP in Cloudflare DNS. Enable proxy for SSL.
 
-- Python 3.11+
-- No external binaries
-- ~50MB disk space
+### Option 2: Docker
+
+```bash
+docker build -t sec-dashboard .
+docker run -p 8444:8444 sec-dashboard
+```
+
+### Option 3: Local only
+
+```bash
+uvicorn backend.main:app --host 127.0.0.1 --port 8444
+```
+
+---
+
+## Tech Stack
+
+- **Backend:** Python 3.11+, FastAPI, aiosqlite, aiohttp
+- **Frontend:** Vanilla JS, HTML5, CSS3 (no framework)
+- **Database:** SQLite (zero config)
+- **Reports:** fpdf2 (PDF), native JSON
+- **Real-time:** WebSocket (FastAPI native)
+- **Proxy:** aiohttp-socks (TOR/SOCKS5)
+
+---
 
 ## License
 
-MIT
+MIT License. See [LICENSE](LICENSE) for details.
