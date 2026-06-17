@@ -19,7 +19,7 @@ from backend.pipeline import PipelineRunner
 from backend.proxy import get_proxy_config, set_proxy_config, get_tor_status, get_aiohttp_proxy
 from backend.report import (
     generate_scan_json, generate_pipeline_json, generate_all_json,
-    generate_scan_pdf, generate_pipeline_pdf,
+    generate_scan_pdf, generate_pipeline_pdf, generate_all_pdf,
 )
 
 app = FastAPI(title="Sec-Dashboard", version="1.0.0")
@@ -201,6 +201,23 @@ async def export_all_json_endpoint():
         content = generate_all_json(scans, pipelines, targets)
         return HTMLResponse(content=content, media_type="application/json",
             headers={"Content-Disposition": 'attachment; filename="sec-dashboard-export.json"'})
+    finally:
+        await db.close()
+
+
+@app.get("/api/export/all/pdf")
+async def export_all_pdf_endpoint():
+    db = await get_db()
+    try:
+        cur_s = await db.execute("SELECT * FROM scans ORDER BY started_at DESC")
+        scans = [dict(r) for r in await cur_s.fetchall()]
+        cur_p = await db.execute("SELECT * FROM pipelines ORDER BY started_at DESC")
+        pipelines = [dict(r) for r in await cur_p.fetchall()]
+        cur_t = await db.execute("SELECT * FROM targets")
+        targets = [dict(r) for r in await cur_t.fetchall()]
+        pdf_bytes = generate_all_pdf(scans, pipelines, targets)
+        return FastResponse(content=pdf_bytes, media_type="application/pdf",
+            headers={"Content-Disposition": 'attachment; filename="sec-dashboard-export.pdf"'})
     finally:
         await db.close()
 

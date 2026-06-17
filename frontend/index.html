@@ -1183,6 +1183,7 @@
                 </div>
                 <div class="flex gap-8">
                     <button class="btn btn-sm" onclick="downloadJSON('/api/export/all/json', 'sec-dashboard-export.json')">Export All (JSON)</button>
+                    <button class="btn btn-sm" onclick="downloadPDF('/api/export/all/pdf', 'sec-dashboard-export.pdf')">Export All (PDF)</button>
                 </div>
             </div>
             <div class="card">
@@ -1336,6 +1337,7 @@
                 <div style="font-size:13px;line-height:1.8">
                     <p><strong>JSON (per scan/pipeline)</strong> -- Splunk-compatible format with <code>event</code>, <code>timestamp</code>, <code>target</code>, <code>result</code> fields. Ready for SIEM ingestion.</p>
                     <p><strong>JSON (Export All)</strong> -- Bulk export of all scans and pipelines. Single file with <code>events[]</code> array. Use for backup or batch import into Splunk/ELK.</p>
+                    <p><strong>PDF (Export All)</strong> -- Full PDF report with summary, targets table, all scans and pipelines in tabular format.</p>
                     <p><strong>PDF (per scan/pipeline)</strong> -- Formatted report with metadata, results summary, and raw JSON appendix. For documentation or sharing with stakeholders.</p>
                 </div>
             </div>
@@ -1359,6 +1361,7 @@
                         <tr><td>GET</td><td><code>/api/pipelines/{id}/export/json</code></td><td>Export pipeline as JSON</td></tr>
                         <tr><td>GET</td><td><code>/api/pipelines/{id}/export/pdf</code></td><td>Export pipeline as PDF</td></tr>
                         <tr><td>GET</td><td><code>/api/export/all/json</code></td><td>Bulk export all data</td></tr>
+                        <tr><td>GET</td><td><code>/api/export/all/pdf</code></td><td>Bulk PDF report</td></tr>
                         <tr><td>DELETE</td><td><code>/api/reset</code></td><td>Reset all data</td></tr>
                     </tbody></table>
                 </div>

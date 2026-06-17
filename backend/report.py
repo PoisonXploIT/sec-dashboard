@@ -160,6 +160,109 @@ def generate_all_json(scans: list, pipelines: list, targets: list) -> str:
     }, indent=2, ensure_ascii=False, default=str)
 
 
+def generate_all_pdf(scans: list, pipelines: list, targets: list) -> bytes:
+    """Generate PDF report for all scans and pipelines."""
+    pdf = ReportPDF()
+    pdf.alias_nb_pages()
+    pdf.add_page()
+
+    target_map = {t["id"]: t for t in targets}
+
+    # Summary
+    pdf.section_title("Full Export Summary")
+    pdf.kv_row("Generated", datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"))
+    pdf.kv_row("Total Scans", str(len(scans)))
+    pdf.kv_row("Total Pipelines", str(len(pipelines)))
+    pdf.kv_row("Total Targets", str(len(targets)))
+    completed = sum(1 for s in scans if s.get("status") == "completed")
+    failed = sum(1 for s in scans if s.get("status") == "failed")
+    pdf.kv_row("Scans Completed", str(completed))
+    pdf.kv_row("Scans Failed", str(failed))
+    pdf.ln(4)
+
+    # Targets
+    if targets:
+        pdf.section_title("Targets")
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.cell(15, 6, "ID", border=1)
+        pdf.cell(50, 6, "Name", border=1)
+        pdf.cell(60, 6, "Host", border=1)
+        pdf.cell(40, 6, "Scans", border=1, new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font("Helvetica", "", 9)
+        for t in targets:
+            scan_count = sum(1 for s in scans if s.get("target_id") == t["id"])
+            pdf.cell(15, 6, str(t.get("id", "")), border=1)
+            pdf.cell(50, 6, str(t.get("name", ""))[:30], border=1)
+            pdf.cell(60, 6, str(t.get("host", ""))[:40], border=1)
+            pdf.cell(40, 6, str(scan_count), border=1, new_x="LMARGIN", new_y="NEXT")
+        pdf.ln(4)
+
+    # Scans table
+    if scans:
+        pdf.section_title("Scans")
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.cell(12, 6, "ID", border=1)
+        pdf.cell(35, 6, "Tool", border=1)
+        pdf.cell(40, 6, "Target", border=1)
+        pdf.cell(18, 6, "Status", border=1)
+        pdf.cell(14, 6, "OK", border=1)
+        pdf.cell(35, 6, "Started", border=1)
+        pdf.cell(35, 6, "Elapsed", border=1, new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font("Helvetica", "", 8)
+        for s in scans:
+            tgt = target_map.get(s.get("target_id"))
+            tgt_host = tgt.get("host", "")[:25] if tgt else ""
+            result_data = {}
+            if s.get("result"):
+                try:
+                    result_data = json.loads(s["result"])
+                except (json.JSONDecodeError, TypeError):
+                    result_data = {}
+            success_str = "Yes" if result_data.get("success") else "No"
+            elapsed = f"{result_data.get('elapsed_seconds', '')}s" if result_data.get("elapsed_seconds") else ""
+            started = str(s.get("started_at", ""))[:19]
+            pdf.cell(12, 5, str(s.get("id", "")), border=1)
+            pdf.cell(35, 5, str(s.get("tool", ""))[:22], border=1)
+            pdf.cell(40, 5, tgt_host, border=1)
+            pdf.cell(18, 5, str(s.get("status", ""))[:8], border=1)
+            pdf.cell(14, 5, success_str, border=1)
+            pdf.cell(35, 5, started, border=1)
+            pdf.cell(35, 5, elapsed, border=1, new_x="LMARGIN", new_y="NEXT")
+        pdf.ln(4)
+
+    # Pipelines
+    if pipelines:
+        pdf.add_page()
+        pdf.section_title("Pipelines")
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.cell(12, 6, "ID", border=1)
+        pdf.cell(30, 6, "Mode", border=1)
+        pdf.cell(40, 6, "Target", border=1)
+        pdf.cell(18, 6, "Status", border=1)
+        pdf.cell(35, 6, "Started", border=1)
+        pdf.cell(25, 6, "Tools", border=1, new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font("Helvetica", "", 8)
+        for p in pipelines:
+            tgt = target_map.get(p.get("target_id"))
+            tgt_host = tgt.get("host", "")[:25] if tgt else ""
+            result_data = {}
+            if p.get("result"):
+                try:
+                    result_data = json.loads(p["result"])
+                except (json.JSONDecodeError, TypeError):
+                    result_data = {}
+            started = str(p.get("started_at", ""))[:19]
+            total = str(result_data.get("total_tools", "")) if result_data else ""
+            pdf.cell(12, 5, str(p.get("id", "")), border=1)
+            pdf.cell(30, 5, str(p.get("mode", ""))[:18], border=1)
+            pdf.cell(40, 5, tgt_host, border=1)
+            pdf.cell(18, 5, str(p.get("status", ""))[:8], border=1)
+            pdf.cell(35, 5, started, border=1)
+            pdf.cell(25, 5, total, border=1, new_x="LMARGIN", new_y="NEXT")
+
+    return bytes(pdf.output())
+
+
 def generate_scan_pdf(scan: dict, target: dict = None) -> bytes:
     """Generate PDF report for a single scan."""
     pdf = ReportPDF()
