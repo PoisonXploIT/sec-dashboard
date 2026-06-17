@@ -242,6 +242,20 @@ class ToolRun(BaseModel):
 @app.on_event("startup")
 async def startup():
     await init_db()
+    # Clean up orphaned scans left as 'running' from a previous crash/restart
+    db = await get_db()
+    try:
+        cur = await db.execute(
+            "UPDATE scans SET status = 'failed', result = ?, finished_at = ? "
+            "WHERE status = 'running'",
+            (json.dumps({"error": "Server restarted while scan was running", "success": False}),
+             datetime.utcnow().isoformat())
+        )
+        if cur.rowcount:
+            await db.commit()
+            print(f"[startup] Marked {cur.rowcount} orphaned running scans as failed")
+    finally:
+        await db.close()
 
 
 # ── Health ─────────────────────────────────────────────────────
