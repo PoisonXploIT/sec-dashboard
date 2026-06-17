@@ -160,8 +160,230 @@ def generate_all_json(scans: list, pipelines: list, targets: list) -> str:
     }, indent=2, ensure_ascii=False, default=str)
 
 
+def _sanitize(text: str) -> str:
+    """Strip non-latin-1 chars for fpdf Helvetica compatibility."""
+    if not isinstance(text, str):
+        text = str(text)
+    replacements = {
+        '\u2014': '--', '\u2013': '-', '\u2018': "'", '\u2019': "'",
+        '\u201c': '"', '\u201d': '"', '\u2026': '...', '\u00a0': ' ',
+        '\u2022': '-', '\u2192': '->', '\u2190': '<-', '\u221e': 'inf',
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    return text.encode('latin-1', errors='replace').decode('latin-1')
+
+
+def _sanitize_dict(obj):
+    """Recursively sanitize all strings in a dict/list structure."""
+    if isinstance(obj, str):
+        return _sanitize(obj)
+    elif isinstance(obj, dict):
+        return {k: _sanitize_dict(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [_sanitize_dict(item) for item in obj]
+    return obj
+
+
+def _render_scan_results(pdf, tool: str, result: dict):
+    """Render tool-specific findings into the PDF."""
+    # Sanitize all string values in result
+    result = _sanitize_dict(result)
+    if tool == "port_scanner":
+        pdf.kv_row("Host", result.get("host", ""))
+        pdf.kv_row("Open Ports", f"{result.get('open_count', 0)}/{result.get('scanned_ports', 0)}")
+        pdf.kv_row("Elapsed", f"{result.get('elapsed_seconds', '')}s")
+        if result.get("open_ports"):
+            pdf.ln(2)
+            pdf.set_font("Helvetica", "B", 8)
+            pdf.cell(15, 5, "Port", border=1)
+            pdf.cell(20, 5, "State", border=1)
+            pdf.cell(45, 5, "Service", border=1, new_x="LMARGIN", new_y="NEXT")
+            pdf.set_font("Helvetica", "", 8)
+            for p in result["open_ports"]:
+                pdf.cell(15, 5, str(p.get("port", "")), border=1)
+                pdf.cell(20, 5, p.get("state", ""), border=1)
+                pdf.cell(45, 5, p.get("service", ""), border=1, new_x="LMARGIN", new_y="NEXT")
+
+    elif tool == "dns_recon":
+        pdf.kv_row("Records", str(result.get("record_count", "")))
+        records = result.get("records", {})
+        for rtype, entries in records.items():
+            if entries:
+                vals = ", ".join(str(e.get("value", e)) if isinstance(e, dict) else str(e) for e in entries[:5])
+                pdf.kv_row(f"  {rtype}", vals)
+
+    elif tool == "subdomain_enum":
+        pdf.kv_row("Found", str(result.get("count", "")))
+        pdf.kv_row("Wordlist", str(result.get("wordlist_size", "")))
+        pdf.kv_row("Elapsed", f"{result.get('elapsed_seconds', '')}s")
+        if result.get("subdomains_found"):
+            pdf.ln(2)
+            pdf.set_font("Helvetica", "B", 8)
+            pdf.cell(60, 5, "Subdomain", border=1)
+            pdf.cell(40, 5, "IP", border=1, new_x="LMARGIN", new_y="NEXT")
+            pdf.set_font("Helvetica", "", 8)
+            for sub in result["subdomains_found"]:
+                pdf.cell(60, 5, sub.get("subdomain", ""), border=1)
+                pdf.cell(40, 5, sub.get("ip", ""), border=1, new_x="LMARGIN", new_y="NEXT")
+
+    elif tool == "http_probe":
+        pdf.kv_row("URL", result.get("url", ""))
+        pdf.kv_row("Status", str(result.get("status_code", "")))
+        pdf.kv_row("Server", result.get("server", ""))
+        pdf.kv_row("Content-Type", result.get("content_type", ""))
+        pdf.kv_row("Size", f"{result.get('content_length', 0)} bytes")
+        pdf.kv_row("Redirect", result.get("redirect_url", "None"))
+
+    elif tool == "whois_lookup":
+        pdf.kv_row("Domain", result.get("domain", ""))
+        pdf.kv_row("Registrar", result.get("registrar", ""))
+        pdf.kv_row("Created", result.get("creation_date", ""))
+        pdf.kv_row("Expires", result.get("expiration_date", ""))
+        pdf.kv_row("Name Servers", ", ".join(result.get("name_servers", [])[:3]))
+        pdf.kv_row("Country", result.get("country", ""))
+
+    elif tool == "ssl_analyzer":
+        pdf.kv_row("TLS Version", result.get("tls_version", ""))
+        pdf.kv_row("Cipher", result.get("cipher_suite", ""))
+        pdf.kv_row("Bits", str(result.get("cipher_bits", "")))
+        pdf.kv_row("Valid", str(result.get("valid", "")))
+        pdf.kv_row("Not After", result.get("not_after", ""))
+        pdf.kv_row("Issuer", str(result.get("issuer", {})))
+        if result.get("subject"):
+            pdf.kv_row("Subject", str(result["subject"]))
+
+    elif tool == "header_analyzer":
+        pdf.kv_row("Grade", result.get("grade", ""))
+        pdf.kv_row("Score", f"{result.get('score', '')}/10")
+        pdf.kv_row("URL", result.get("url", ""))
+        if result.get("security_headers_present"):
+            pdf.ln(1)
+            pdf.set_font("Helvetica", "B", 8)
+            pdf.cell(0, 5, "Present:", new_x="LMARGIN", new_y="NEXT")
+            pdf.set_font("Helvetica", "", 8)
+            for h in result["security_headers_present"]:
+                pdf.cell(0, 5, f"  + {h.get('header', '')}: {h.get('value', '')[:60]}", new_x="LMARGIN", new_y="NEXT")
+        if result.get("security_headers_missing"):
+            pdf.ln(1)
+            pdf.set_font("Helvetica", "B", 8)
+            pdf.set_text_color(200, 0, 0)
+            pdf.cell(0, 5, "Missing:", new_x="LMARGIN", new_y="NEXT")
+            pdf.set_text_color(0, 0, 0)
+            pdf.set_font("Helvetica", "", 8)
+            for h in result["security_headers_missing"]:
+                pdf.cell(0, 5, f"  - {h.get('header', '')}: {h.get('description', '')[:60]}", new_x="LMARGIN", new_y="NEXT")
+
+    elif tool == "tech_detector":
+        pdf.kv_row("URL", result.get("url", ""))
+        pdf.kv_row("Status", str(result.get("status", "")))
+        pdf.kv_row("Server", result.get("server", ""))
+        pdf.kv_row("Total Detected", str(result.get("total_detected", "")))
+        for cat, techs in result.get("technologies", {}).items():
+            pdf.kv_row(f"  {cat}", ", ".join(techs))
+
+    elif tool == "dir_fuzzer":
+        pdf.kv_row("Found", str(result.get("count", "")))
+        if result.get("found_paths"):
+            pdf.ln(2)
+            pdf.set_font("Helvetica", "B", 8)
+            pdf.cell(60, 5, "Path", border=1)
+            pdf.cell(15, 5, "Status", border=1)
+            pdf.cell(20, 5, "Size", border=1, new_x="LMARGIN", new_y="NEXT")
+            pdf.set_font("Helvetica", "", 8)
+            for p in result["found_paths"][:20]:
+                pdf.cell(60, 5, p.get("path", "")[:40], border=1)
+                pdf.cell(15, 5, str(p.get("status", "")), border=1)
+                pdf.cell(20, 5, str(p.get("size", "")), border=1, new_x="LMARGIN", new_y="NEXT")
+
+    elif tool == "password_audit":
+        pdf.kv_row("Strength", result.get("strength", ""))
+        pdf.kv_row("Score", str(result.get("score", "")))
+        analysis = result.get("analysis", {})
+        pdf.kv_row("Length", str(analysis.get("length", "")))
+        pdf.kv_row("Entropy", str(analysis.get("entropy", "")))
+        pdf.kv_row("Breached", str(result.get("breached", "")))
+
+    elif tool == "cve_search":
+        pdf.kv_row("CVEs Found", str(result.get("count", "")))
+        for cve in result.get("cves", [])[:10]:
+            pdf.kv_row(f"  {cve.get('id', '')}", cve.get("summary", "")[:80])
+
+    elif tool == "ping_sweep":
+        alive = result.get("alive_hosts", [])
+        pdf.kv_row("Alive Hosts", str(len(alive)))
+        for h in alive[:10]:
+            pdf.kv_row(f"  {h.get('ip', '')}", f"{h.get('rtt_ms', '')}ms")
+
+    elif tool == "traceroute":
+        hops = result.get("hops", [])
+        pdf.kv_row("Hops", str(len(hops)))
+        for h in hops[:15]:
+            pdf.kv_row(f"  {h.get('hop', '')}", f"{h.get('host', h.get('ip', ''))}  {h.get('rtt_ms', '')}ms")
+
+    elif tool == "asn_lookup":
+        pdf.kv_row("ASN", result.get("asn", ""))
+        pdf.kv_row("Name", result.get("name", ""))
+        pdf.kv_row("Country", result.get("country", ""))
+        pdf.kv_row("CIDR", result.get("cidr", ""))
+
+    elif tool == "reverse_dns":
+        pdf.kv_row("IP", result.get("ip", ""))
+        pdf.kv_row("Hostname", result.get("hostname", ""))
+
+    elif tool == "ct_logs":
+        pdf.kv_row("Certificates", str(result.get("cert_count", "")))
+        pdf.kv_row("Subdomains", str(result.get("unique_subdomains", "")))
+        for sub in result.get("subdomains", [])[:10]:
+            pdf.cell(0, 5, f"  {sub}", new_x="LMARGIN", new_y="NEXT")
+
+    elif tool == "ip_geolocation":
+        pdf.kv_row("IP", result.get("ip", ""))
+        pdf.kv_row("Country", f"{result.get('country', '')} ({result.get('country_code', '')})")
+        pdf.kv_row("City", result.get("city", ""))
+        pdf.kv_row("ISP", result.get("isp", ""))
+        pdf.kv_row("Org", result.get("org", ""))
+        pdf.kv_row("Coordinates", f"{result.get('lat', '')}, {result.get('lon', '')}")
+
+    elif tool == "shodan_lookup":
+        pdf.kv_row("IP", result.get("ip", ""))
+        pdf.kv_row("Ports", ", ".join(str(p) for p in result.get("ports", [])[:10]))
+        pdf.kv_row("OS", result.get("os", ""))
+        pdf.kv_row("Org", result.get("org", ""))
+
+    elif tool == "cors_checker":
+        pdf.kv_row("Vulnerable", str(result.get("vulnerable", False)))
+        for finding in result.get("findings", [])[:5]:
+            pdf.kv_row(f"  {finding.get('name', '')}", finding.get("description", "")[:60])
+
+    elif tool == "csp_analyzer":
+        pdf.kv_row("Grade", result.get("grade", ""))
+        pdf.kv_row("Score", str(result.get("score", "")))
+        for issue in result.get("issues", [])[:5]:
+            pdf.kv_row(f"  {issue.get('severity', '')}", issue.get("description", "")[:60])
+
+    elif tool == "sqli_scanner":
+        pdf.kv_row("Vulnerable", str(result.get("vulnerable_count", 0)))
+        for finding in result.get("findings", [])[:5]:
+            pdf.kv_row(f"  {finding.get('param', '')}", finding.get("type", ""))
+
+    elif tool == "xss_scanner":
+        pdf.kv_row("Vulnerable", str(result.get("vulnerable_count", 0)))
+        for finding in result.get("findings", [])[:5]:
+            pdf.kv_row(f"  {finding.get('param', '')}", finding.get("type", ""))
+
+    elif tool == "open_redirect":
+        pdf.kv_row("Vulnerable", str(result.get("vulnerable", False)))
+        for finding in result.get("findings", [])[:5]:
+            pdf.kv_row(f"  {finding.get('param', '')}", finding.get("url", "")[:60])
+
+    else:
+        # Generic fallback
+        pdf.add_json_block(result, max_lines=30)
+
+
 def generate_all_pdf(scans: list, pipelines: list, targets: list) -> bytes:
-    """Generate PDF report for all scans and pipelines."""
+    """Generate PDF report for all scans and pipelines with full results."""
     pdf = ReportPDF()
     pdf.alias_nb_pages()
     pdf.add_page()
@@ -197,9 +419,9 @@ def generate_all_pdf(scans: list, pipelines: list, targets: list) -> bytes:
             pdf.cell(40, 6, str(scan_count), border=1, new_x="LMARGIN", new_y="NEXT")
         pdf.ln(4)
 
-    # Scans table
+    # Scans overview table
     if scans:
-        pdf.section_title("Scans")
+        pdf.section_title("Scans Overview")
         pdf.set_font("Helvetica", "B", 8)
         pdf.cell(12, 6, "ID", border=1)
         pdf.cell(35, 6, "Tool", border=1)
@@ -229,6 +451,39 @@ def generate_all_pdf(scans: list, pipelines: list, targets: list) -> bytes:
             pdf.cell(35, 5, started, border=1)
             pdf.cell(35, 5, elapsed, border=1, new_x="LMARGIN", new_y="NEXT")
         pdf.ln(4)
+
+        # Detailed results per scan
+        pdf.section_title("Scan Results")
+        for s in scans:
+            if s.get("status") != "completed":
+                continue
+            result_data = {}
+            if s.get("result"):
+                try:
+                    result_data = json.loads(s["result"])
+                except (json.JSONDecodeError, TypeError):
+                    result_data = {}
+            if not result_data.get("success"):
+                continue
+
+            tgt = target_map.get(s.get("target_id"))
+            tgt_host = tgt.get("host", "") if tgt else ""
+            tool = s.get("tool", "unknown")
+
+            # Check page space — add page if near bottom
+            if pdf.get_y() > 240:
+                pdf.add_page()
+
+            pdf.set_font("Helvetica", "B", 10)
+            pdf.set_fill_color(40, 40, 40)
+            pdf.set_text_color(255, 255, 255)
+            pdf.cell(0, 7, f"  #{s.get('id', '')}  {tool}  ->  {tgt_host}", fill=True, new_x="LMARGIN", new_y="NEXT")
+            pdf.set_text_color(0, 0, 0)
+            pdf.ln(2)
+
+            result = result_data.get("result", result_data)
+            _render_scan_results(pdf, tool, result)
+            pdf.ln(4)
 
     # Pipelines
     if pipelines:
