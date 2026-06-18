@@ -1,6 +1,7 @@
 """FastAPI backend — REST API + WebSocket for real-time updates."""
 import asyncio
 import json
+import os
 import time
 from datetime import datetime
 from pathlib import Path
@@ -31,6 +32,7 @@ app.add_middleware(
         "http://127.0.0.1:8444",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
+        "https://sec.sammideblas.com",
     ],
     allow_methods=["*"],
     allow_headers=["*"],
