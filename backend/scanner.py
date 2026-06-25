@@ -4,7 +4,7 @@ import time
 import traceback
 from typing import Callable, Any
 
-from backend.config import TOOLS
+from backend.config import TOOLS, SPECIAL_TOOLS
 from backend.tools.network import (
     port_scanner, dns_recon, subdomain_enum, http_probe,
     whois_lookup, ping_sweep, traceroute, ssl_analyzer,
@@ -16,6 +16,7 @@ from backend.tools.web import (
 from backend.tools.vuln import cve_search, hash_checker, password_audit
 from backend.tools.system import network_connections, process_monitor, system_info
 from backend.tools.osint import asn_lookup, reverse_dns, ct_logs, shodan_lookup, ip_geolocation
+from backend.tools.emailsec import dnssec_checker, email_security, http_methods, robots_analyzer, caa_checker
 
 # ── Tool → Handler mapping ─────────────────────────────────────
 HANDLERS: dict[str, Callable] = {
@@ -51,11 +52,24 @@ HANDLERS: dict[str, Callable] = {
     "ct_logs": ct_logs,
     "shodan_lookup": shodan_lookup,
     "ip_geolocation": ip_geolocation,
+    # Email Security
+    "dnssec_checker": dnssec_checker,
+    "email_security": email_security,
+    # Web Security (additional)
+    "http_methods": http_methods,
+    "robots_analyzer": robots_analyzer,
+    # Network Recon (additional)
+    "caa_checker": caa_checker,
 }
 
 
 async def run_tool(tool_name: str, target: str, **kwargs) -> dict:
-    """Run a single tool against a target."""
+    """Run a single tool against a target.
+
+    For special tools (hash_checker, password_audit, cve_search), the 'target'
+    is actually the direct input (hash, password, keyword). For system tools,
+    target is ignored.
+    """
     if tool_name not in HANDLERS:
         return {"error": f"Unknown tool: {tool_name}", "success": False}
 

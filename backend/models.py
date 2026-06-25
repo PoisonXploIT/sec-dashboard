@@ -13,7 +13,7 @@ CREATE TABLE IF NOT EXISTS targets (
 
 CREATE TABLE IF NOT EXISTS scans (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    target_id INTEGER NOT NULL,
+    target_id INTEGER,  -- nullable for special tools (no target)
     tool TEXT NOT NULL,
     status TEXT DEFAULT 'pending',
     result TEXT,

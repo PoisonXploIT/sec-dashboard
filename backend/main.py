@@ -13,7 +13,7 @@ from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from backend.config import TOOLS, CATEGORIES, PIPELINES, RESULTS_DIR
+from backend.config import TOOLS, CATEGORIES, PIPELINES, RESULTS_DIR, SPECIAL_TOOLS
 from backend.models import init_db, get_db
 from backend.scanner import run_tool, run_parallel
 from backend.pipeline import PipelineRunner
@@ -251,9 +251,10 @@ class TargetCreate(BaseModel):
     host: str
 
 class ScanCreate(BaseModel):
-    target_id: int
+    target_id: int = 0  # 0 = no target (special tools)
     tool: str
     params: dict = {}
+    direct_input: str = ""  # For special tools
 
 class PipelineCreate(BaseModel):
     target_id: int
@@ -262,6 +263,7 @@ class PipelineCreate(BaseModel):
 class ToolRun(BaseModel):
     target: str
     params: dict = {}
+    direct_input: str = ""  # For special tools (hash, password, keyword)
 
 
 # ── Events ────────────────────────────────────────────────────
@@ -328,7 +330,7 @@ async def dashboard_stats():
         cur = await db.execute(
             "SELECT s.id, s.tool, s.status, s.started_at, s.finished_at, "
             "t.name as target_name, t.host as target_host "
-            "FROM scans s JOIN targets t ON s.target_id = t.id "
+            "FROM scans s LEFT JOIN targets t ON s.target_id = t.id "
             "ORDER BY s.started_at DESC LIMIT 10"
         )
         recent_scans = [dict(r) for r in await cur.fetchall()]
@@ -374,14 +376,18 @@ async def dashboard_stats():
 async def list_tools():
     tools = []
     for tool_id, config in TOOLS.items():
-        tools.append({
+        tool_entry = {
             "id": tool_id,
             "name": config["name"],
             "category": config["category"],
             "description": config["description"],
             "icon": config["icon"],
             "timeout": config["timeout"],
-        })
+        }
+        # Add special tool info if applicable
+        if tool_id in SPECIAL_TOOLS:
+            tool_entry["special"] = SPECIAL_TOOLS[tool_id]
+        tools.append(tool_entry)
     return {"tools": tools, "categories": CATEGORIES}
 
 
@@ -390,7 +396,9 @@ async def run_single_tool(tool_id: str, body: ToolRun):
     if tool_id not in TOOLS:
         raise HTTPException(404, f"Tool '{tool_id}' not found")
 
-    result = await run_tool(tool_id, body.target, **body.params)
+    # For special tools, use direct_input as the target
+    effective_target = body.direct_input if body.direct_input and tool_id in SPECIAL_TOOLS else body.target
+    result = await run_tool(tool_id, effective_target, **body.params)
     return result
 
 
@@ -457,7 +465,7 @@ async def list_scans(target_id: int = None, offset: int = 0, limit: int = 50):
         else:
             cursor = await db.execute(
                 "SELECT s.*, t.name as target_name, t.host as target_host "
-                "FROM scans s JOIN targets t ON s.target_id = t.id "
+                "FROM scans s LEFT JOIN targets t ON s.target_id = t.id "
                 "ORDER BY s.started_at DESC LIMIT ? OFFSET ?",
                 (limit, offset)
             )
@@ -472,18 +480,36 @@ async def create_scan(body: ScanCreate):
     if body.tool not in TOOLS:
         raise HTTPException(404, f"Tool '{body.tool}' not found")
 
+    is_special = body.tool in SPECIAL_TOOLS
+
+    # For special tools, target_id is optional
+    if not is_special and not body.target_id:
+        raise HTTPException(400, "target_id is required for non-special tools")
+
+    target_host = ""
+    target_name = ""
+
+    if body.target_id:
+        db = await get_db()
+        try:
+            cursor = await db.execute("SELECT * FROM targets WHERE id = ?", (body.target_id,))
+            target = await cursor.fetchone()
+            if not target:
+                raise HTTPException(404, "Target not found")
+            target_host = target["host"]
+            target_name = target["name"]
+        finally:
+            await db.close()
+    elif is_special:
+        target_host = body.direct_input or "direct_input"
+        target_name = SPECIAL_TOOLS[body.tool].get("input_label", "direct") or "direct"
+
+    # Create scan record
     db = await get_db()
     try:
-        # Get target
-        cursor = await db.execute("SELECT * FROM targets WHERE id = ?", (body.target_id,))
-        target = await cursor.fetchone()
-        if not target:
-            raise HTTPException(404, "Target not found")
-
-        # Create scan record
         cursor = await db.execute(
             "INSERT INTO scans (target_id, tool, status, started_at) VALUES (?, ?, 'running', ?)",
-            (body.target_id, body.tool, datetime.utcnow().isoformat())
+            (body.target_id or 0, body.tool, datetime.utcnow().isoformat())
         )
         scan_id = cursor.lastrowid
         await db.commit()
@@ -493,9 +519,15 @@ async def create_scan(body: ScanCreate):
     # Run tool in background task so we can track/cancel it
     await broadcast({"type": "scan_start", "scan_id": scan_id, "tool": body.tool})
 
+    # Determine effective target
+    if is_special:
+        effective_target = body.direct_input or target_host
+    else:
+        effective_target = target_host
+
     async def _run_scan():
         try:
-            result = await run_tool(body.tool, target["host"], **body.params)
+            result = await run_tool(body.tool, effective_target, **body.params)
             db2 = await get_db()
             try:
                 status = "completed" if result.get("success") else "failed"
@@ -512,7 +544,7 @@ async def create_scan(body: ScanCreate):
             await webhooks.notify("scan_complete", {
                 "scan_id": scan_id,
                 "tool": body.tool,
-                "target": target["host"],
+                "target": effective_target,
                 "status": status,
                 "elapsed_seconds": result.get("elapsed_seconds", 0),
             })

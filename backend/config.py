@@ -212,9 +212,79 @@ TOOLS = {
         "icon": "Gp",
         "timeout": 10,
     },
+    # ─── Email Security ───
+    "dnssec_checker": {
+        "name": "DNSSEC Checker",
+        "category": "Email Security",
+        "description": "Verifies DNSSEC status and chain of trust for a domain",
+        "icon": "DS",
+        "timeout": 15,
+    },
+    "email_security": {
+        "name": "Email Security",
+        "category": "Email Security",
+        "description": "SPF, DKIM, and DMARC record analysis for a domain",
+        "icon": "EM",
+        "timeout": 15,
+    },
+    "http_methods": {
+        "name": "HTTP Methods",
+        "category": "Web Security",
+        "description": "Checks which HTTP methods are allowed (PUT, DELETE, TRACE, etc.)",
+        "icon": "HM",
+        "timeout": 15,
+    },
+    "robots_analyzer": {
+        "name": "Robots.txt Analyzer",
+        "category": "Web Security",
+        "description": "Analyzes robots.txt for sensitive paths and misconfigurations",
+        "icon": "RB",
+        "timeout": 10,
+    },
+    "caa_checker": {
+        "name": "CAA Checker",
+        "category": "Network Recon",
+        "description": "Checks CAA records -- which CAs can issue certificates",
+        "icon": "CA",
+        "timeout": 10,
+    },
 }
 
-CATEGORIES = ["Network Recon", "Web Security", "Vulnerability", "System", "OSINT"]
+CATEGORIES = ["Network Recon", "Web Security", "Vulnerability", "System", "OSINT", "Email Security"]
+
+# ── Special tools (don't use target domain/IP, need custom input) ──
+SPECIAL_TOOLS = {
+    "hash_checker": {
+        "input_label": "Hash (MD5 / SHA-1 / SHA-256)",
+        "input_placeholder": "e.g. d41d8cd98f00b204e9800998ecf8427e",
+        "input_type": "text",
+    },
+    "password_audit": {
+        "input_label": "Password to analyze",
+        "input_placeholder": "Type a password to check strength + breach status",
+        "input_type": "password",
+    },
+    "cve_search": {
+        "input_label": "Keyword or CVE ID",
+        "input_placeholder": "e.g. Apache 2.4 or CVE-2024-12345",
+        "input_type": "text",
+    },
+    "network_connections": {
+        "input_label": None,
+        "input_placeholder": None,
+        "input_type": "none",
+    },
+    "process_monitor": {
+        "input_label": None,
+        "input_placeholder": None,
+        "input_type": "none",
+    },
+    "system_info": {
+        "input_label": None,
+        "input_placeholder": None,
+        "input_type": "none",
+    },
+}
 
 # ── Pipeline modes ─────────────────────────────────────────────
 PIPELINES = {
@@ -240,14 +310,15 @@ PIPELINES = {
     },
     "nuclear": {
         "name": "Nuclear Scan",
-        "description": "Comprehensive security audit (~10 min)",
+        "description": "Comprehensive security audit (~7 min)",
         "icon": "",
         "phases": [
-            {"name": "Recon", "tools": ["whois_lookup", "dns_recon", "subdomain_enum", "http_probe"]},
+            {"name": "Recon", "tools": ["whois_lookup", "dns_recon", "subdomain_enum", "http_probe", "caa_checker"]},
             {"name": "Scan", "tools": ["port_scanner", "ssl_analyzer"]},
-            {"name": "Web", "tools": ["header_analyzer", "tech_detector", "dir_fuzzer", "sqli_scanner", "xss_scanner", "cors_checker", "csp_analyzer", "open_redirect"]},
+            {"name": "Web", "tools": ["header_analyzer", "tech_detector", "dir_fuzzer", "sqli_scanner", "xss_scanner", "cors_checker", "csp_analyzer", "open_redirect", "http_methods", "robots_analyzer"]},
             {"name": "Vuln", "tools": ["cve_search"]},
             {"name": "OSINT", "tools": ["asn_lookup", "reverse_dns", "ct_logs", "shodan_lookup", "ip_geolocation"]},
+            {"name": "Email", "tools": ["dnssec_checker", "email_security"]},
         ],
     },
 }

@@ -109,6 +109,7 @@
         .cat-vuln { background: rgba(248,81,73,0.15); color: var(--red); }
         .cat-system { background: rgba(63,185,80,0.15); color: var(--green); }
         .cat-osint { background: rgba(247,120,186,0.15); color: var(--pink); }
+        .cat-emailsec { background: rgba(63,185,80,0.15); color: var(--green); }
 
         /* Target list */
         .target-item { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 8px; transition: var(--transition); }
@@ -293,7 +294,7 @@
                 <span class="icon"></span> Dashboard
             </a>
             <a class="nav-item" data-page="tools" onclick="navigate('tools')">
-                <span class="icon"></span> Tools <span class="badge" id="tools-count">27</span>
+                <span class="icon"></span> Tools <span class="badge" id="tools-count">32</span>
             </a>
             <a class="nav-item" data-page="pipeline" onclick="navigate('pipeline')">
                 <span class="icon"></span> Pipeline
@@ -329,9 +330,12 @@
             <a class="nav-item" onclick="filterCategory('OSINT')">
                 <span class="icon">OS</span> OSINT
             </a>
+            <a class="nav-item" onclick="filterCategory('Email Security')">
+                <span class="icon">EM</span> Email Security
+            </a>
             <div style="flex:1"></div>
             <div style="padding: 16px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-muted);">
-                <div>27 tools • 5 categories</div>
+                <div>32 tools • 6 categories</div>
                 <div>Webhooks • Cancel • SSRF protection</div>
             </div>
         </nav>
@@ -483,8 +487,8 @@
     }
 
     function esc(str) { return String(str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-    function catIcon(cat) { return {'Network Recon':'','Web Security':'','Vulnerability':'','System':'','OSINT':'OS'}[cat]||''; }
-    function catClass(cat) { return {'Network Recon':'network','Web Security':'web','Vulnerability':'vuln','System':'system','OSINT':'osint'}[cat]||'network'; }
+    function catIcon(cat) { return {'Network Recon':'','Web Security':'','Vulnerability':'','System':'','OSINT':'OS','Email Security':'EM'}[cat]||''; }
+    function catClass(cat) { return {'Network Recon':'network','Web Security':'web','Vulnerability':'vuln','System':'system','OSINT':'osint','Email Security':'emailsec'}[cat]||'network'; }
 
     // ── Dashboard ──────────────────────────────
     function timeAgo(ts) {
@@ -696,7 +700,7 @@
                     <!-- Categories -->
                     <div class="card">
                         <div class="card-header"><div class="card-title">Categories</div></div>
-                        ${['Network Recon','Web Security','Vulnerability','System','OSINT'].map(cat => `
+                        ${['Network Recon','Web Security','Vulnerability','System','OSINT','Email Security'].map(cat => `
                             <div style="display:flex;align-items:center;gap:10px;padding:6px 0;cursor:pointer" onclick="filterCategory('${cat}')">
                                 <span style="font-size:16px">${catIcon(cat)}</span>
                                 <span style="flex:1;font-size:13px">${cat}</span>
@@ -729,7 +733,7 @@
         content.innerHTML = `
             <div class="tabs">
                 <div class="tab ${!state.categoryFilter?'active':''}" onclick="state.categoryFilter=null;renderTools()">All (${state.tools.length})</div>
-                ${['Network Recon','Web Security','Vulnerability','System','OSINT'].map(c =>
+                ${['Network Recon','Web Security','Vulnerability','System','OSINT','Email Security'].map(c =>
                     `<div class="tab ${state.categoryFilter===c?'active':''}" onclick="filterCategory('${c}')">${catIcon(c)} ${c} (${state.tools.filter(t=>t.category===c).length})</div>`
                 ).join('')}
             </div>
@@ -760,31 +764,74 @@
 
     // ── Run Tool ───────────────────────────────
     async function runTool(toolId, params = {}) {
+        // Check if this is a special tool (needs custom input, not a target)
+        const tool = (state.tools || []).find(t => t.id === toolId);
+        if (tool && tool.special) {
+            const spec = tool.special;
+            if (spec.input_type === 'none') {
+                // System tools -- no input needed, run directly
+                return await _executeScan(toolId, 0, {}, '');
+            }
+            // Show custom input modal
+            showSpecialInput(toolId, spec);
+            return;
+        }
+
         if (!state.selectedTarget) {
             const targets = await api.get('/targets');
             if (!targets.targets?.length) { showAddTarget(); toast('Add a target first', 'error'); return; }
             showTargetPicker(toolId, targets.targets);
             return;
         }
+        await _executeScan(toolId, state.selectedTarget.id, params, '');
+    }
+
+    function showSpecialInput(toolId, spec) {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.innerHTML = `<div class="modal"><h3>${esc(toolId.replace(/_/g, ' '))}</h3>
+            <div class="input-group"><label>${esc(spec.input_label)}</label>
+                <input type="${esc(spec.input_type)}" id="special-input" placeholder="${esc(spec.input_placeholder||'')}">
+            </div>
+            <div class="modal-actions"><button class="btn" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+            <button class="btn btn-primary" onclick="runSpecialTool('${toolId}')">Run</button></div>
+        </div>`;
+        document.body.appendChild(overlay);
+        document.getElementById('special-input').focus();
+    }
+
+    async function runSpecialTool(toolId) {
+        const input = document.getElementById('special-input').value.trim();
+        if (!input) { toast('Input required', 'error'); return; }
+        document.querySelector('.modal-overlay')?.remove();
+        await _executeScan(toolId, 0, {}, input);
+    }
+
+    async function _executeScan(toolId, targetId, params, directInput) {
         const card = document.getElementById(`tool-${toolId}`);
         if (card) { card.className = 'tool-card running'; }
         const resultDiv = document.getElementById('tool-result');
         if (resultDiv) resultDiv.innerHTML = `<div class="card"><div class="skeleton" style="width:60%"></div><div class="skeleton" style="width:80%"></div><div class="skeleton" style="width:40%"></div></div>`;
 
-        // Single call: creates scan record + runs tool + returns result
-        const result = await api.post('/scans', { target_id: state.selectedTarget.id, tool: toolId, params: params });
-        const toolResult = result.result || {};
-        if (card) { card.className = `tool-card ${toolResult.success ? 'success' : 'error'}`; const elapsed = card.querySelector('.elapsed'); if (!elapsed) { const e = document.createElement('span'); e.className='elapsed'; e.textContent=`${toolResult.elapsed_seconds}s`; card.appendChild(e); } else { elapsed.textContent=`${toolResult.elapsed_seconds}s`; } }
+        try {
+            const result = await api.post('/scans', { target_id: targetId, tool: toolId, params: params, direct_input: directInput });
+            const toolResult = result.result || {};
+            if (card) { card.className = `tool-card ${toolResult.success ? 'success' : 'error'}`; const elapsed = card.querySelector('.elapsed'); if (!elapsed) { const e = document.createElement('span'); e.className='elapsed'; e.textContent=`${toolResult.elapsed_seconds}s`; card.appendChild(e); } else { elapsed.textContent=`${toolResult.elapsed_seconds}s`; } }
 
-        if (resultDiv) {
-            if (toolResult.success) {
-                resultDiv.innerHTML = `<div class="card"><div class="card-header"><div class="card-title">${toolResult.success?'':''} ${toolId}</div><span style="font-size:12px;color:var(--text-muted)">${toolResult.elapsed_seconds}s</span></div>${formatResult(toolId, toolResult.result)}</div>`;
-            } else {
-                resultDiv.innerHTML = `<div class="card"><div class="card-header"><div class="card-title"> ${toolId} -- Error</div></div><div class="result-panel"><pre style="color:var(--red)">${esc(toolResult.error || 'Unknown error')}</pre></div></div>`;
+            if (resultDiv) {
+                if (toolResult.success) {
+                    resultDiv.innerHTML = `<div class="card"><div class="card-header"><div class="card-title">${toolResult.success?'':''} ${toolId}</div><span style="font-size:12px;color:var(--text-muted)">${toolResult.elapsed_seconds}s</span></div>${formatResult(toolId, toolResult.result)}</div>`;
+                } else {
+                    resultDiv.innerHTML = `<div class="card"><div class="card-header"><div class="card-title"> ${toolId} -- Error</div></div><div class="result-panel"><pre style="color:var(--red)">${esc(toolResult.error || 'Unknown error')}</pre></div></div>`;
+                }
             }
+            // Refresh scan history in background
+            if (state.page === 'history') renderHistoryPage();
+        } catch (e) {
+            if (resultDiv) resultDiv.innerHTML = `<div class="card"><div class="card-header"><div class="card-title">${toolId} -- Error</div></div><div class="result-panel"><pre style="color:var(--red)">${esc(e.message)}</pre></div></div>`;
+            if (card) card.className = 'tool-card error';
+            toast(e.message, 'error');
         }
-        // Refresh scan history in background
-        if (state.currentPage === 'history') loadHistory();
     }
 
     // ── Result Formatter ───────────────────────
@@ -813,6 +860,11 @@
             network_connections: formatNetConn,
             process_monitor: formatProcesses,
             system_info: formatSystemInfo,
+            dnssec_checker: formatDNSSEC,
+            email_security: formatEmailSec,
+            http_methods: formatHttpMethods,
+            robots_analyzer: formatRobots,
+            caa_checker: formatCAA,
         };
         const formatter = formatters[toolId];
         if (formatter) return formatter(data);
@@ -1085,6 +1137,106 @@
         return html;
     }
 
+    // ── Special Tool Formatters ────────────────────────────────
+    function formatDNSSEC(d) {
+        if (d.error) return `<div class="finding-card vuln">${esc(d.error)}</div>`;
+        let html = `<div class="finding-card ${d.dnssec_enabled?'safe':'vuln'}"><strong>${d.dnssec_enabled?'DNSSEC is enabled':'DNSSEC is NOT enabled'}</strong></div>`;
+        if (d.details?.dnskey_records?.length) {
+            html += `<div class="result-section mt-8"><h4>DNSKEY Records (${d.details.key_count})</h4>`;
+            html += d.details.dnskey_records.map(k => `<div class="kv-grid"><span class="key">${esc(k.type)}</span><span class="value">algorithm ${k.algorithm}, protocol ${k.protocol}</span></div>`).join('');
+            html += '</div>';
+        }
+        if (d.details?.ds_records?.length) {
+            html += `<div class="result-section"><h4>DS Records (${d.details.ds_count})</h4>`;
+            html += d.details.ds_records.map(ds => `<div class="kv-grid"><span class="key">Key Tag</span><span class="value">${ds.key_tag}</span><span class="key">Algorithm</span><span class="value">${ds.algorithm}</span><span class="key">Digest Type</span><span class="value">${ds.digest_type}</span></div>`).join('');
+            html += '</div>';
+        }
+        if (d.recommendation) html += `<div class="finding-card warn mt-8">${esc(d.recommendation)}</div>`;
+        return html;
+    }
+
+    function formatEmailSec(d) {
+        if (d.error) return `<div class="finding-card vuln">${esc(d.error)}</div>`;
+        const s = d.summary || {};
+        const score = s.score || 0;
+        const color = score === 3 ? 'var(--green)' : score >= 2 ? 'var(--yellow)' : 'var(--red)';
+        let html = `<div class="flex items-center gap-16 mb-16"><div style="font-size:28px;font-weight:700;color:${color}">${score}/3</div><div><div style="font-size:14px">Email Security Score</div><div style="font-size:12px;color:var(--text-secondary)">${s.spf||'?'} SPF | ${s.dkim||'?'} DKIM | ${s.dmarc||'?'} DMARC</div></div></div>`;
+
+        // SPF
+        const spf = d.spf || {};
+        html += `<div class="result-section"><h4>SPF ${spf.present?'<span class="tag tag-green">Present</span>':'<span class="tag tag-red">Missing</span>'}</h4>`;
+        if (spf.record) html += `<div class="result-panel"><pre>${esc(spf.record)}</pre></div>`;
+        if (spf.mechanisms?.length) html += `<div>${spf.mechanisms.map(m=>`<span class="tag">${esc(m.type)}: ${esc(m.value||m.policy||'')}</span>`).join(' ')}</div>`;
+        if (spf.recommendation) html += `<div class="finding-card warn">${esc(spf.recommendation)}</div>`;
+        html += '</div>';
+
+        // DKIM
+        const dkim = d.dkim || {};
+        html += `<div class="result-section"><h4>DKIM ${dkim.present?'<span class="tag tag-green">Present</span>':'<span class="tag tag-red">Missing</span>'}</h4>`;
+        if (dkim.selectors?.length) html += dkim.selectors.map(s=>`<div class="finding-card safe"><strong>Selector:</strong> ${esc(s.selector)}<div class="result-panel mt-8"><pre style="font-size:10px">${esc(s.record)}</pre></div></div>`).join('');
+        if (dkim.recommendation) html += `<div class="finding-card warn">${esc(dkim.recommendation)}</div>`;
+        html += '</div>';
+
+        // DMARC
+        const dmarc = d.dmarc || {};
+        html += `<div class="result-section"><h4>DMARC ${dmarc.present?'<span class="tag tag-green">Present</span>':'<span class="tag tag-red">Missing</span>'}</h4>`;
+        if (dmarc.record) html += `<div class="result-panel"><pre>${esc(dmarc.record)}</pre></div>`;
+        if (dmarc.policy) html += `<div class="kv-grid mt-8"><span class="key">Policy</span><span class="value"><span class="tag ${dmarc.policy.policy==='reject'?'tag-green':dmarc.policy.policy==='quarantine'?'tag-yellow':'tag-red'}">${esc(dmarc.policy.policy||'none')}</span></span>${dmarc.policy.reports?`<span class="key">Reports</span><span class="value">${esc(dmarc.policy.reports)}</span>`:''}</div>`;
+        if (dmarc.recommendation) html += `<div class="finding-card warn">${esc(dmarc.recommendation)}</div>`;
+        html += '</div>';
+
+        return html;
+    }
+
+    function formatHttpMethods(d) {
+        if (d.error) return `<div class="finding-card vuln">${esc(d.error)}</div>`;
+        let html = `<div class="finding-card ${d.dangerous_count>0?'vuln':'safe'}"><strong>${d.dangerous_count>0?d.dangerous_count+' dangerous methods detected':'No dangerous methods detected'}</strong></div>`;
+        if (d.methods?.length) {
+            html += `<div class="result-section mt-8"><h4>HTTP Methods</h4><table><thead><tr><th>Method</th><th>Status</th><th>Allowed</th></tr></thead><tbody>`;
+            html += d.methods.map(m => `<tr><td><strong>${esc(m.method)}</strong></td><td><span class="tag ${m.status<400?'tag-green':'tag-red'}">${m.status||'-'}</span></td><td>${m.allowed?'<span class="tag tag-green">Yes</span>':'<span class="tag tag-red">No</span>'}</td></tr>`).join('');
+            html += '</tbody></table></div>';
+        }
+        if (d.dangerous?.length) {
+            html += `<div class="result-section"><h4>Dangerous Methods</h4>`;
+            html += d.dangerous.map(dg => `<div class="finding-card vuln"><strong>${esc(dg.method)}</strong> (${dg.risk})<div style="font-size:12px;color:var(--text-secondary);margin-top:4px">${esc(dg.reason)}</div></div>`).join('');
+            html += '</div>';
+        }
+        if (d.recommendation) html += `<div class="finding-card warn mt-8">${esc(d.recommendation)}</div>`;
+        return html;
+    }
+
+    function formatRobots(d) {
+        if (d.error) return `<div class="finding-card vuln">${esc(d.error)}</div>`;
+        let html = `<div class="finding-card ${d.found?'safe':'warn'}"><strong>${d.found?'robots.txt found':'robots.txt not found'}</strong>${d.content_length?` (${d.content_length} bytes)`:''}</div>`;
+        if (d.rules?.length) {
+            html += `<div class="result-section mt-8"><h4>Rules (${d.rule_count})</h4><table><thead><tr><th>Agent</th><th>Rule</th><th>Path</th></tr></thead><tbody>`;
+            html += d.rules.map(r => `<tr><td>${esc(r.agent)}</td><td><span class="tag ${r.rule==='Disallow'?'tag-red':'tag-green'}">${esc(r.rule)}</span></td><td style="font-family:monospace">${esc(r.path)}</td></tr>`).join('');
+            html += '</tbody></table></div>';
+        }
+        if (d.sensitive_paths?.length) {
+            html += `<div class="result-section"><h4>Sensitive Paths (${d.sensitive_count})</h4>`;
+            html += d.sensitive_paths.map(sp => `<div class="finding-card warn"><strong>${esc(sp.path)}</strong> (${sp.risk})<div style="font-size:12px;color:var(--text-secondary)">${esc(sp.reason)}</div></div>`).join('');
+            html += '</div>';
+        }
+        if (d.issues?.length) html += `<div class="result-section"><h4>Issues</h4>${d.issues.map(i=>`<div class="finding-card ${i.severity==='HIGH'?'vuln':'warn'}"><strong>${esc(i.type)}</strong>: ${esc(i.message)}</div>`).join('')}</div>`;
+        if (d.content) html += `<div class="result-section"><h4>Raw Content</h4><div class="result-panel"><pre>${esc(d.content)}</pre></div></div>`;
+        if (d.recommendation) html += `<div class="finding-card warn mt-8">${esc(d.recommendation)}</div>`;
+        return html;
+    }
+
+    function formatCAA(d) {
+        if (d.error) return `<div class="finding-card vuln">${esc(d.error)}</div>`;
+        let html = `<div class="finding-card ${d.found?'safe':'vuln'}"><strong>${d.found?'CAA records found':'No CAA records found'}</strong></div>`;
+        if (d.caa_records?.length) {
+            html += `<div class="result-section mt-8"><h4>CAA Records (${d.count})</h4>`;
+            html += d.caa_records.map(r => `<div class="kv-grid"><span class="key">${esc(r.tag)}</span><span class="value">${esc(r.value)}</span></div>`).join('');
+            html += '</div>';
+        }
+        if (d.issuers?.length) html += `<div class="result-section"><h4>Authorized CAs</h4>${d.issuers.map(i=>`<span class="tag tag-green">${esc(i)}</span>`).join(' ')}</div>`;
+        if (d.recommendation) html += `<div class="finding-card warn mt-8">${esc(d.recommendation)}</div>`;
+        return html;
+    }
+
     function showTargetPicker(toolId, targets) {
         const overlay = document.createElement('div');
         overlay.className = 'modal-overlay';
@@ -1191,7 +1343,7 @@
         const phaseDefs = {
             fast: [{name:'Recon',tools:['whois_lookup','dns_recon','http_probe']},{name:'Scan',tools:['port_scanner']}],
             deep: [{name:'Recon',tools:['whois_lookup','dns_recon','subdomain_enum','http_probe']},{name:'Scan',tools:['port_scanner','ssl_analyzer']},{name:'Web',tools:['header_analyzer','tech_detector','dir_fuzzer','cors_checker','csp_analyzer']},{name:'OSINT',tools:['reverse_dns','ct_logs','ip_geolocation']}],
-            nuclear: [{name:'Recon',tools:['whois_lookup','dns_recon','subdomain_enum','http_probe']},{name:'Scan',tools:['port_scanner','ssl_analyzer']},{name:'Web',tools:['header_analyzer','tech_detector','dir_fuzzer','sqli_scanner','xss_scanner','cors_checker','csp_analyzer','open_redirect']},{name:'Vuln',tools:['cve_search']},{name:'OSINT',tools:['asn_lookup','reverse_dns','ct_logs','shodan_lookup','ip_geolocation']}],
+            nuclear: [{name:'Recon',tools:['whois_lookup','dns_recon','subdomain_enum','http_probe','caa_checker']},{name:'Scan',tools:['port_scanner','ssl_analyzer']},{name:'Web',tools:['header_analyzer','tech_detector','dir_fuzzer','sqli_scanner','xss_scanner','cors_checker','csp_analyzer','open_redirect','http_methods','robots_analyzer']},{name:'Vuln',tools:['cve_search']},{name:'OSINT',tools:['asn_lookup','reverse_dns','ct_logs','shodan_lookup','ip_geolocation']},{name:'Email',tools:['dnssec_checker','email_security']}],
         };
         const phases = phaseDefs[selectedPipelineMode] || [];
 

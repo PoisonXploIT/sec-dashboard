@@ -8,15 +8,22 @@ Built with FastAPI + vanilla JS. No cloud dependencies, no accounts — runs ent
 
 ## Features
 
-**27 Security Tools** organized in 5 categories:
+**27 Security Tools** organized in 6 categories:
 
 | Category | Tools |
 |----------|-------|
-| Network Recon | Port Scanner, DNS Recon, Subdomain Enum, HTTP Probe, Whois Lookup, Ping Sweep, Traceroute, SSL Analyzer |
-| Web Security | Header Analyzer, Dir Fuzzer, SQLi Scanner, XSS Scanner, CORS Checker, CSP Analyzer, Tech Detector, Open Redirect |
+| Network Recon | Port Scanner, DNS Recon, Subdomain Enum, HTTP Probe, Whois Lookup, Ping Sweep, Traceroute, SSL Analyzer, CAA Checker |
+| Web Security | Header Analyzer, Dir Fuzzer, SQLi Scanner, XSS Scanner, CORS Checker, CSP Analyzer, Tech Detector, Open Redirect, HTTP Methods, Robots.txt Analyzer |
 | Vulnerability | CVE Search, Hash Checker, Password Audit |
 | System | Network Connections, Process Monitor, System Info |
 | OSINT | ASN Lookup, Reverse DNS, Certificate Transparency, Shodan Lookup, IP Geolocation |
+| Email Security | DNSSEC Checker, Email Security (SPF/DKIM/DMARC) |
+
+**Special tools** (don't require a target domain/IP):
+- **Hash Checker**: input a file hash (MD5/SHA-1/SHA-256) to check reputation
+- **Password Audit**: input a password to check strength and breach status
+- **CVE Search**: input a keyword or CVE ID to search NIST NVD
+- **System tools**: run on the local machine, no target needed
 
 **Pipeline Engine** — Multi-phase automated scans:
 - **Fast** (4 tools) — Quick recon + port scan
