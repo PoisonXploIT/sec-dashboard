@@ -811,7 +811,14 @@
         const card = document.getElementById(`tool-${toolId}`);
         if (card) { card.className = 'tool-card running'; }
         const resultDiv = document.getElementById('tool-result');
-        if (resultDiv) resultDiv.innerHTML = `<div class="card"><div class="skeleton" style="width:60%"></div><div class="skeleton" style="width:80%"></div><div class="skeleton" style="width:40%"></div></div>`;
+
+        // Warning for system tools on remote deployment
+        const systemTools = ['network_connections', 'process_monitor', 'system_info'];
+        if (systemTools.includes(toolId) && API_BASE === '' && location.hostname !== '127.0.0.1' && location.hostname !== 'localhost') {
+            if (resultDiv) resultDiv.innerHTML = `<div class="card" style="border-color:var(--yellow)"><div class="finding-card warn"><strong>Note:</strong> System tools report the server where the dashboard runs, not your local machine. This dashboard is running on a remote server. Run locally with <code>uvicorn backend.main:app --host 127.0.0.1 --port 8444</code> to scan your own machine.</div><div class="skeleton" style="width:60%"></div><div class="skeleton" style="width:80%"></div></div>`;
+        } else if (resultDiv) {
+            resultDiv.innerHTML = `<div class="card"><div class="skeleton" style="width:60%"></div><div class="skeleton" style="width:80%"></div><div class="skeleton" style="width:40%"></div></div>`;
+        }
 
         try {
             const result = await api.post('/scans', { target_id: targetId, tool: toolId, params: params, direct_input: directInput });
@@ -819,10 +826,15 @@
             if (card) { card.className = `tool-card ${toolResult.success ? 'success' : 'error'}`; const elapsed = card.querySelector('.elapsed'); if (!elapsed) { const e = document.createElement('span'); e.className='elapsed'; e.textContent=`${toolResult.elapsed_seconds}s`; card.appendChild(e); } else { elapsed.textContent=`${toolResult.elapsed_seconds}s`; } }
 
             if (resultDiv) {
+                // Add warning banner for system tools on remote
+                let warning = '';
+                if (systemTools.includes(toolId) && location.hostname !== '127.0.0.1' && location.hostname !== 'localhost') {
+                    warning = `<div class="finding-card warn mb-16"><strong>Remote server:</strong> This data is from the server hosting the dashboard, not your local machine. Run locally to scan your own system.</div>`;
+                }
                 if (toolResult.success) {
-                    resultDiv.innerHTML = `<div class="card"><div class="card-header"><div class="card-title">${toolResult.success?'':''} ${toolId}</div><span style="font-size:12px;color:var(--text-muted)">${toolResult.elapsed_seconds}s</span></div>${formatResult(toolId, toolResult.result)}</div>`;
+                    resultDiv.innerHTML = `<div class="card"><div class="card-header"><div class="card-title">${toolResult.success?'':''} ${toolId}</div><span style="font-size:12px;color:var(--text-muted)">${toolResult.elapsed_seconds}s</span></div>${warning}${formatResult(toolId, toolResult.result)}</div>`;
                 } else {
-                    resultDiv.innerHTML = `<div class="card"><div class="card-header"><div class="card-title"> ${toolId} -- Error</div></div><div class="result-panel"><pre style="color:var(--red)">${esc(toolResult.error || 'Unknown error')}</pre></div></div>`;
+                    resultDiv.innerHTML = `<div class="card"><div class="card-header"><div class="card-title"> ${toolId} -- Error</div></div>${warning}<div class="result-panel"><pre style="color:var(--red)">${esc(toolResult.error || 'Unknown error')}</pre></div></div>`;
                 }
             }
             // Refresh scan history in background
