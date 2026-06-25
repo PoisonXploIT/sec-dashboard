@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%230d1117'/><text x='50' y='70' font-size='60' text-anchor='middle' fill='%2358a6ff' font-family='monospace' font-weight='bold'>S</text></svg>">
     <title>Sec-Dashboard</title>
     <style>
         :root {
@@ -154,6 +155,7 @@
         .badge-running { background: rgba(210,153,34,0.2); color: var(--yellow); }
         .badge-completed { background: rgba(63,185,80,0.2); color: var(--green); }
         .badge-failed { background: rgba(248,81,73,0.2); color: var(--red); }
+        .badge-cancelled { background: rgba(139,148,158,0.2); color: var(--text-secondary); }
 
         /* Severity */
         .sev-critical { color: var(--red); font-weight: 700; }
@@ -208,7 +210,7 @@
         /* Search bar */
         .search-bar { position: relative; margin-bottom: 16px; }
         .search-bar input { padding-left: 36px; }
-        .search-bar::before { content: ''; position: absolute; left: 10px; top: 50%; transform: translateY(-50%); font-size: 14px; z-index: 1; }
+        .search-bar::before { content: '\1F50D'; position: absolute; left: 10px; top: 50%; transform: translateY(-50%); font-size: 14px; z-index: 1; }
 
         /* Formatted result cards */
         .kv-grid { display: grid; grid-template-columns: 140px 1fr; gap: 4px 12px; font-size: 13px; }
@@ -259,6 +261,11 @@
 
         .hidden { display: none !important; }
 
+        /* Pipeline live progress tags */
+        #pip-phases-live .tag.running { background: rgba(210,153,34,0.2); color: var(--yellow); animation: shimmer 1.5s infinite; }
+        #pip-phases-live .tag.done { background: rgba(63,185,80,0.2); color: var(--green); }
+        #pip-phases-live .tag.error { background: rgba(248,81,73,0.2); color: var(--red); }
+
         /* Dashboard responsive */
         @media (max-width: 1000px) {
             .dash-grid { grid-template-columns: 1fr !important; }
@@ -303,6 +310,9 @@
             <a class="nav-item" data-page="proxy" onclick="navigate('proxy')">
                 <span class="icon">Px</span> Proxy
             </a>
+            <a class="nav-item" data-page="webhooks" onclick="navigate('webhooks')">
+                <span class="icon">WH</span> Webhooks
+            </a>
             <div class="nav-section" style="margin-top: 16px;">Categories</div>
             <a class="nav-item" onclick="filterCategory('Network Recon')">
                 <span class="icon"></span> Network Recon
@@ -322,7 +332,7 @@
             <div style="flex:1"></div>
             <div style="padding: 16px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-muted);">
                 <div>27 tools • 5 categories</div>
-                <div>Pure Python • No deps</div>
+                <div>Webhooks • Cancel • SSRF protection</div>
             </div>
         </nav>
         <div class="main">
@@ -344,16 +354,45 @@
     const state = {
         page: 'dashboard', tools: [], targets: [], selectedTarget: null,
         pipelines: {}, ws: null, categoryFilter: null, toolSearch: '',
+        historyTab: 'scans', historySearch: '', historyOffset: 0, historyLimit: 50,
+        activePipelineId: null, activeScanId: null,
     };
+
+    // Restore selected target from localStorage
+    try { const saved = localStorage.getItem('sec_dash_target'); if (saved) state.selectedTarget = JSON.parse(saved); } catch {}
 
     // API base: same-origin by default, override via window.API_BASE for remote deployments
     const API_BASE = window.API_BASE || '';
     const WS_BASE = window.WS_BASE || '';
 
     const api = {
-        async get(path) { const r = await fetch(`${API_BASE}/api${path}`); return r.json(); },
-        async post(path, data) { const r = await fetch(`${API_BASE}/api${path}`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) }); return r.json(); },
-        async del(path) { const r = await fetch(`${API_BASE}/api${path}`, { method: 'DELETE' }); return r.json(); },
+        async get(path) {
+            const r = await fetch(`${API_BASE}/api${path}`);
+            if (!r.ok) {
+                let err;
+                try { err = await r.json(); } catch { err = {detail: r.statusText}; }
+                throw new Error(err.detail || `HTTP ${r.status}`);
+            }
+            return r.json();
+        },
+        async post(path, data) {
+            const r = await fetch(`${API_BASE}/api${path}`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) });
+            if (!r.ok) {
+                let err;
+                try { err = await r.json(); } catch { err = {detail: r.statusText}; }
+                throw new Error(err.detail || `HTTP ${r.status}`);
+            }
+            return r.json();
+        },
+        async del(path) {
+            const r = await fetch(`${API_BASE}/api${path}`, { method: 'DELETE' });
+            if (!r.ok) {
+                let err;
+                try { err = await r.json(); } catch { err = {detail: r.statusText}; }
+                throw new Error(err.detail || `HTTP ${r.status}`);
+            }
+            return r.json();
+        },
     };
 
     // WebSocket
@@ -374,11 +413,45 @@
     }
 
     function handleWSEvent(event) {
-        if (event.type === 'tool_start') toast(` Running ${event.tool}...`, 'info');
-        else if (event.type === 'tool_complete') { const s = event.success ? '' : ''; toast(`${s} ${event.tool} (${event.elapsed}s)`, event.success ? 'success' : 'error'); }
-        else if (event.type === 'pipeline_complete') { toast(` Pipeline completed in ${event.elapsed}s`, 'success'); if (state.page === 'pipeline') renderPipelinePage(); }
-        else if (event.type === 'phase_start') { /* handled by pollPipeline */ }
-        else if (event.type === 'scan_complete') { if (state.page === 'history') renderHistoryPage(); if (state.page === 'dashboard') renderDashboard(); }
+        if (event.type === 'tool_start') { toast(` Running ${event.tool}...`, 'info'); updatePipelineProgress(event); }
+        else if (event.type === 'tool_complete') { const s = event.success ? '' : ''; toast(`${s} ${event.tool} (${event.elapsed}s)`, event.success ? 'success' : 'error'); updatePipelineProgress(event); }
+        else if (event.type === 'phase_start') { updatePipelineProgress(event); }
+        else if (event.type === 'phase_complete') { updatePipelineProgress(event); }
+        else if (event.type === 'pipeline_complete') { toast(` Pipeline completed in ${event.elapsed}s`, 'success'); state.activePipelineId = null; if (state.page === 'pipeline') renderPipelinePage(); if (state.page === 'dashboard') renderDashboard(); }
+        else if (event.type === 'scan_start') { state.activeScanId = event.scan_id; }
+        else if (event.type === 'scan_complete') { state.activeScanId = null; if (state.page === 'history') renderHistoryPage(); if (state.page === 'dashboard') renderDashboard(); }
+    }
+
+    function updatePipelineProgress(event) {
+        if (!state.activePipelineId || event.pipeline_id !== state.activePipelineId) return;
+        const statusDiv = document.getElementById('pip-status');
+        const progressBar = document.getElementById('pip-progress');
+        const phasesContainer = document.getElementById('pip-phases-live');
+        if (!statusDiv) return;
+
+        if (event.type === 'phase_start') {
+            if (progressBar) progressBar.style.width = (event.progress || 0) + '%';
+            if (statusDiv) statusDiv.textContent = `Phase: ${event.phase} | Tools: ${(event.tools||[]).join(', ')}`;
+            if (phasesContainer) {
+                const phaseEl = phasesContainer.querySelector(`[data-phase="${event.phase}"]`);
+                if (phaseEl) phaseEl.classList.add('active');
+            }
+        } else if (event.type === 'tool_start') {
+            if (statusDiv) statusDiv.textContent = `Phase: ${event.phase} | Running: ${event.tool}`;
+        } else if (event.type === 'tool_complete') {
+            if (statusDiv) statusDiv.textContent = `Phase: ${event.phase} | ${event.tool} done (${event.success ? 'ok' : 'fail'}, ${event.elapsed}s)`;
+            if (phasesContainer) {
+                const toolEl = phasesContainer.querySelector(`[data-tool="${event.tool}"]`);
+                if (toolEl) { toolEl.classList.remove('running'); toolEl.classList.add(event.success ? 'done' : 'error'); }
+            }
+        } else if (event.type === 'phase_complete') {
+            if (progressBar) progressBar.style.width = (event.progress || 0) + '%';
+            if (statusDiv) statusDiv.textContent = `Phase complete: ${event.phase} (${event.progress}%)`;
+            if (phasesContainer) {
+                const phaseEl = phasesContainer.querySelector(`[data-phase="${event.phase}"]`);
+                if (phaseEl) { phaseEl.classList.remove('active'); phaseEl.classList.add('done'); }
+            }
+        }
     }
 
     // Navigation
@@ -387,9 +460,9 @@
         document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
         const navEl = document.querySelector(`[data-page="${page}"]`);
         if (navEl) navEl.classList.add('active');
-        const titles = {dashboard:'Dashboard',tools:'Security Tools',pipeline:'Pipeline Engine',targets:'Targets',history:'Scan History',guide:'User Guide',proxy:'Proxy / Anonymity'};
+        const titles = {dashboard:'Dashboard',tools:'Security Tools',pipeline:'Pipeline Engine',targets:'Targets',history:'Scan History',guide:'User Guide',proxy:'Proxy / Anonymity',webhooks:'Webhooks'};
         document.getElementById('page-title').textContent = titles[page] || page;
-        const renderers = {dashboard:renderDashboard,tools:renderTools,pipeline:renderPipelinePage,targets:renderTargets,history:renderHistoryPage,guide:renderGuide,proxy:renderProxy};
+        const renderers = {dashboard:renderDashboard,tools:renderTools,pipeline:renderPipelinePage,targets:renderTargets,history:renderHistoryPage,guide:renderGuide,proxy:renderProxy,webhooks:renderWebhooks};
         (renderers[page] || renderDashboard)();
     }
 
@@ -1034,6 +1107,7 @@
 
     function selectTargetAndRun(id, name, host, toolId) {
         state.selectedTarget = {id, name, host};
+        localStorage.setItem('sec_dash_target', JSON.stringify({id, name, host}));
         document.querySelector('.modal-overlay')?.remove();
         runTool(toolId);
     }
@@ -1099,7 +1173,41 @@
         const targetSelect = document.getElementById('pipeline-target');
         if (!targetSelect.value) { toast('Select a target', 'error'); return; }
         const result = await api.post('/pipelines', { target_id: parseInt(targetSelect.value), mode: selectedPipelineMode });
-        if (result.pipeline_id) { toast(`Pipeline started (ID: ${result.pipeline_id})`, 'success'); pollPipeline(result.pipeline_id); }
+        if (result.pipeline_id) {
+            state.activePipelineId = result.pipeline_id;
+            toast(`Pipeline started (ID: ${result.pipeline_id})`, 'success');
+            showPipelineLiveProgress(result.pipeline_id);
+            // Also poll as fallback in case WS events are missed
+            pollPipeline(result.pipeline_id);
+        }
+    }
+
+    function showPipelineLiveProgress(id) {
+        const progressDiv = document.getElementById('pipeline-progress');
+        if (!progressDiv) return;
+        progressDiv.className = '';
+
+        // Get phase definitions
+        const phaseDefs = {
+            fast: [{name:'Recon',tools:['whois_lookup','dns_recon','http_probe']},{name:'Scan',tools:['port_scanner']}],
+            deep: [{name:'Recon',tools:['whois_lookup','dns_recon','subdomain_enum','http_probe']},{name:'Scan',tools:['port_scanner','ssl_analyzer']},{name:'Web',tools:['header_analyzer','tech_detector','dir_fuzzer','cors_checker','csp_analyzer']},{name:'OSINT',tools:['reverse_dns','ct_logs','ip_geolocation']}],
+            nuclear: [{name:'Recon',tools:['whois_lookup','dns_recon','subdomain_enum','http_probe']},{name:'Scan',tools:['port_scanner','ssl_analyzer']},{name:'Web',tools:['header_analyzer','tech_detector','dir_fuzzer','sqli_scanner','xss_scanner','cors_checker','csp_analyzer','open_redirect']},{name:'Vuln',tools:['cve_search','password_audit']},{name:'OSINT',tools:['asn_lookup','reverse_dns','ct_logs','shodan_lookup','ip_geolocation']},{name:'System',tools:['network_connections','process_monitor','system_info']}],
+        };
+        const phases = phaseDefs[selectedPipelineMode] || [];
+
+        progressDiv.innerHTML = `<div class="card">
+            <div class="card-header"><div class="card-title">Pipeline Running...</div>
+                <button class="btn btn-sm btn-danger" onclick="cancelPipeline(${id})">Cancel</button>
+            </div>
+            <div class="progress-bar"><div class="progress-fill" id="pip-progress" style="width:0%"></div></div>
+            <div id="pip-status" style="font-size:12px;color:var(--text-secondary);margin-top:8px">Starting...</div>
+            <div id="pip-phases-live" style="margin-top:12px">
+                ${phases.map((p,i) => `<div class="phase-item" data-phase="${p.name}">
+                    <div class="phase-icon">${i+1}</div>
+                    <div><div class="phase-name">${p.name}</div><div class="phase-tools">${p.tools.map(t => `<span data-tool="${t}" class="tag" style="margin-right:4px">${t}</span>`).join('')}</div></div>
+                </div>`).join('')}
+            </div>
+        </div>`;
     }
 
     async function pollPipeline(id) {
@@ -1121,9 +1229,31 @@
     async function viewPipelineResult(id) {
         const data = await api.get(`/pipelines/${id}/result`);
         const content = document.getElementById('content');
+        const result = data.result || {};
+        const phases = result.phases || {};
+        let phasesHtml = '';
+
+        for (const [phaseName, tools] of Object.entries(phases)) {
+            let toolsHtml = '';
+            for (const [toolName, toolResult] of Object.entries(tools)) {
+                const success = toolResult?.success;
+                const elapsed = toolResult?.elapsed_seconds || 0;
+                const inner = success
+                    ? formatResult(toolName, toolResult.result)
+                    : `<div class="result-panel"><pre style="color:var(--red)">${esc(toolResult?.error || 'Unknown error')}</pre></div>`;
+                toolsHtml += `<div class="card" style="margin-bottom:8px">
+                    <div class="card-header"><div class="card-title">${success?'':''} ${esc(toolName)}</div><span style="font-size:12px;color:var(--text-muted)">${elapsed}s</span></div>
+                    ${inner}
+                </div>`;
+            }
+            phasesHtml += `<div class="card"><div class="card-header"><div class="card-title">${esc(phaseName)}</div></div>${toolsHtml}</div>`;
+        }
+
         content.innerHTML = `<button class="btn mb-16" onclick="renderPipelinePage()">Back</button>
-            <div class="card"><div class="card-header"><div class="card-title">Pipeline #${id} Result</div><div class="flex gap-8"><span class="badge-status badge-${data.status}">${data.status}</span> <button class="btn btn-sm" onclick="downloadJSON('/api/pipelines/${id}/export/json', 'pipeline_${id}.json')">JSON</button> <button class="btn btn-sm" onclick="downloadPDF('/api/pipelines/${id}/export/pdf', 'pipeline_${id}.pdf')">PDF</button> <button class="btn btn-sm btn-danger" onclick="deletePipeline(${id})">Delete</button></div></div>
-            <div class="result-panel" style="max-height:80vh"><pre>${esc(JSON.stringify(data.result, null, 2))}</pre></div></div>`;
+            <div class="card"><div class="card-header"><div class="card-title">Pipeline #${id} -- ${esc(data.mode||'')}</div><div class="flex gap-8"><span class="badge-status badge-${data.status}">${data.status}</span> <button class="btn btn-sm" onclick="downloadJSON('/api/pipelines/${id}/export/json', 'pipeline_${id}.json')">JSON</button> <button class="btn btn-sm" onclick="downloadPDF('/api/pipelines/${id}/export/pdf', 'pipeline_${id}.pdf')">PDF</button> <button class="btn btn-sm btn-danger" onclick="deletePipeline(${id})">Delete</button></div></div>
+            <div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px">Target: ${esc(data.target_name||'')} | Elapsed: ${result.elapsed_seconds||'?'}s | Tools: ${result.total_tools||'?'}</div>
+            </div>
+            ${phasesHtml || '<div class="empty-state"><h3>No results data</h3><p>Pipeline may still be running or failed without results.</p></div>'}`;
     }
 
     async function deletePipeline(id) {
@@ -1153,7 +1283,7 @@
             </div>`;
     }
 
-    function selectTarget(id, name, host) { state.selectedTarget = {id, name, host}; toast(`Target selected: ${name}`, 'success'); renderTargets(); }
+    function selectTarget(id, name, host) { state.selectedTarget = {id, name, host}; localStorage.setItem('sec_dash_target', JSON.stringify({id, name, host})); toast(`Target selected: ${name}`, 'success'); renderTargets(); }
 
     function showAddTarget() {
         const overlay = document.createElement('div');
@@ -1188,23 +1318,76 @@
     // ── History ────────────────────────────────
     async function renderHistoryPage() {
         const content = document.getElementById('content');
-        const [scans, pipelines] = await Promise.all([api.get('/scans'), api.get('/pipelines/history')]);
+        content.innerHTML = '<div class="skeleton" style="height:200px;margin-bottom:16px"></div>'.repeat(2);
+
+        const scansPromise = api.get(`/scans?offset=${state.historyOffset}&limit=${state.historyLimit}`);
+        const pipelinesPromise = api.get('/pipelines/history');
+        const [scans, pipelines] = await Promise.all([scansPromise, pipelinesPromise]);
+
+        const allScans = scans.scans || [];
+        const allPipelines = pipelines.pipelines || [];
+
+        // Filter scans by search
+        let filteredScans = allScans;
+        if (state.historySearch) {
+            const q = state.historySearch.toLowerCase();
+            filteredScans = allScans.filter(s =>
+                (s.tool||'').toLowerCase().includes(q) ||
+                (s.target_name||'').toLowerCase().includes(q) ||
+                (s.target_host||'').toLowerCase().includes(q) ||
+                (s.status||'').toLowerCase().includes(q)
+            );
+        }
+
+        // Filter pipelines by search
+        let filteredPipelines = allPipelines;
+        if (state.historySearch) {
+            const q = state.historySearch.toLowerCase();
+            filteredPipelines = allPipelines.filter(p =>
+                (p.mode||'').toLowerCase().includes(q) ||
+                (p.target_name||'').toLowerCase().includes(q) ||
+                (p.target_host||'').toLowerCase().includes(q) ||
+                (p.status||'').toLowerCase().includes(q)
+            );
+        }
+
+        const activeTab = state.historyTab || 'scans';
+
         content.innerHTML = `
             <div class="flex items-center justify-between mb-16">
                 <div class="tabs" style="margin-bottom:0;border-bottom:none">
-                    <div class="tab active">Scans (${scans.scans?.length||0})</div>
-                    <div class="tab">Pipelines (${pipelines.pipelines?.length||0})</div>
+                    <div class="tab ${activeTab==='scans'?'active':''}" onclick="state.historyTab='scans';renderHistoryPage()">Scans (${allScans.length})</div>
+                    <div class="tab ${activeTab==='pipelines'?'active':''}" onclick="state.historyTab='pipelines';renderHistoryPage()">Pipelines (${allPipelines.length})</div>
                 </div>
                 <div class="flex gap-8">
                     <button class="btn btn-sm" onclick="downloadJSON('/api/export/all/json', 'sec-dashboard-export.json')">Export All (JSON)</button>
                     <button class="btn btn-sm" onclick="downloadPDF('/api/export/all/pdf', 'sec-dashboard-export.pdf')">Export All (PDF)</button>
                 </div>
             </div>
-            <div class="card">
-                ${scans.scans?.length ? `<table><thead><tr><th>Tool</th><th>Target</th><th>Status</th><th>Started</th><th>Actions</th></tr></thead><tbody>
-                    ${scans.scans.map(s => `<tr><td>${esc(s.tool)}</td><td>${esc(s.target_name||'')}</td><td><span class="badge-status badge-${s.status}">${s.status}</span></td><td>${s.started_at||''}</td><td class="flex gap-8">${s.result?`<button class="btn btn-sm" onclick="viewScanResult(${s.id})">View</button>`:''} <button class="btn btn-sm" onclick="downloadJSON('/api/scans/${s.id}/export/json', 'scan_${s.id}.json')">JSON</button> <button class="btn btn-sm" onclick="downloadPDF('/api/scans/${s.id}/export/pdf', 'scan_${s.id}.pdf')">PDF</button> <button class="btn btn-sm btn-danger" onclick="deleteScan(${s.id})">Del</button></td></tr>`).join('')}
-                </tbody></table>` : `<div class="empty-state"><h3>No scans yet</h3><p>Run a tool or pipeline to see results here</p></div>`}
-            </div>`;
+            <div class="search-bar mb-16">
+                <input type="text" placeholder="Search by tool, target, status..." value="${esc(state.historySearch)}" oninput="state.historySearch=this.value;renderHistoryPage()">
+            </div>
+            ${activeTab === 'scans' ? `
+                <div class="card">
+                    ${filteredScans.length ? `<table><thead><tr><th>Tool</th><th>Target</th><th>Status</th><th>Started</th><th>Actions</th></tr></thead><tbody>
+                        ${filteredScans.map(s => `<tr><td>${esc(s.tool)}</td><td>${esc(s.target_name||'')} <span style="color:var(--text-muted);font-size:11px">${esc(s.target_host||'')}</span></td><td><span class="badge-status badge-${s.status}">${s.status}</span></td><td style="font-size:12px;color:var(--text-muted)">${timeAgo(s.started_at)}</td><td class="flex gap-8">${s.result?`<button class="btn btn-sm" onclick="viewScanResult(${s.id})">View</button>`:''} <button class="btn btn-sm" onclick="downloadJSON('/api/scans/${s.id}/export/json', 'scan_${s.id}.json')">JSON</button> <button class="btn btn-sm" onclick="downloadPDF('/api/scans/${s.id}/export/pdf', 'scan_${s.id}.pdf')">PDF</button> ${s.status==='running'?`<button class="btn btn-sm btn-danger" onclick="cancelScan(${s.id})">Cancel</button>`:''} <button class="btn btn-sm btn-danger" onclick="deleteScan(${s.id})">Del</button></td></tr>`).join('')}
+                    </tbody></table>
+                    <div class="flex items-center justify-between mt-16">
+                        <span style="font-size:12px;color:var(--text-muted)">Showing ${filteredScans.length} of ${allScans.length} scans</span>
+                        <div class="flex gap-8">
+                            <button class="btn btn-sm" onclick="state.historyOffset=Math.max(0,state.historyOffset-state.historyLimit);renderHistoryPage()" ${state.historyOffset===0?'disabled':''}>Prev</button>
+                            <button class="btn btn-sm" onclick="state.historyOffset+=state.historyLimit;renderHistoryPage()" ${allScans.length<state.historyLimit?'disabled':''}>Next</button>
+                        </div>
+                    </div>` : `<div class="empty-state"><h3>No scans yet</h3><p>Run a tool or pipeline to see results here</p></div>`}
+                </div>
+            ` : `
+                <div class="card">
+                    ${filteredPipelines.length ? `<table><thead><tr><th>Mode</th><th>Target</th><th>Status</th><th>Started</th><th>Actions</th></tr></thead><tbody>
+                        ${filteredPipelines.map(p => `<tr><td><strong>${esc(p.mode)}</strong></td><td>${esc(p.target_name||'')} <span style="color:var(--text-muted);font-size:11px">${esc(p.target_host||'')}</span></td><td><span class="badge-status badge-${p.status}">${p.status}</span></td><td style="font-size:12px;color:var(--text-muted)">${timeAgo(p.started_at)}</td><td class="flex gap-8"><button class="btn btn-sm" onclick="viewPipelineResult(${p.id})">View</button> <button class="btn btn-sm" onclick="downloadJSON('/api/pipelines/${p.id}/export/json', 'pipeline_${p.id}.json')">JSON</button> <button class="btn btn-sm" onclick="downloadPDF('/api/pipelines/${p.id}/export/pdf', 'pipeline_${p.id}.pdf')">PDF</button> ${p.status==='running'?`<button class="btn btn-sm btn-danger" onclick="cancelPipeline(${p.id})">Cancel</button>`:''} <button class="btn btn-sm btn-danger" onclick="deletePipeline(${p.id})">Del</button></td></tr>`).join('')}
+                    </tbody></table>` : `<div class="empty-state"><h3>No pipelines yet</h3><p>Run a pipeline to see results here</p></div>`}
+                </div>
+            `}
+        `;
     }
 
     async function viewScanResult(id) {
@@ -1467,6 +1650,136 @@
         } else {
             resultDiv.innerHTML = '<div class="finding-card vuln">Error: ' + esc(data.error || 'Could not connect') + '</div>';
         }
+    }
+
+    async function cancelScan(id) {
+        try {
+            await api.post(`/scans/${id}/cancel`, {});
+            toast('Scan cancelled', 'info');
+            renderHistoryPage();
+        } catch (e) { toast('Cancel failed: ' + e.message, 'error'); }
+    }
+
+    async function cancelPipeline(id) {
+        try {
+            await api.post(`/pipelines/${id}/cancel`, {});
+            toast('Pipeline cancelled', 'info');
+            state.activePipelineId = null;
+            renderPipelinePage();
+        } catch (e) { toast('Cancel failed: ' + e.message, 'error'); }
+    }
+
+    // ── Webhooks ───────────────────────────────
+    async function renderWebhooks() {
+        const content = document.getElementById('content');
+        content.innerHTML = '<div class="skeleton" style="height:200px;margin-bottom:16px"></div>';
+        const data = await api.get('/webhooks');
+        const hooks = data.webhooks || [];
+
+        content.innerHTML = `
+            <div class="card">
+                <div class="card-header"><div class="card-title">Webhook Notifications</div><button class="btn btn-primary" onclick="showAddWebhook()">Add Webhook</button></div>
+                <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px">Get notified when scans and pipelines complete. Supports Discord, Slack, and generic HTTP webhooks.</p>
+                ${hooks.length ? hooks.map(h => `
+                    <div class="target-item">
+                        <div>
+                            <div class="name">${esc(h.name)} <span class="tag tag-accent" style="margin-left:4px">${esc(h.type)}</span> ${h.enabled?'<span class="tag tag-green">Active</span>':'<span class="tag tag-red">Disabled</span>'}</div>
+                            <div class="host">${esc(h.url)}</div>
+                            <div style="font-size:11px;color:var(--text-muted);margin-top:2px">Events: ${(JSON.parse(h.events||'[]')).join(', ')}</div>
+                        </div>
+                        <div class="actions">
+                            <button class="btn btn-sm" onclick="testWebhook(${h.id})">Test</button>
+                            <button class="btn btn-sm" onclick="toggleWebhook(${h.id}, ${h.enabled?0:1})">${h.enabled?'Disable':'Enable'}</button>
+                            <button class="btn btn-sm btn-danger" onclick="deleteWebhook(${h.id})">Del</button>
+                        </div>
+                    </div>
+                `).join('') : '<div class="empty-state"><h3>No webhooks configured</h3><p>Add a webhook to get notifications when scans complete</p></div>'}
+            </div>
+            <div class="card">
+                <div class="card-header"><div class="card-title">Setup Guide</div></div>
+                <div style="font-size:13px;line-height:1.8">
+                    <p><strong>Discord</strong>: Go to Server Settings > Integrations > Webhooks > New Webhook. Copy the URL and paste it here. Select type "discord".</p>
+                    <p><strong>Slack</strong>: Go to your Slack workspace > Apps > Incoming Webhooks > Add Configuration. Copy the URL and select type "slack".</p>
+                    <p><strong>Generic</strong>: Any HTTP endpoint that accepts POST with JSON body. Payload includes event type, timestamp, and scan data.</p>
+                </div>
+            </div>
+        `;
+    }
+
+    function showAddWebhook() {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.innerHTML = `<div class="modal"><h3>Add Webhook</h3>
+            <div class="input-group"><label>Name</label><input type="text" id="wh-name" placeholder="My Discord Server"></div>
+            <div class="input-group"><label>URL</label><input type="text" id="wh-url" placeholder="https://discord.com/api/webhooks/..."></div>
+            <div class="input-group"><label>Type</label>
+                <select id="wh-type">
+                    <option value="generic">Generic (JSON POST)</option>
+                    <option value="discord">Discord</option>
+                    <option value="slack">Slack</option>
+                </select>
+            </div>
+            <div class="input-group"><label>Events</label>
+                <div style="display:flex;gap:16px;font-size:13px">
+                    <label><input type="checkbox" id="wh-evt-scan" checked> scan_complete</label>
+                    <label><input type="checkbox" id="wh-evt-pipe" checked> pipeline_complete</label>
+                </div>
+            </div>
+            <div class="modal-actions"><button class="btn" onclick="this.closest('.modal-overlay').remove()">Cancel</button><button class="btn btn-primary" onclick="addWebhook()">Add</button></div>
+        </div>`;
+        document.body.appendChild(overlay);
+        document.getElementById('wh-name').focus();
+    }
+
+    async function addWebhook() {
+        const name = document.getElementById('wh-name').value.trim();
+        const url = document.getElementById('wh-url').value.trim();
+        const type = document.getElementById('wh-type').value;
+        const events = [];
+        if (document.getElementById('wh-evt-scan').checked) events.push('scan_complete');
+        if (document.getElementById('wh-evt-pipe').checked) events.push('pipeline_complete');
+        if (!name || !url) { toast('Fill name and URL', 'error'); return; }
+        try {
+            await api.post('/webhooks', {name, url, type, events, enabled: true});
+            document.querySelector('.modal-overlay')?.remove();
+            toast('Webhook added', 'success');
+            renderWebhooks();
+        } catch (e) { toast('Error: ' + e.message, 'error'); }
+    }
+
+    async function testWebhook(id) {
+        toast('Sending test...', 'info');
+        try {
+            const result = await api.post(`/webhooks/${id}/test`, {});
+            if (result.ok) toast('Test sent successfully', 'success');
+            else toast('Test failed: ' + (result.error || `HTTP ${result.status_code}`), 'error');
+        } catch (e) { toast('Test failed: ' + e.message, 'error'); }
+    }
+
+    async function toggleWebhook(id, enable) {
+        try {
+            // Fetch current webhook data, then PUT with updated enabled flag
+            const data = await api.get('/webhooks');
+            const hook = (data.webhooks || []).find(h => h.id === id);
+            if (!hook) { toast('Webhook not found', 'error'); return; }
+            let events = ['scan_complete', 'pipeline_complete'];
+            try { events = JSON.parse(hook.events || '[]'); } catch {}
+            await api.put(`/webhooks/${id}`, {
+                name: hook.name, url: hook.url, type: hook.type,
+                events: events, enabled: !!enable
+            });
+            toast(enable ? 'Webhook enabled' : 'Webhook disabled', 'success');
+            renderWebhooks();
+        } catch (e) { toast('Toggle failed: ' + e.message, 'error'); }
+    }
+
+    async function deleteWebhook(id) {
+        if (!confirm('Delete this webhook?')) return;
+        try {
+            await api.del(`/webhooks/${id}`);
+            toast('Webhook deleted', 'success');
+            renderWebhooks();
+        } catch (e) { toast('Delete failed: ' + e.message, 'error'); }
     }
 
     // Init

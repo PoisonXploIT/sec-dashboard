@@ -35,6 +35,16 @@ CREATE TABLE IF NOT EXISTS pipelines (
     finished_at TIMESTAMP,
     FOREIGN KEY (target_id) REFERENCES targets(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS webhooks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    url TEXT NOT NULL,
+    type TEXT DEFAULT 'generic',
+    enabled INTEGER DEFAULT 1,
+    events TEXT DEFAULT '["scan_complete","pipeline_complete"]',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 

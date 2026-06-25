@@ -30,6 +30,12 @@ Built with FastAPI + vanilla JS. No cloud dependencies, no accounts — runs ent
 - Target management with persistent scan history
 - Dark theme responsive UI
 - Built-in integrated guide and API reference
+- Cancel running scans and pipelines
+- Webhook notifications (Discord, Slack, generic HTTP)
+- SSRF protection in remote mode (blocks private/loopback/metadata IPs)
+- Search and pagination in scan history
+- Pipeline results with per-tool formatted output
+- Favicon and search bar icon
 
 ---
 
@@ -91,20 +97,30 @@ sec-dashboard/
 | GET | `/api/tools` | List all available tools |
 | POST | `/api/tools/{id}/run` | Run a single tool |
 | GET | `/api/targets` | List targets |
-| POST | `/api/targets` | Create target |
+| POST | `/api/targets` | Create target (SSRF-validated in remote mode) |
 | DELETE | `/api/targets/{id}` | Delete target and its scans |
-| GET | `/api/scans` | List scan history |
+| GET | `/api/scans` | List scans (supports `?offset=0&limit=50&target_id=N`) |
 | POST | `/api/scans` | Create and execute a scan |
 | DELETE | `/api/scans/{id}` | Delete a scan |
+| POST | `/api/scans/{id}/cancel` | Cancel a running scan |
 | GET | `/api/scans/{id}/export/json` | Export scan as JSON |
 | GET | `/api/scans/{id}/export/pdf` | Export scan as PDF |
 | GET | `/api/pipelines` | List pipeline configurations |
 | POST | `/api/pipelines` | Execute a pipeline |
 | GET | `/api/pipelines/history` | Pipeline execution history |
+| POST | `/api/pipelines/{id}/cancel` | Cancel a running pipeline |
+| GET | `/api/pipelines/{id}/result` | Get pipeline result |
+| GET | `/api/pipelines/{id}/export/json` | Export pipeline as JSON |
+| GET | `/api/pipelines/{id}/export/pdf` | Export pipeline as PDF |
+| GET | `/api/webhooks` | List webhooks |
+| POST | `/api/webhooks` | Create webhook |
+| PUT | `/api/webhooks/{id}` | Update webhook |
+| DELETE | `/api/webhooks/{id}` | Delete webhook |
+| POST | `/api/webhooks/{id}/test` | Send test notification |
 | GET | `/api/export/all/json` | Bulk JSON export |
 | GET | `/api/export/all/pdf` | Bulk PDF report |
 | WS | `/ws` | Real-time scan events |
-| DELETE | `/api/reset` | Reset all data |
+| DELETE | `/api/reset?confirm=true` | Reset all data (requires confirmation) |
 
 ---
 

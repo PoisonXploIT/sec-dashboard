@@ -22,6 +22,8 @@ from backend.report import (
     generate_scan_json, generate_pipeline_json, generate_all_json,
     generate_scan_pdf, generate_pipeline_pdf, generate_all_pdf,
 )
+from backend.validators import validate_target, is_remote_mode
+from backend import webhooks
 
 app = FastAPI(title="Sec-Dashboard", version="1.0.0")
 
@@ -227,6 +229,10 @@ async def export_all_pdf_endpoint():
 # ── WebSocket connections ──────────────────────────────────────
 ws_clients: set[WebSocket] = set()
 
+# Track running scans and pipelines for cancellation
+_running_scans: dict[int, asyncio.Task] = {}
+_running_pipelines: dict[int, asyncio.Task] = {}
+
 
 async def broadcast(event: dict):
     """Send event to all connected WebSocket clients."""
@@ -287,6 +293,7 @@ async def status():
         "tools_count": len(TOOLS),
         "categories": CATEGORIES,
         "uptime": time.time(),
+        "remote_mode": is_remote_mode(),
     }
 
 
@@ -405,6 +412,11 @@ async def list_targets():
 
 @app.post("/api/targets")
 async def create_target(body: TargetCreate):
+    # SSRF validation
+    valid, reason = validate_target(body.host)
+    if not valid:
+        raise HTTPException(400, f"Invalid target: {reason}")
+
     db = await get_db()
     try:
         cursor = await db.execute(
@@ -432,19 +444,22 @@ async def delete_target(target_id: int):
 
 # ── Scans ──────────────────────────────────────────────────────
 @app.get("/api/scans")
-async def list_scans(target_id: int = None):
+async def list_scans(target_id: int = None, offset: int = 0, limit: int = 50):
     db = await get_db()
     try:
+        limit = min(limit, 200)  # cap at 200
+        offset = max(offset, 0)
         if target_id:
             cursor = await db.execute(
-                "SELECT * FROM scans WHERE target_id = ? ORDER BY started_at DESC",
-                (target_id,)
+                "SELECT * FROM scans WHERE target_id = ? ORDER BY started_at DESC LIMIT ? OFFSET ?",
+                (target_id, limit, offset)
             )
         else:
             cursor = await db.execute(
                 "SELECT s.*, t.name as target_name, t.host as target_host "
                 "FROM scans s JOIN targets t ON s.target_id = t.id "
-                "ORDER BY s.started_at DESC LIMIT 50"
+                "ORDER BY s.started_at DESC LIMIT ? OFFSET ?",
+                (limit, offset)
             )
         rows = await cursor.fetchall()
         return {"scans": [dict(r) for r in rows]}
@@ -472,23 +487,68 @@ async def create_scan(body: ScanCreate):
         )
         scan_id = cursor.lastrowid
         await db.commit()
-
-        # Run tool
-        await broadcast({"type": "scan_start", "scan_id": scan_id, "tool": body.tool})
-        result = await run_tool(body.tool, target["host"], **body.params)
-
-        # Update scan record
-        status = "completed" if result.get("success") else "failed"
-        await db.execute(
-            "UPDATE scans SET status = ?, result = ?, finished_at = ? WHERE id = ?",
-            (status, json.dumps(result), datetime.utcnow().isoformat(), scan_id)
-        )
-        await db.commit()
-
-        await broadcast({"type": "scan_complete", "scan_id": scan_id, "status": status})
-        return {"scan_id": scan_id, "status": status, "result": result}
     finally:
         await db.close()
+
+    # Run tool in background task so we can track/cancel it
+    await broadcast({"type": "scan_start", "scan_id": scan_id, "tool": body.tool})
+
+    async def _run_scan():
+        try:
+            result = await run_tool(body.tool, target["host"], **body.params)
+            db2 = await get_db()
+            try:
+                status = "completed" if result.get("success") else "failed"
+                await db2.execute(
+                    "UPDATE scans SET status = ?, result = ?, finished_at = ? WHERE id = ?",
+                    (status, json.dumps(result), datetime.utcnow().isoformat(), scan_id)
+                )
+                await db2.commit()
+            finally:
+                await db2.close()
+
+            await broadcast({"type": "scan_complete", "scan_id": scan_id, "status": status, "tool": body.tool})
+            # Webhook notification
+            await webhooks.notify("scan_complete", {
+                "scan_id": scan_id,
+                "tool": body.tool,
+                "target": target["host"],
+                "status": status,
+                "elapsed_seconds": result.get("elapsed_seconds", 0),
+            })
+            return {"scan_id": scan_id, "status": status, "result": result}
+        except asyncio.CancelledError:
+            db2 = await get_db()
+            try:
+                await db2.execute(
+                    "UPDATE scans SET status = 'cancelled', finished_at = ? WHERE id = ?",
+                    (datetime.utcnow().isoformat(), scan_id)
+                )
+                await db2.commit()
+            finally:
+                await db2.close()
+            await broadcast({"type": "scan_complete", "scan_id": scan_id, "status": "cancelled", "tool": body.tool})
+            raise
+        except Exception as e:
+            db2 = await get_db()
+            try:
+                await db2.execute(
+                    "UPDATE scans SET status = 'failed', result = ?, finished_at = ? WHERE id = ?",
+                    (json.dumps({"error": str(e), "success": False}), datetime.utcnow().isoformat(), scan_id)
+                )
+                await db2.commit()
+            finally:
+                await db2.close()
+            await broadcast({"type": "scan_complete", "scan_id": scan_id, "status": "failed", "tool": body.tool})
+            return {"scan_id": scan_id, "status": "failed", "error": str(e)}
+        finally:
+            _running_scans.pop(scan_id, None)
+
+    task = asyncio.create_task(_run_scan())
+    _running_scans[scan_id] = task
+
+    # Wait for it to complete (blocking endpoint -- returns when done)
+    return await task
 
 
 @app.delete("/api/scans/{scan_id}")
@@ -500,6 +560,16 @@ async def delete_scan(scan_id: int):
         return {"deleted": True}
     finally:
         await db.close()
+
+
+@app.post("/api/scans/{scan_id}/cancel")
+async def cancel_scan(scan_id: int):
+    """Cancel a running scan."""
+    task = _running_scans.get(scan_id)
+    if not task:
+        return {"error": "Scan not running or not found"}
+    task.cancel()
+    return {"cancelled": True, "scan_id": scan_id}
 
 
 # ── Pipelines ──────────────────────────────────────────────────
@@ -563,6 +633,28 @@ async def create_pipeline(body: PipelineCreate):
                     await db2.commit()
                 finally:
                     await db2.close()
+                # Webhook notification
+                await webhooks.notify("pipeline_complete", {
+                    "pipeline_id": pipeline_id,
+                    "mode": body.mode,
+                    "target": target["host"],
+                    "status": result.get("status", "completed"),
+                    "elapsed_seconds": result.get("elapsed_seconds", 0),
+                    "total_tools": result.get("total_tools", 0),
+                })
+            except asyncio.CancelledError:
+                try:
+                    db2 = await get_db()
+                    await db2.execute(
+                        "UPDATE pipelines SET status = 'cancelled', finished_at = ? WHERE id = ?",
+                        (datetime.utcnow().isoformat(), pipeline_id)
+                    )
+                    await db2.commit()
+                    await db2.close()
+                except Exception:
+                    pass
+                await broadcast({"type": "pipeline_complete", "pipeline_id": pipeline_id, "status": "cancelled"})
+                raise
             except Exception as e:
                 # Mark as failed if anything goes wrong
                 try:
@@ -575,8 +667,11 @@ async def create_pipeline(body: PipelineCreate):
                     await db2.close()
                 except Exception:
                     pass
+            finally:
+                _running_pipelines.pop(pipeline_id, None)
 
-        asyncio.create_task(run_and_save())
+        task = asyncio.create_task(run_and_save())
+        _running_pipelines[pipeline_id] = task
         return {"pipeline_id": pipeline_id, "mode": body.mode, "status": "started"}
     finally:
         await db.close()
@@ -609,14 +704,63 @@ async def delete_pipeline(pipeline_id: int):
         await db.close()
 
 
+@app.post("/api/pipelines/{pipeline_id}/cancel")
+async def cancel_pipeline(pipeline_id: int):
+    """Cancel a running pipeline."""
+    task = _running_pipelines.get(pipeline_id)
+    if not task:
+        return {"error": "Pipeline not running or not found"}
+    task.cancel()
+    return {"cancelled": True, "pipeline_id": pipeline_id}
+
+
+# ── Webhooks ───────────────────────────────────────────────────
+class WebhookCreate(BaseModel):
+    name: str
+    url: str
+    type: str = "generic"  # generic, discord, slack
+    events: list[str] = ["scan_complete", "pipeline_complete"]
+    enabled: bool = True
+
+
+@app.get("/api/webhooks")
+async def list_webhooks_endpoint():
+    return {"webhooks": await webhooks.list_webhooks()}
+
+
+@app.post("/api/webhooks")
+async def create_webhook_endpoint(body: WebhookCreate):
+    return await webhooks.create_webhook(body.name, body.url, body.type, body.events, body.enabled)
+
+
+@app.put("/api/webhooks/{webhook_id}")
+async def update_webhook_endpoint(webhook_id: int, body: WebhookCreate):
+    return await webhooks.update_webhook(webhook_id, name=body.name, url=body.url,
+                                         type=body.type, events=body.events, enabled=body.enabled)
+
+
+@app.delete("/api/webhooks/{webhook_id}")
+async def delete_webhook_endpoint(webhook_id: int):
+    return await webhooks.delete_webhook(webhook_id)
+
+
+@app.post("/api/webhooks/{webhook_id}/test")
+async def test_webhook_endpoint(webhook_id: int):
+    return await webhooks.test_webhook(webhook_id)
+
+
 # ── Reset ──────────────────────────────────────────────────────
 @app.delete("/api/reset")
-async def reset_all():
+async def reset_all(confirm: bool = Query(False)):
+    """Reset all data. Requires ?confirm=true to prevent accidental wipes."""
+    if not confirm:
+        raise HTTPException(400, "Confirmation required: add ?confirm=true to reset all data")
     db = await get_db()
     try:
         await db.execute("DELETE FROM scans")
         await db.execute("DELETE FROM pipelines")
         await db.execute("DELETE FROM targets")
+        await db.execute("DELETE FROM webhooks")
         await db.commit()
         return {"reset": True}
     finally:
