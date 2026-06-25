@@ -39,6 +39,7 @@ Built with FastAPI + vanilla JS. No cloud dependencies, no accounts — runs ent
 - Built-in integrated guide and API reference
 - Cancel running scans and pipelines
 - Webhook notifications (Discord, Slack, generic HTTP)
+- Splunk integration with auto-indexing via REST API
 - SSRF protection in remote mode (blocks private/loopback/metadata IPs)
 - Search and pagination in scan history
 - Pipeline results with per-tool formatted output
@@ -78,6 +79,9 @@ sec-dashboard/
 │   ├── report.py        # JSON and PDF report generators
 │   ├── proxy.py         # TOR/SOCKS5 proxy management
 │   ├── models.py        # SQLite schema
+│   ├── validators.py    # SSRF protection / target validation
+│   ├── webhooks.py      # Discord/Slack/generic webhook notifications
+│   ├── splunk.py        # Splunk REST API auto-indexing
 │   └── tools/
 │       ├── network.py   # Port scanner, DNS, subdomain, SSL, etc.
 │       ├── web.py       # Headers, tech detection, SQLi, XSS, etc.
@@ -124,6 +128,10 @@ sec-dashboard/
 | PUT | `/api/webhooks/{id}` | Update webhook |
 | DELETE | `/api/webhooks/{id}` | Delete webhook |
 | POST | `/api/webhooks/{id}/test` | Send test notification |
+| GET | `/api/splunk` | Get Splunk config (password masked) |
+| POST | `/api/splunk` | Save Splunk config |
+| POST | `/api/splunk/test` | Test Splunk connection + send test event |
+| POST | `/api/splunk/export-all` | Bulk export all scans/pipelines to Splunk |
 | GET | `/api/export/all/json` | Bulk JSON export |
 | GET | `/api/export/all/pdf` | Bulk PDF report |
 | WS | `/ws` | Real-time scan events |

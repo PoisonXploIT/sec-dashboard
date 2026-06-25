@@ -1607,7 +1607,8 @@
                     <p><strong>5. Cancel running scans</strong> -- If a scan or pipeline is running and you need to stop it, click the <strong>Cancel</strong> button that appears next to running items in History or Pipeline pages.</p>
                     <p><strong>6. Export</strong> -- Every scan and pipeline has <strong>JSON</strong> and <strong>PDF</strong> export buttons. Use <strong>Export All (JSON)</strong> in History for bulk export (Splunk/SIEM compatible).</p>
                     <p><strong>7. Webhooks</strong> -- Go to <strong>Webhooks</strong> in the sidebar to configure notifications. Add a Discord, Slack, or generic HTTP webhook URL. You'll get notified when scans and pipelines complete. Click <strong>Test</strong> to verify the webhook works.</p>
-                    <p><strong>8. Delete</strong> -- Each row has a <strong>Del</strong> button with confirmation. You can delete scans, pipelines, targets, and webhooks individually.</p>
+                    <p><strong>8. Splunk</strong> -- Go to <strong>Splunk</strong> in the sidebar to configure auto-indexing. Enter your Splunk REST API URL (default: <code>https://127.0.0.1:8089</code>), username, password, and index name. Click <strong>Test Connection</strong> to verify, then enable auto-indexing. Every scan and pipeline that completes sends an event to Splunk automatically. Use <strong>Export All History</strong> for initial bulk sync.</p>
+                    <p><strong>9. Delete</strong> -- Each row has a <strong>Del</strong> button with confirmation. You can delete scans, pipelines, targets, and webhooks individually.</p>
                 </div>
             </div>
 
@@ -1733,6 +1734,27 @@
             </div>
 
             <div class="card">
+                <div class="card-header"><div class="card-title">Splunk Integration</div></div>
+                <div style="font-size:13px;line-height:1.8">
+                    <p>Automatic indexing of scan and pipeline results into Splunk via REST API. When enabled, every completed scan and pipeline sends a JSON event to Splunk -- no manual export needed.</p>
+                    <p><strong>1.</strong> Go to <strong>Splunk</strong> in the sidebar.</p>
+                    <p><strong>2.</strong> Enter your Splunk REST API URL (default: <code>https://127.0.0.1:8089</code>), username, password, and index name.</p>
+                    <p><strong>3.</strong> Set <strong>Verify SSL</strong> to <strong>No</strong> if using self-signed certificates (default for local Splunk).</p>
+                    <p><strong>4.</strong> Click <strong>Save Settings</strong>, then <strong>Test Connection</strong> to verify connectivity.</p>
+                    <p><strong>5.</strong> Set <strong>Enable Auto-Indexing</strong> to <strong>Enabled</strong>. From now on, every scan and pipeline that completes sends an event automatically.</p>
+                    <p><strong>6.</strong> Use <strong>Export All History</strong> for initial bulk sync of existing scans and pipelines.</p>
+                    <p style="margin-top:8px"><strong>Event format</strong>: Each event is a JSON object with <code>event</code>, <code>timestamp</code>, <code>scan_id</code>/<code>pipeline_id</code>, <code>tool</code>/<code>mode</code>, <code>target</code>, <code>status</code>, <code>success</code>, <code>elapsed_seconds</code>.</p>
+                    <p style="margin-top:8px"><strong>SPL Examples</strong>:</p>
+                    <div class="result-panel"><pre style="font-size:11px">search index=sec_dashboard event="sec_dashboard_scan"
+search index=sec_dashboard status="failed"
+search index=sec_dashboard | stats count by tool
+search index=sec_dashboard | timechart count
+search index=sec_dashboard | stats avg(elapsed_seconds) as avg_time by tool</pre></div>
+                    <p><strong>Note</strong>: Splunk REST API must be accessible from the dashboard server. For remote deployments (Railway), Splunk must be reachable via network. For local use, both must run on the same machine.</p>
+                </div>
+            </div>
+
+            <div class="card">
                 <div class="card-header"><div class="card-title">Security</div></div>
                 <div style="font-size:13px;line-height:1.8">
                     <p><strong>SSRF Protection</strong>: In remote mode (when the dashboard is deployed on a server, detected automatically via the <code>PORT</code> env var), the dashboard blocks targets that resolve to private IPs, loopback addresses, link-local ranges, and cloud metadata endpoints (e.g. <code>169.254.169.254</code>). In local mode, all targets are allowed.</p>
@@ -1777,6 +1799,9 @@
                         <tr><td>PUT</td><td><code>/api/webhooks/{id}</code></td><td>Update webhook</td></tr>
                         <tr><td>DELETE</td><td><code>/api/webhooks/{id}</code></td><td>Delete webhook</td></tr>
                         <tr><td>POST</td><td><code>/api/webhooks/{id}/test</code></td><td>Send test notification</td></tr>
+                        <tr><td>GET/POST</td><td><code>/api/splunk</code></td><td>Get/save Splunk config</td></tr>
+                        <tr><td>POST</td><td><code>/api/splunk/test</code></td><td>Test Splunk connection</td></tr>
+                        <tr><td>POST</td><td><code>/api/splunk/export-all</code></td><td>Bulk export all data to Splunk</td></tr>
                         <tr><td>GET</td><td><code>/api/export/all/json</code></td><td>Bulk export all data</td></tr>
                         <tr><td>GET</td><td><code>/api/export/all/pdf</code></td><td>Bulk PDF report</td></tr>
                         <tr><td>WS</td><td><code>/ws</code></td><td>Real-time scan/pipeline events</td></tr>
