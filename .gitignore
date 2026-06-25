@@ -37,3 +37,4 @@ node_modules/
 # Env
 .env
 .env.local
+tool_test_results.json

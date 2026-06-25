@@ -1630,12 +1630,17 @@
             <div class="card">
                 <div class="card-header"><div class="card-title">TOR Status</div></div>
                 <div class="kv-grid">
-                    <span class="key">TOR Detected</span>
-                    <span class="value">${tor.available ? '<span class="tag tag-green">Yes</span>' : '<span class="tag tag-red">No</span>'}</span>
+                    <span class="key">Installed</span>
+                    <span class="value">${tor.installed ? '<span class="tag tag-green">Yes</span>' : '<span class="tag tag-red">No</span>'}</span>
+                    <span class="key">Running</span>
+                    <span class="value">${tor.running ? '<span class="tag tag-green">Yes</span>' : '<span class="tag tag-red">No</span>'}</span>
+                    ${tor.install_path ? `<span class="key">Path</span><span class="value" style="font-size:12px">${esc(tor.install_path)}</span>` : ''}
+                    ${tor.install_type ? `<span class="key">Type</span><span class="value">${esc(tor.install_type)}</span>` : ''}
                     <span class="key">Message</span>
                     <span class="value">${esc(tor.message || '')}</span>
                 </div>
-                ${!tor.available ? '<div class="finding-card warn mt-16">TOR not detected. Install TOR Browser from <a href="https://www.torproject.org/download/" target="_blank" style="color:var(--accent)">torproject.org</a>, then enable below. Default port: 9150 (TOR Browser) or 9050 (expert bundle).</div>' : ''}
+                ${!tor.installed ? '<div class="finding-card warn mt-16">TOR not installed. Download TOR Browser from <a href="https://www.torproject.org/download/" target="_blank" style="color:var(--accent)">torproject.org</a>, then enable below. Default port: 9150 (TOR Browser) or 9050 (expert bundle).</div>' : ''}
+                ${tor.installed && !tor.running ? `<div class="finding-card warn mt-16">TOR is installed but not running. Start ${tor.install_type === 'tor_browser' ? 'TOR Browser' : 'the TOR service'} to use the proxy. Default port: ${tor.port}.</div>` : ''}
             </div>
             <div class="card">
                 <div class="card-header"><div class="card-title">Proxy Configuration</div></div>

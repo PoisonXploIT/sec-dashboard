@@ -43,25 +43,48 @@ async def asn_lookup(target: str, **kw) -> dict:
     except Exception as e:
         results["sources"]["bgpview"] = {"error": str(e)[:80]}
 
-    # ASN prefix info
-    asn_num = results.get("sources", {}).get("bgpview", {}).get("asn", "")
-    if asn_num:
+    # Fallback: use ip-api.com ASN data (already works without bgpview)
+    if not results["sources"].get("bgpview") or results["sources"]["bgpview"].get("error"):
         try:
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15), connector=get_aiohttp_connector()) as session:
-                async with session.get(f"https://api.bgpview.io/asn/{asn_num}") as resp:
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10), connector=get_aiohttp_connector()) as session:
+                async with session.get(f"http://ip-api.com/json/{ip}?fields=status,country,as,asname,isp,org,query") as resp:
                     if resp.status == 200:
-                        asn_data = (await resp.json()).get("data", {})
-                        results["asn_details"] = {
-                            "asn": asn_num,
-                            "name": asn_data.get("name", ""),
-                            "description": asn_data.get("description_short", ""),
-                            "country": asn_data.get("country_code", ""),
-                            "website": asn_data.get("website", ""),
-                            "email_contacts": asn_data.get("email_contacts", [])[:3],
-                            "abuse_contacts": asn_data.get("abuse_contacts", [])[:3],
-                        }
-        except Exception:
-            pass
+                        ipdata = await resp.json()
+                        if ipdata.get("status") == "success":
+                            as_str = ipdata.get("as", "")
+                            # Parse "AS13335 Cloudflare, Inc."
+                            asn_num = ""
+                            if as_str.startswith("AS"):
+                                parts = as_str.split(" ", 1)
+                                asn_num = parts[0].replace("AS", "")
+                                as_name = parts[1] if len(parts) > 1 else ""
+                            else:
+                                as_name = as_str
+                            results["sources"]["ip_api"] = {
+                                "asn": asn_num,
+                                "name": as_name,
+                                "country": ipdata.get("country", ""),
+                                "isp": ipdata.get("isp", ""),
+                                "org": ipdata.get("org", ""),
+                            }
+                            # If we got ASN from ip-api, try bgpview for more details
+                            if asn_num and not results.get("asn_details"):
+                                try:
+                                    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10), connector=get_aiohttp_connector()) as session2:
+                                        async with session2.get(f"https://api.bgpview.io/asn/{asn_num}") as resp2:
+                                            if resp2.status == 200:
+                                                asn_data = (await resp2.json()).get("data", {})
+                                                results["asn_details"] = {
+                                                    "asn": asn_num,
+                                                    "name": asn_data.get("name", as_name),
+                                                    "description": asn_data.get("description_short", ""),
+                                                    "country": asn_data.get("country_code", ""),
+                                                    "website": asn_data.get("website", ""),
+                                                }
+                                except Exception:
+                                    pass
+        except Exception as e:
+            results["sources"]["ip_api"] = {"error": str(e)[:80]}
 
     return results
 
