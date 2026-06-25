@@ -270,6 +270,39 @@ class ToolRun(BaseModel):
 @app.on_event("startup")
 async def startup():
     await init_db()
+    # Migrate: make scans.target_id nullable for special tools
+    db = await get_db()
+    try:
+        # Check if target_id is nullable
+        cur = await db.execute("PRAGMA table_info(scans)")
+        cols = await cur.fetchall()
+        target_col = [c for c in cols if c["name"] == "target_id"]
+        if target_col and target_col[0]["notnull"] == 1:
+            # Need to recreate the table with nullable target_id
+            await db.execute("PRAGMA foreign_keys=OFF")
+            await db.execute("ALTER TABLE scans RENAME TO scans_old")
+            await db.execute(
+                "CREATE TABLE scans ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                "target_id INTEGER, "
+                "tool TEXT NOT NULL, "
+                "status TEXT DEFAULT 'pending', "
+                "result TEXT, "
+                "started_at TIMESTAMP, "
+                "finished_at TIMESTAMP, "
+                "FOREIGN KEY (target_id) REFERENCES targets(id) ON DELETE CASCADE"
+                ")"
+            )
+            await db.execute("INSERT INTO scans SELECT * FROM scans_old")
+            await db.execute("DROP TABLE scans_old")
+            await db.execute("PRAGMA foreign_keys=ON")
+            await db.commit()
+            print("[startup] Migrated scans table: target_id is now nullable")
+    except Exception as e:
+        print(f"[startup] Migration check: {e}")
+    finally:
+        await db.close()
+
     # Clean up orphaned scans left as 'running' from a previous crash/restart
     db = await get_db()
     try:
@@ -509,7 +542,7 @@ async def create_scan(body: ScanCreate):
     try:
         cursor = await db.execute(
             "INSERT INTO scans (target_id, tool, status, started_at) VALUES (?, ?, 'running', ?)",
-            (body.target_id or 0, body.tool, datetime.utcnow().isoformat())
+            (body.target_id if body.target_id else None, body.tool, datetime.utcnow().isoformat())
         )
         scan_id = cursor.lastrowid
         await db.commit()
