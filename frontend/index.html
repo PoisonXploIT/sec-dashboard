@@ -1434,11 +1434,13 @@
                 <div class="card-header"><div class="card-title">Quick Start</div></div>
                 <div style="font-size:13px;line-height:1.8">
                     <p><strong>1. Add a target</strong> -- Go to <strong>Targets</strong> and click <strong>Add Target</strong>. Enter a name and a domain or IP (e.g. <code>example.com</code>).</p>
-                    <p><strong>2. Run a tool</strong> -- Go to <strong>Tools</strong>, click any tool card, select your target from the popup. Results appear instantly below the tools grid.</p>
-                    <p><strong>3. Run a pipeline</strong> -- Go to <strong>Pipeline</strong>, pick a mode (Fast / Deep / Nuclear), select a target, click <strong>Start Pipeline</strong>. Progress updates in real time.</p>
-                    <p><strong>4. View results</strong> -- Go to <strong>History</strong> to see all past scans and pipelines. Click <strong>View</strong> to see formatted results.</p>
-                    <p><strong>5. Export</strong> -- Every scan and pipeline has <strong>JSON</strong> and <strong>PDF</strong> export buttons. Use <strong>Export All (JSON)</strong> in History for bulk export (Splunk/SIEM compatible).</p>
-                    <p><strong>6. Delete</strong> -- Each row has a <strong>Del</strong> button with confirmation. You can delete scans, pipelines, and targets individually.</p>
+                    <p><strong>2. Run a tool</strong> -- Go to <strong>Tools</strong>, click any tool card, select your target from the popup. Results appear instantly below the tools grid. Your selected target persists across page reloads.</p>
+                    <p><strong>3. Run a pipeline</strong> -- Go to <strong>Pipeline</strong>, pick a mode (Fast / Deep / Nuclear), select a target, click <strong>Start Pipeline</strong>. Progress updates in real time with per-tool status.</p>
+                    <p><strong>4. View results</strong> -- Go to <strong>History</strong> to see all past scans and pipelines. Use the <strong>Scans</strong> and <strong>Pipelines</strong> tabs to switch views. Use the search bar to filter by tool, target, or status. Click <strong>View</strong> to see formatted results (pipeline results show each tool's output individually, not raw JSON).</p>
+                    <p><strong>5. Cancel running scans</strong> -- If a scan or pipeline is running and you need to stop it, click the <strong>Cancel</strong> button that appears next to running items in History or Pipeline pages.</p>
+                    <p><strong>6. Export</strong> -- Every scan and pipeline has <strong>JSON</strong> and <strong>PDF</strong> export buttons. Use <strong>Export All (JSON)</strong> in History for bulk export (Splunk/SIEM compatible).</p>
+                    <p><strong>7. Webhooks</strong> -- Go to <strong>Webhooks</strong> in the sidebar to configure notifications. Add a Discord, Slack, or generic HTTP webhook URL. You'll get notified when scans and pipelines complete. Click <strong>Test</strong> to verify the webhook works.</p>
+                    <p><strong>8. Delete</strong> -- Each row has a <strong>Del</strong> button with confirmation. You can delete scans, pipelines, targets, and webhooks individually.</p>
                 </div>
             </div>
 
@@ -1540,26 +1542,78 @@
             </div>
 
             <div class="card">
+                <div class="card-header"><div class="card-title">Cancel Scans & Pipelines</div></div>
+                <div style="font-size:13px;line-height:1.8">
+                    <p>If you start a scan or pipeline and realize you picked the wrong target or mode, you can cancel it while it's running.</p>
+                    <p><strong>Scans</strong>: In <strong>History</strong>, running scans show a <strong>Cancel</strong> button. Click it to abort the scan -- it gets marked as <code>cancelled</code> in the database.</p>
+                    <p><strong>Pipelines</strong>: In the <strong>Pipeline</strong> page, the live progress card has a <strong>Cancel</strong> button. You can also cancel from <strong>History</strong> under the Pipelines tab.</p>
+                    <p>Cancelled items keep their records for audit purposes but are no longer running.</p>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><div class="card-title">Webhook Notifications</div></div>
+                <div style="font-size:13px;line-height:1.8">
+                    <p>Get notified when scans and pipelines complete without watching the dashboard.</p>
+                    <p><strong>1.</strong> Go to <strong>Webhooks</strong> in the sidebar.</p>
+                    <p><strong>2.</strong> Click <strong>Add Webhook</strong> and enter a name, URL, and type (Discord, Slack, or generic).</p>
+                    <p><strong>3.</strong> Select which events to listen to: <code>scan_complete</code>, <code>pipeline_complete</code>, or both.</p>
+                    <p><strong>4.</strong> Click <strong>Test</strong> to send a test notification and verify the URL works.</p>
+                    <p><strong>Discord</strong>: Server Settings > Integrations > Webhooks > New Webhook. Paste the URL and select type "discord".</p>
+                    <p><strong>Slack</strong>: Workspace > Apps > Incoming Webhooks > Add Configuration. Paste the URL and select type "slack".</p>
+                    <p><strong>Generic</strong>: Any HTTP endpoint that accepts POST with JSON body. Payload includes <code>source</code>, <code>event</code>, <code>timestamp</code>, and <code>data</code> fields.</p>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><div class="card-title">Security</div></div>
+                <div style="font-size:13px;line-height:1.8">
+                    <p><strong>SSRF Protection</strong>: In remote mode (when the dashboard is deployed on a server, detected automatically via the <code>PORT</code> env var), the dashboard blocks targets that resolve to private IPs, loopback addresses, link-local ranges, and cloud metadata endpoints (e.g. <code>169.254.169.254</code>). In local mode, all targets are allowed.</p>
+                    <p><strong>Reset Protection</strong>: The <code>DELETE /api/reset</code> endpoint requires <code>?confirm=true</code> to prevent accidental data wipes from automated tools or scanners.</p>
+                    <p><strong>Cloudflare Access</strong>: When deployed behind Cloudflare Access, the dashboard is protected by OAuth authentication. All API requests go through Cloudflare's proxy.</p>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><div class="card-title">History & Search</div></div>
+                <div style="font-size:13px;line-height:1.8">
+                    <p>The <strong>History</strong> page has two tabs: <strong>Scans</strong> and <strong>Pipelines</strong>. Click a tab to switch between views.</p>
+                    <p><strong>Search</strong>: Use the search bar to filter by tool name, target name, target host, or status. Filtering happens in real-time as you type.</p>
+                    <p><strong>Pagination</strong>: Scan history is paginated (50 per page). Use <strong>Prev</strong> and <strong>Next</strong> buttons to navigate through older scans.</p>
+                    <p><strong>Formatted pipeline results</strong>: When you click <strong>View</strong> on a pipeline, you see each tool's output formatted individually -- port tables, header grades, CVE cards, etc. -- not a raw JSON dump.</p>
+                </div>
+            </div>
+
+            <div class="card">
                 <div class="card-header"><div class="card-title">API Reference</div></div>
                 <div style="font-size:12px">
                     <table><thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead><tbody>
-                        <tr><td>GET</td><td><code>/api/status</code></td><td>Health check</td></tr>
+                        <tr><td>GET</td><td><code>/api/status</code></td><td>Health check + remote mode flag</td></tr>
+                        <tr><td>GET</td><td><code>/api/dashboard/stats</code></td><td>Dashboard overview stats</td></tr>
                         <tr><td>GET</td><td><code>/api/tools</code></td><td>List all tools</td></tr>
                         <tr><td>POST</td><td><code>/api/tools/{id}/run</code></td><td>Run a tool (body: target, params)</td></tr>
-                        <tr><td>GET/POST</td><td><code>/api/targets</code></td><td>List/create targets</td></tr>
+                        <tr><td>GET/POST</td><td><code>/api/targets</code></td><td>List/create targets (SSRF-validated in remote mode)</td></tr>
                         <tr><td>DELETE</td><td><code>/api/targets/{id}</code></td><td>Delete target</td></tr>
-                        <tr><td>GET/POST</td><td><code>/api/scans</code></td><td>List/create scans</td></tr>
+                        <tr><td>GET</td><td><code>/api/scans?offset=0&limit=50</code></td><td>List scans (paginated)</td></tr>
+                        <tr><td>POST</td><td><code>/api/scans</code></td><td>Create and execute a scan</td></tr>
                         <tr><td>DELETE</td><td><code>/api/scans/{id}</code></td><td>Delete scan</td></tr>
+                        <tr><td>POST</td><td><code>/api/scans/{id}/cancel</code></td><td>Cancel a running scan</td></tr>
                         <tr><td>GET</td><td><code>/api/scans/{id}/export/json</code></td><td>Export scan as JSON</td></tr>
                         <tr><td>GET</td><td><code>/api/scans/{id}/export/pdf</code></td><td>Export scan as PDF</td></tr>
                         <tr><td>POST</td><td><code>/api/pipelines</code></td><td>Start pipeline (body: target_id, mode)</td></tr>
                         <tr><td>GET</td><td><code>/api/pipelines/history</code></td><td>Pipeline history</td></tr>
+                        <tr><td>POST</td><td><code>/api/pipelines/{id}/cancel</code></td><td>Cancel a running pipeline</td></tr>
                         <tr><td>GET</td><td><code>/api/pipelines/{id}/result</code></td><td>Pipeline result</td></tr>
                         <tr><td>GET</td><td><code>/api/pipelines/{id}/export/json</code></td><td>Export pipeline as JSON</td></tr>
                         <tr><td>GET</td><td><code>/api/pipelines/{id}/export/pdf</code></td><td>Export pipeline as PDF</td></tr>
+                        <tr><td>GET/POST</td><td><code>/api/webhooks</code></td><td>List/create webhooks</td></tr>
+                        <tr><td>PUT</td><td><code>/api/webhooks/{id}</code></td><td>Update webhook</td></tr>
+                        <tr><td>DELETE</td><td><code>/api/webhooks/{id}</code></td><td>Delete webhook</td></tr>
+                        <tr><td>POST</td><td><code>/api/webhooks/{id}/test</code></td><td>Send test notification</td></tr>
                         <tr><td>GET</td><td><code>/api/export/all/json</code></td><td>Bulk export all data</td></tr>
                         <tr><td>GET</td><td><code>/api/export/all/pdf</code></td><td>Bulk PDF report</td></tr>
-                        <tr><td>DELETE</td><td><code>/api/reset</code></td><td>Reset all data</td></tr>
+                        <tr><td>WS</td><td><code>/ws</code></td><td>Real-time scan/pipeline events</td></tr>
+                        <tr><td>DELETE</td><td><code>/api/reset?confirm=true</code></td><td>Reset all data (requires confirmation)</td></tr>
                     </tbody></table>
                 </div>
             </div>
