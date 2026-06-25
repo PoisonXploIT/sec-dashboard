@@ -314,6 +314,9 @@
             <a class="nav-item" data-page="webhooks" onclick="navigate('webhooks')">
                 <span class="icon">WH</span> Webhooks
             </a>
+            <a class="nav-item" data-page="splunk" onclick="navigate('splunk')">
+                <span class="icon">SP</span> Splunk
+            </a>
             <div class="nav-section" style="margin-top: 16px;">Categories</div>
             <a class="nav-item" onclick="filterCategory('Network Recon')">
                 <span class="icon"></span> Network Recon
@@ -464,9 +467,9 @@
         document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
         const navEl = document.querySelector(`[data-page="${page}"]`);
         if (navEl) navEl.classList.add('active');
-        const titles = {dashboard:'Dashboard',tools:'Security Tools',pipeline:'Pipeline Engine',targets:'Targets',history:'Scan History',guide:'User Guide',proxy:'Proxy / Anonymity',webhooks:'Webhooks'};
+        const titles = {dashboard:'Dashboard',tools:'Security Tools',pipeline:'Pipeline Engine',targets:'Targets',history:'Scan History',guide:'User Guide',proxy:'Proxy / Anonymity',webhooks:'Webhooks',splunk:'Splunk Integration'};
         document.getElementById('page-title').textContent = titles[page] || page;
-        const renderers = {dashboard:renderDashboard,tools:renderTools,pipeline:renderPipelinePage,targets:renderTargets,history:renderHistoryPage,guide:renderGuide,proxy:renderProxy,webhooks:renderWebhooks};
+        const renderers = {dashboard:renderDashboard,tools:renderTools,pipeline:renderPipelinePage,targets:renderTargets,history:renderHistoryPage,guide:renderGuide,proxy:renderProxy,webhooks:renderWebhooks,splunk:renderSplunk};
         (renderers[page] || renderDashboard)();
     }
 
@@ -2003,6 +2006,132 @@
             toast('Webhook deleted', 'success');
             renderWebhooks();
         } catch (e) { toast('Delete failed: ' + e.message, 'error'); }
+    }
+
+    // ── Splunk ─────────────────────────────────
+    async function renderSplunk() {
+        const content = document.getElementById('content');
+        content.innerHTML = '<div class="skeleton" style="height:200px;margin-bottom:16px"></div>';
+        let config = {enabled: false, url: 'https://127.0.0.1:8089', username: '', password: '', index: 'sec_dashboard', sourcetype: '_json', verify_ssl: false};
+        try {
+            const data = await api.get('/splunk');
+            config = data.config || config;
+        } catch (e) { /* use defaults */ }
+
+        content.innerHTML = `
+            <div class="card">
+                <div class="card-header"><div class="card-title">Splunk Integration</div>
+                    <span class="badge-status ${config.enabled?'badge-completed':'badge-pending'}">${config.enabled?'Enabled':'Disabled'}</span>
+                </div>
+                <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px">
+                    Automatic indexing of scan and pipeline results into Splunk via REST API.
+                    When enabled, every scan and pipeline that completes sends an event to Splunk automatically -- no manual export needed.
+                </p>
+                <div class="flex gap-8 mb-16">
+                    <button class="btn btn-primary" onclick="saveSplunk()">Save Settings</button>
+                    <button class="btn" onclick="testSplunk()">Test Connection</button>
+                    <button class="btn btn-accent" onclick="exportAllSplunk()">Export All History</button>
+                </div>
+                <div id="splunk-result" class="mt-16"></div>
+            </div>
+            <div class="card">
+                <div class="card-header"><div class="card-title">Configuration</div></div>
+                <div class="input-group"><label>Splunk URL (REST API)</label>
+                    <input type="text" id="splunk-url" value="${esc(config.url)}" placeholder="https://127.0.0.1:8089">
+                </div>
+                <div class="input-group"><label>Username</label>
+                    <input type="text" id="splunk-user" value="${esc(config.username)}" placeholder="admin">
+                </div>
+                <div class="input-group"><label>Password</label>
+                    <input type="password" id="splunk-pass" value="${config.password?'***':''}" placeholder="password">
+                </div>
+                <div class="input-group"><label>Index</label>
+                    <input type="text" id="splunk-index" value="${esc(config.index)}" placeholder="sec_dashboard">
+                </div>
+                <div class="input-group"><label>Source Type</label>
+                    <input type="text" id="splunk-sourcetype" value="${esc(config.sourcetype)}" placeholder="_json">
+                </div>
+                <div class="input-group"><label>Verify SSL</label>
+                    <select id="splunk-ssl">
+                        <option value="0" ${!config.verify_ssl?'selected':''}>No (self-signed OK)</option>
+                        <option value="1" ${config.verify_ssl?'selected':''}>Yes</option>
+                    </select>
+                </div>
+                <div class="input-group"><label>Enable Auto-Indexing</label>
+                    <select id="splunk-enabled">
+                        <option value="0" ${!config.enabled?'selected':''}>Disabled</option>
+                        <option value="1" ${config.enabled?'selected':''}>Enabled</option>
+                    </select>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header"><div class="card-title">How it works</div></div>
+                <div style="font-size:13px;line-height:1.8">
+                    <p><strong>Auto-indexing:</strong> When enabled, every scan and pipeline that completes sends an event to Splunk automatically via the REST API (<code>/services/receivers/simple</code>).</p>
+                    <p><strong>Event format:</strong> Each event is a JSON object with <code>event</code>, <code>timestamp</code>, <code>scan_id</code>/<code>pipeline_id</code>, <code>tool</code>/<code>mode</code>, <code>target</code>, <code>status</code>, <code>elapsed_seconds</code>.</p>
+                    <p><strong>Export All:</strong> The <strong>Export All History</strong> button sends all existing scans and pipelines to Splunk. Useful for initial sync.</p>
+                    <p><strong>SPL Examples:</strong></p>
+                    <div class="result-panel"><pre style="font-size:11px">search index=sec_dashboard event="sec_dashboard_scan"
+search index=sec_dashboard status="failed"
+search index=sec_dashboard | stats count by tool
+search index=sec_dashboard | timechart count</pre></div>
+                    <p><strong>Requirements:</strong> Splunk REST API accessible from the dashboard server. Default port: 8089.</p>
+                </div>
+            </div>
+        `;
+    }
+
+    async function saveSplunk() {
+        const config = {
+            enabled: document.getElementById('splunk-enabled').value === '1',
+            url: document.getElementById('splunk-url').value.trim(),
+            username: document.getElementById('splunk-user').value.trim(),
+            password: document.getElementById('splunk-pass').value,
+            index: document.getElementById('splunk-index').value.trim(),
+            sourcetype: document.getElementById('splunk-sourcetype').value.trim(),
+            verify_ssl: document.getElementById('splunk-ssl').value === '1',
+        };
+        try {
+            await api.post('/splunk', config);
+            toast('Splunk settings saved', 'success');
+        } catch (e) { toast('Save failed: ' + e.message, 'error'); }
+    }
+
+    async function testSplunk() {
+        const resultDiv = document.getElementById('splunk-result');
+        resultDiv.innerHTML = '<div class="skeleton" style="width:200px"></div>';
+        try {
+            // Save first so test uses new config
+            await saveSplunk();
+            const result = await api.post('/splunk/test', {});
+            if (result.ok) {
+                resultDiv.innerHTML = `<div class="finding-card safe"><strong>Connected!</strong> Splunk ${esc(result.version||'')} | Index: ${esc(result.index)}<br>${esc(result.message||'')}</div>`;
+                toast('Splunk connection OK', 'success');
+            } else {
+                resultDiv.innerHTML = `<div class="finding-card vuln"><strong>Connection failed:</strong> ${esc(result.error||'Unknown')}</div>`;
+                toast('Splunk test failed', 'error');
+            }
+        } catch (e) {
+            resultDiv.innerHTML = `<div class="finding-card vuln"><strong>Error:</strong> ${esc(e.message)}</div>`;
+            toast('Test failed: ' + e.message, 'error');
+        }
+    }
+
+    async function exportAllSplunk() {
+        const resultDiv = document.getElementById('splunk-result');
+        resultDiv.innerHTML = '<div class="skeleton" style="width:200px"></div>';
+        try {
+            const result = await api.post('/splunk/export-all', {});
+            if (result.error) {
+                resultDiv.innerHTML = `<div class="finding-card vuln"><strong>Error:</strong> ${esc(result.error)}</div>`;
+            } else {
+                resultDiv.innerHTML = `<div class="finding-card safe"><strong>Bulk export done</strong><br>Sent: ${result.sent} | Failed: ${result.failed} | Total: ${result.total}</div>`;
+                toast(`${result.sent} events sent to Splunk`, 'success');
+            }
+        } catch (e) {
+            resultDiv.innerHTML = `<div class="finding-card vuln"><strong>Error:</strong> ${esc(e.message)}</div>`;
+            toast('Export failed: ' + e.message, 'error');
+        }
     }
 
     // Init

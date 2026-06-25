@@ -24,6 +24,7 @@ from backend.report import (
 )
 from backend.validators import validate_target, is_remote_mode
 from backend import webhooks
+from backend import splunk
 
 app = FastAPI(title="Sec-Dashboard", version="1.0.0")
 
@@ -581,6 +582,11 @@ async def create_scan(body: ScanCreate):
                 "status": status,
                 "elapsed_seconds": result.get("elapsed_seconds", 0),
             })
+            # Splunk auto-index
+            await splunk.index_scan_event(
+                scan_id, body.tool, effective_target, status,
+                result.get("elapsed_seconds", 0), result.get("success", False)
+            )
             return {"scan_id": scan_id, "status": status, "result": result}
         except asyncio.CancelledError:
             db2 = await get_db()
@@ -707,6 +713,13 @@ async def create_pipeline(body: PipelineCreate):
                     "elapsed_seconds": result.get("elapsed_seconds", 0),
                     "total_tools": result.get("total_tools", 0),
                 })
+                # Splunk auto-index
+                await splunk.index_pipeline_event(
+                    pipeline_id, body.mode, target["host"],
+                    result.get("status", "completed"),
+                    result.get("elapsed_seconds", 0),
+                    result.get("total_tools", 0)
+                )
             except asyncio.CancelledError:
                 try:
                     db2 = await get_db()
@@ -812,6 +825,46 @@ async def delete_webhook_endpoint(webhook_id: int):
 @app.post("/api/webhooks/{webhook_id}/test")
 async def test_webhook_endpoint(webhook_id: int):
     return await webhooks.test_webhook(webhook_id)
+
+
+# ── Splunk Integration ─────────────────────────────────────────
+class SplunkConfig(BaseModel):
+    enabled: bool = False
+    url: str = "https://127.0.0.1:8089"
+    username: str = ""
+    password: str = ""
+    index: str = "sec_dashboard"
+    sourcetype: str = "_json"
+    verify_ssl: bool = False
+
+
+@app.get("/api/splunk")
+async def get_splunk():
+    config = splunk.get_splunk_config()
+    # Don't return password
+    config["password"] = "***" if config.get("password") else ""
+    return {"config": config}
+
+
+@app.post("/api/splunk")
+async def update_splunk(body: SplunkConfig):
+    config = body.dict()
+    # Don't overwrite password if masked
+    if config.get("password") == "***":
+        config["password"] = splunk.get_splunk_config().get("password", "")
+    splunk.set_splunk_config(config)
+    return {"status": "updated", "enabled": config["enabled"]}
+
+
+@app.post("/api/splunk/test")
+async def test_splunk():
+    return await splunk.test_splunk_connection()
+
+
+@app.post("/api/splunk/export-all")
+async def splunk_export_all():
+    """Bulk export all scan/pipeline history to Splunk."""
+    return await splunk.bulk_export_to_splunk()
 
 
 # ── Reset ──────────────────────────────────────────────────────
