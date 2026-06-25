@@ -21,7 +21,7 @@ Built with FastAPI + vanilla JS. No cloud dependencies, no accounts — runs ent
 **Pipeline Engine** — Multi-phase automated scans:
 - **Fast** (4 tools) — Quick recon + port scan
 - **Deep** (14 tools) — Full recon + web + OSINT
-- **Nuclear** (24 tools) — Comprehensive security audit
+- **Nuclear** (20 tools) — Comprehensive security audit
 
 **Additional features:**
 - Real-time WebSocket updates during scans

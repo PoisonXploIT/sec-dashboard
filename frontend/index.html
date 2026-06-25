@@ -1191,7 +1191,7 @@
         const phaseDefs = {
             fast: [{name:'Recon',tools:['whois_lookup','dns_recon','http_probe']},{name:'Scan',tools:['port_scanner']}],
             deep: [{name:'Recon',tools:['whois_lookup','dns_recon','subdomain_enum','http_probe']},{name:'Scan',tools:['port_scanner','ssl_analyzer']},{name:'Web',tools:['header_analyzer','tech_detector','dir_fuzzer','cors_checker','csp_analyzer']},{name:'OSINT',tools:['reverse_dns','ct_logs','ip_geolocation']}],
-            nuclear: [{name:'Recon',tools:['whois_lookup','dns_recon','subdomain_enum','http_probe']},{name:'Scan',tools:['port_scanner','ssl_analyzer']},{name:'Web',tools:['header_analyzer','tech_detector','dir_fuzzer','sqli_scanner','xss_scanner','cors_checker','csp_analyzer','open_redirect']},{name:'Vuln',tools:['cve_search','password_audit']},{name:'OSINT',tools:['asn_lookup','reverse_dns','ct_logs','shodan_lookup','ip_geolocation']},{name:'System',tools:['network_connections','process_monitor','system_info']}],
+            nuclear: [{name:'Recon',tools:['whois_lookup','dns_recon','subdomain_enum','http_probe']},{name:'Scan',tools:['port_scanner','ssl_analyzer']},{name:'Web',tools:['header_analyzer','tech_detector','dir_fuzzer','sqli_scanner','xss_scanner','cors_checker','csp_analyzer','open_redirect']},{name:'Vuln',tools:['cve_search']},{name:'OSINT',tools:['asn_lookup','reverse_dns','ct_logs','shodan_lookup','ip_geolocation']}],
         };
         const phases = phaseDefs[selectedPipelineMode] || [];
 
@@ -1526,8 +1526,8 @@
                 <div class="card-header"><div class="card-title">Pipeline Modes</div></div>
                 <table><thead><tr><th>Mode</th><th>Phases</th><th>Duration</th><th>Use case</th></tr></thead><tbody>
                     <tr><td><strong>Fast</strong></td><td>Recon + Scan</td><td>~1 min</td><td>Quick overview of a target</td></tr>
-                    <tr><td><strong>Deep</strong></td><td>Recon + Scan + Web</td><td>~3 min</td><td>Recon + web security analysis</td></tr>
-                    <tr><td><strong>Nuclear</strong></td><td>Recon + Scan + Web + Vuln + System</td><td>~10 min</td><td>Full security audit</td></tr>
+                    <tr><td><strong>Deep</strong></td><td>Recon + Scan + Web + OSINT</td><td>~3 min</td><td>Recon + web security analysis</td></tr>
+                    <tr><td><strong>Nuclear</strong></td><td>Recon + Scan + Web + Vuln + OSINT</td><td>~7 min</td><td>Full security audit</td></tr>
                 </tbody></table>
             </div>
 

@@ -246,9 +246,8 @@ PIPELINES = {
             {"name": "Recon", "tools": ["whois_lookup", "dns_recon", "subdomain_enum", "http_probe"]},
             {"name": "Scan", "tools": ["port_scanner", "ssl_analyzer"]},
             {"name": "Web", "tools": ["header_analyzer", "tech_detector", "dir_fuzzer", "sqli_scanner", "xss_scanner", "cors_checker", "csp_analyzer", "open_redirect"]},
-            {"name": "Vuln", "tools": ["cve_search", "password_audit"]},
+            {"name": "Vuln", "tools": ["cve_search"]},
             {"name": "OSINT", "tools": ["asn_lookup", "reverse_dns", "ct_logs", "shodan_lookup", "ip_geolocation"]},
-            {"name": "System", "tools": ["network_connections", "process_monitor", "system_info"]},
         ],
     },
 }

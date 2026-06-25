@@ -64,20 +64,25 @@ def _find_tor_installation() -> dict:
     if system == "Windows":
         # Common TOR Browser install locations on Windows
         check_paths = []
-        # Desktop
+        # Desktop -- TOR Browser uses "Tor Browser/Browser/TorBrowser/Tor/tor.exe"
         desktop = os.path.join(os.environ.get("USERPROFILE", ""), "Desktop")
+        check_paths.append(os.path.join(desktop, "Tor Browser", "Browser", "TorBrowser", "Tor", "tor.exe"))
         check_paths.append(os.path.join(desktop, "Tor Browser", "Browser", "tor.exe"))
+        check_paths.append(os.path.join(desktop, "TorBrowser", "Browser", "TorBrowser", "Tor", "tor.exe"))
         check_paths.append(os.path.join(desktop, "TorBrowser", "Browser", "tor.exe"))
         # Program Files
         for pf in [os.environ.get("ProgramFiles", r"C:\Program Files"),
                     os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")]:
+            check_paths.append(os.path.join(pf, "Tor Browser", "Browser", "TorBrowser", "Tor", "tor.exe"))
             check_paths.append(os.path.join(pf, "Tor Browser", "Browser", "tor.exe"))
         # Downloads
         downloads = os.path.join(os.environ.get("USERPROFILE", ""), "Downloads")
+        check_paths.append(os.path.join(downloads, "Tor Browser", "Browser", "TorBrowser", "Tor", "tor.exe"))
         check_paths.append(os.path.join(downloads, "Tor Browser", "Browser", "tor.exe"))
         # LocalAppData
         localappdata = os.environ.get("LOCALAPPDATA", "")
         if localappdata:
+            check_paths.append(os.path.join(localappdata, "Tor Browser", "Browser", "TorBrowser", "Tor", "tor.exe"))
             check_paths.append(os.path.join(localappdata, "Tor Browser", "Browser", "tor.exe"))
         # Expert bundle default
         for pf in [os.environ.get("ProgramFiles", r"C:\Program Files"),
