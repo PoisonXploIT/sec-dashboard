@@ -248,6 +248,14 @@ TOOLS = {
         "icon": "CA",
         "timeout": 10,
     },
+    # ─── Host Audit ───
+    "ps_security_audit": {
+        "name": "PS Security Audit",
+        "category": "System",
+        "description": "Full enterprise security audit via PowerShell (10 modules: system, users, processes, network, logs, files, registry, LOLBAS, drivers, hardware)",
+        "icon": "PS",
+        "timeout": 600,
+    },
 }
 
 CATEGORIES = ["Network Recon", "Web Security", "Vulnerability", "System", "OSINT", "Email Security"]
@@ -280,6 +288,11 @@ SPECIAL_TOOLS = {
         "input_type": "none",
     },
     "system_info": {
+        "input_label": None,
+        "input_placeholder": None,
+        "input_type": "none",
+    },
+    "ps_security_audit": {
         "input_label": None,
         "input_placeholder": None,
         "input_type": "none",
