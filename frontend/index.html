@@ -1609,16 +1609,21 @@
                     <p><strong>7. Webhooks</strong> -- Go to <strong>Webhooks</strong> in the sidebar to configure notifications. Add a Discord, Slack, or generic HTTP webhook URL. You'll get notified when scans and pipelines complete. Click <strong>Test</strong> to verify the webhook works.</p>
                     <p><strong>8. Splunk</strong> -- Go to <strong>Splunk</strong> in the sidebar to configure auto-indexing. Enter your Splunk REST API URL (default: <code>https://127.0.0.1:8089</code>), username, password, and index name. Click <strong>Test Connection</strong> to verify, then enable auto-indexing. Every scan and pipeline that completes sends an event to Splunk automatically. Use <strong>Export All History</strong> for initial bulk sync.</p>
                     <p><strong>9. Delete</strong> -- Each row has a <strong>Del</strong> button with confirmation. You can delete scans, pipelines, targets, and webhooks individually.</p>
+                    <p><strong>10. Hardware & Audit tools</strong> -- The <strong>System</strong> category includes 3 special tools that don't need a target domain/IP:
+                    <code>PS Security Audit</code> (Windows only, runs a full PowerShell audit -- requires <a href="https://github.com/PoisonXploIT/Auditing_with_PowerShell" target="_blank">Auditing_with_PowerShell</a> cloned locally),
+                    <code>WiFi Marauder Scan</code> (polls <a href="https://github.com/PoisonXploIT/wifi-marauder-viewer" target="_blank">wifi-marauder-viewer</a> Flask app -- M5StickC Marauder),
+                    and <code>M5Stick Networks</code> (polls <a href="https://github.com/PoisonXploIT/Visualizacion_extendida_M5StickPlus2" target="_blank">M5Stick Plus 2 viewer</a> -- Evil-M5Project).
+                    WiFi tools ask for the viewer URL (default <code>http://127.0.0.1:5000</code>). Results are sent to Splunk with custom sourcetypes (<code>powershell:audit</code>, <code>wifi:marauder</code>, <code>m5stick:networks</code>).</p>
                 </div>
             </div>
 
             <div class="card">
                 <div class="card-header"><div class="card-title">Tools Reference</div></div>
                 <div class="tabs mb-16">
-                    <div class="tab active" onclick="document.getElementById('guide-network').style.display='';document.getElementById('guide-web').style.display='none';document.getElementById('guide-vuln').style.display='none';document.getElementById('guide-sys').style.display='none';document.getElementById('guide-osint').style.display='none'">Network (8)</div>
-                    <div class="tab" onclick="document.getElementById('guide-network').style.display='none';document.getElementById('guide-web').style.display='';document.getElementById('guide-vuln').style.display='none';document.getElementById('guide-sys').style.display='none';document.getElementById('guide-osint').style.display='none'">Web (8)</div>
+                    <div class="tab active" onclick="document.getElementById('guide-network').style.display='';document.getElementById('guide-web').style.display='none';document.getElementById('guide-vuln').style.display='none';document.getElementById('guide-sys').style.display='none';document.getElementById('guide-osint').style.display='none'">Network (9)</div>
+                    <div class="tab" onclick="document.getElementById('guide-network').style.display='none';document.getElementById('guide-web').style.display='';document.getElementById('guide-vuln').style.display='none';document.getElementById('guide-sys').style.display='none';document.getElementById('guide-osint').style.display='none'">Web (10)</div>
                     <div class="tab" onclick="document.getElementById('guide-network').style.display='none';document.getElementById('guide-web').style.display='none';document.getElementById('guide-vuln').style.display='';document.getElementById('guide-sys').style.display='none';document.getElementById('guide-osint').style.display='none'">Vuln (3)</div>
-                    <div class="tab" onclick="document.getElementById('guide-network').style.display='none';document.getElementById('guide-web').style.display='none';document.getElementById('guide-vuln').style.display='none';document.getElementById('guide-sys').style.display='';document.getElementById('guide-osint').style.display='none'">System (3)</div>
+                    <div class="tab" onclick="document.getElementById('guide-network').style.display='none';document.getElementById('guide-web').style.display='none';document.getElementById('guide-vuln').style.display='none';document.getElementById('guide-sys').style.display='';document.getElementById('guide-osint').style.display='none'">System (6)</div>
                     <div class="tab" onclick="document.getElementById('guide-network').style.display='none';document.getElementById('guide-web').style.display='none';document.getElementById('guide-vuln').style.display='none';document.getElementById('guide-sys').style.display='none';document.getElementById('guide-osint').style.display=''">OSINT (5)</div>
                 </div>
 
@@ -1632,6 +1637,7 @@
                         <tr><td>Ping Sweep</td><td>Checks host reachability via ICMP</td><td>Domain or IP</td><td>Alive status, latency stats</td></tr>
                         <tr><td>Traceroute</td><td>Traces network path to target</td><td>Domain or IP</td><td>Hop list with IPs and times</td></tr>
                         <tr><td>SSL/TLS Analyzer</td><td>Analyzes certificate and cipher details</td><td>Domain or IP</td><td>TLS version, cipher, cert validity, SAN</td></tr>
+                        <tr><td>CAA Checker</td><td>Checks which CAs are allowed to issue certificates</td><td>Domain</td><td>CAA records, issue/wildcard policies</td></tr>
                     </tbody></table>
                 </div>
 
@@ -1645,6 +1651,8 @@
                         <tr><td>Tech Detector</td><td>Fingerprints CMS, frameworks, CDN, analytics</td><td>URL</td><td>Categorized technology list</td></tr>
                         <tr><td>CSP Analyzer</td><td>Analyzes Content Security Policy strength</td><td>URL</td><td>Score 0-100, grade, issues, policy text</td></tr>
                         <tr><td>Open Redirect</td><td>Tests for open redirect in URL parameters</td><td>URL with params</td><td>Redirect chains to malicious URLs</td></tr>
+                        <tr><td>HTTP Methods</td><td>Checks which HTTP methods are allowed (PUT, DELETE, TRACE)</td><td>URL</td><td>Allowed methods with response codes</td></tr>
+                        <tr><td>Robots.txt Analyzer</td><td>Analyzes robots.txt for sensitive paths</td><td>URL</td><td>Disallowed paths, sitemaps, misconfigurations</td></tr>
                     </tbody></table>
                 </div>
 
@@ -1661,7 +1669,17 @@
                         <tr><td>Net Connections</td><td>Lists active network connections and listening ports</td><td>None (local system)</td><td>Listening/established connections table</td></tr>
                         <tr><td>Process Monitor</td><td>Lists running processes correlated with ports</td><td>None (local system)</td><td>Process table with memory and port info</td></tr>
                         <tr><td>System Info</td><td>Shows OS, network, firewall, disk, RAM</td><td>None (local system)</td><td>System overview with security posture</td></tr>
+                        <tr><td>PS Security Audit</td><td>Full enterprise security audit via PowerShell (10 modules: system, users, processes, network, logs, files, registry, LOLBAS, drivers, hardware)</td><td>None (Windows only)</td><td>Structured JSON per module with summaries</td></tr>
+                        <tr><td>WiFi Marauder Scan</td><td>Polls WiFi scan data from M5StickC Marauder viewer (networks, RSSI, BSSID, ESSID)</td><td>Viewer URL (default http://127.0.0.1:5000)</td><td>Networks table with signal strength and channels</td></tr>
+                        <tr><td>M5Stick Networks</td><td>Polls WiFi networks + clients from M5Stick Plus 2 Evil-M5Project viewer</td><td>Viewer URL (default http://127.0.0.1:5000)</td><td>Networks with client counts and channels</td></tr>
                     </tbody></table>
+                    <div style="margin-top:12px;padding:12px;background:rgba(255,255,255,0.05);border-radius:6px;font-size:12px">
+                        <strong>Hardware tools setup:</strong>
+                        <p style="margin-top:4px"><strong>PS Security Audit (Windows only):</strong> Clone <code>https://github.com/PoisonXploIT/Auditing_with_PowerShell</code> to <code>~/Auditing_with_PowerShell</code>. The tool auto-detects the script. Admin privileges recommended for full audit (logs, registry, services).</p>
+                        <p style="margin-top:4px"><strong>WiFi Marauder Scan:</strong> Clone <code>https://github.com/PoisonXploIT/wifi-marauder-viewer</code>, run <code>python app.py</code>. Requires M5StickC with Marauder firmware + PuTTY serial log capture.</p>
+                        <p style="margin-top:4px"><strong>M5Stick Networks:</strong> Clone <code>https://github.com/PoisonXploIT/Visualizacion_extendida_M5StickPlus2</code>, run <code>python src/app.py</code>. Requires M5Stick Plus 2 with Evil-M5Project firmware.</p>
+                        <p style="margin-top:8px"><strong>Splunk sourcetypes:</strong> PS Audit → <code>powershell:audit</code> (1 event per module) | WiFi Marauder → <code>wifi:marauder</code> | M5Stick → <code>m5stick:networks</code></p>
+                    </div>
                 </div>
                 <div id="guide-osint" style="display:none">
                     <table><thead><tr><th>Tool</th><th>What it does</th><th>Input</th><th>Output</th></tr></thead><tbody>
@@ -1744,12 +1762,23 @@
                     <p><strong>5.</strong> Set <strong>Enable Auto-Indexing</strong> to <strong>Enabled</strong>. From now on, every scan and pipeline that completes sends an event automatically.</p>
                     <p><strong>6.</strong> Use <strong>Export All History</strong> for initial bulk sync of existing scans and pipelines.</p>
                     <p style="margin-top:8px"><strong>Event format</strong>: Each event is a JSON object with <code>event</code>, <code>timestamp</code>, <code>scan_id</code>/<code>pipeline_id</code>, <code>tool</code>/<code>mode</code>, <code>target</code>, <code>status</code>, <code>success</code>, <code>elapsed_seconds</code>.</p>
+                    <p style="margin-top:8px"><strong>Full results export</strong>: Tools with rich JSON output (PS Security Audit, WiFi Marauder Scan, M5Stick Networks) also send their complete results to Splunk with custom sourcetypes:</p>
+                    <p style="margin-left:12px">• <code>powershell:audit</code> -- 1 event per audit module (system, users, processes, etc.) for granular SPL searches</p>
+                    <p style="margin-left:12px">• <code>wifi:marauder</code> -- 1 event with all detected WiFi networks (BSSID, ESSID, RSSI, channel)</p>
+                    <p style="margin-left:12px">• <code>m5stick:networks</code> -- 1 event with networks + clients (SSID, BSSID, client count)</p>
                     <p style="margin-top:8px"><strong>SPL Examples</strong>:</p>
                     <div class="result-panel"><pre style="font-size:11px">search index=sec_dashboard event="sec_dashboard_scan"
 search index=sec_dashboard status="failed"
 search index=sec_dashboard | stats count by tool
 search index=sec_dashboard | timechart count
-search index=sec_dashboard | stats avg(elapsed_seconds) as avg_time by tool</pre></div>
+search index=sec_dashboard | stats avg(elapsed_seconds) as avg_time by tool
+
+-- Hardware & audit tools:
+search index=sec_dashboard sourcetype=powershell:audit
+search index=sec_dashboard sourcetype=powershell:audit module=02_Usuarios
+search index=sec_dashboard sourcetype=wifi:marauder
+search index=sec_dashboard sourcetype=m5stick:networks
+search index=sec_dashboard (sourcetype=wifi:marauder OR sourcetype=m5stick:networks) | table timestamp tool</pre></div>
                     <p><strong>Note</strong>: Splunk REST API must be accessible from the dashboard server. For remote deployments (Railway), Splunk must be reachable via network. For local use, both must run on the same machine.</p>
                 </div>
             </div>
