@@ -287,14 +287,14 @@
     <div class="app">
         <nav class="sidebar">
             <div class="sidebar-header">
-                <h1> Sec-Dashboard <span class="version">v1.0</span></h1>
+                <h1> Sec-Dashboard <span class="version">v1.1</span></h1>
             </div>
             <div class="nav-section">Navigation</div>
             <a class="nav-item active" data-page="dashboard" onclick="navigate('dashboard')">
                 <span class="icon"></span> Dashboard
             </a>
             <a class="nav-item" data-page="tools" onclick="navigate('tools')">
-                <span class="icon"></span> Tools <span class="badge" id="tools-count">32</span>
+                <span class="icon"></span> Tools <span class="badge" id="tools-count">35</span>
             </a>
             <a class="nav-item" data-page="pipeline" onclick="navigate('pipeline')">
                 <span class="icon"></span> Pipeline
@@ -338,7 +338,7 @@
             </a>
             <div style="flex:1"></div>
             <div style="padding: 16px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-muted);">
-                <div>32 tools • 6 categories</div>
+                <div>35 tools • 6 categories</div>
                 <div>Webhooks • Cancel • SSRF protection</div>
             </div>
         </nav>
@@ -725,7 +725,7 @@
     // ── Tools ──────────────────────────────────
     async function renderTools() {
         const content = document.getElementById('content');
-        if (!state.tools.length) { const data = await api.get('/tools'); state.tools = data.tools || []; }
+        if (!state.tools.length) { const data = await api.get('/tools'); state.tools = data.tools || []; const badge = document.getElementById('tools-count'); if (badge) badge.textContent = state.tools.length; }
         let tools = state.tools;
         if (state.categoryFilter) tools = tools.filter(t => t.category === state.categoryFilter);
         if (state.toolSearch) {
