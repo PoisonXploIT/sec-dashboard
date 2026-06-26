@@ -139,7 +139,8 @@ async def ps_security_audit(**kw) -> dict:
         json_files = list(subdir.glob("*.json"))
         for jf in json_files:
             try:
-                data = json.loads(jf.read_text(encoding="utf-8", errors="replace"))
+                # PowerShell ConvertTo-Json writes UTF-8 with BOM, use utf-8-sig to strip it
+                data = json.loads(jf.read_text(encoding="utf-8-sig", errors="replace"))
                 module_name = subdir.name
                 # If data is a list, count items; if dict, extract keys
                 if isinstance(data, list):
@@ -166,7 +167,7 @@ async def ps_security_audit(**kw) -> dict:
     log_file = audit_folder / "auditoria.log"
     log_text = ""
     if log_file.exists():
-        log_text = log_file.read_text(encoding="utf-8", errors="replace")[:2000]
+        log_text = log_file.read_text(encoding="utf-8-sig", errors="replace")[:2000]
 
     return {
         "status": "completed",
