@@ -924,4 +924,8 @@ FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 @app.get("/", response_class=HTMLResponse)
 async def serve_index():
     index_file = FRONTEND_DIR / "index.html"
-    return HTMLResponse(content=index_file.read_text(encoding="utf-8"))
+    content = index_file.read_text(encoding="utf-8")
+    return HTMLResponse(
+        content=content,
+        headers={"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache", "Expires": "0"},
+    )

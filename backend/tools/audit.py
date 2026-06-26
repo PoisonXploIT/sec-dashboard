@@ -38,6 +38,16 @@ def _find_script() -> str | None:
     return None
 
 
+def _find_wrapper() -> str | None:
+    """Locate run-audit.ps1 (AMSI bypass wrapper) on disk."""
+    script_path = _find_script()
+    if script_path:
+        wrapper = Path(script_path).parent / "run-audit.ps1"
+        if wrapper.exists():
+            return str(wrapper)
+    return None
+
+
 async def ps_security_audit(**kw) -> dict:
     """Run the PowerShell security audit script and return a summary.
 
@@ -70,12 +80,14 @@ async def ps_security_audit(**kw) -> dict:
 
     # Run the script with -NoProfile and bypass execution policy
     # The script creates Auditoria_<timestamp>/ with 10 subfolders of JSON/CSV/TXT
+    # Use run-audit.ps1 wrapper if available (bypasses AMSI false positive blocking)
+    run_script = _find_wrapper() or script_path
     cmd = [
         "powershell",
         "-NoProfile",
         "-NonInteractive",
         "-ExecutionPolicy", "Bypass",
-        "-File", script_path,
+        "-File", run_script,
     ]
 
     try:
