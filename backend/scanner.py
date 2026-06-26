@@ -16,6 +16,7 @@ from backend.tools.web import (
 from backend.tools.vuln import cve_search, hash_checker, password_audit
 from backend.tools.system import network_connections, process_monitor, system_info
 from backend.tools.audit import ps_security_audit
+from backend.tools.wifi import wifi_marauder_scan, m5stick_networks
 from backend.tools.osint import asn_lookup, reverse_dns, ct_logs, shodan_lookup, ip_geolocation
 from backend.tools.emailsec import dnssec_checker, email_security, http_methods, robots_analyzer, caa_checker
 
@@ -63,6 +64,9 @@ HANDLERS: dict[str, Callable] = {
     "caa_checker": caa_checker,
     # Host Audit
     "ps_security_audit": ps_security_audit,
+    # WiFi Hardware (M5Stick devices)
+    "wifi_marauder_scan": wifi_marauder_scan,
+    "m5stick_networks": m5stick_networks,
 }
 
 
@@ -81,6 +85,7 @@ async def run_tool(tool_name: str, target: str, **kwargs) -> dict:
     timeout = tool_config.get("timeout", 60)
 
     # System tools don't need a target (or use target as data param)
+    # WiFi tools use target as the Flask app URL (not in system_tools)
     system_tools = {"network_connections", "process_monitor", "system_info", "ps_security_audit"}
 
     start = time.time()

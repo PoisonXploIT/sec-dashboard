@@ -256,6 +256,21 @@ TOOLS = {
         "icon": "PS",
         "timeout": 600,
     },
+    # ─── WiFi Hardware (M5Stick devices) ───
+    "wifi_marauder_scan": {
+        "name": "WiFi Marauder Scan",
+        "category": "System",
+        "description": "Poll WiFi scan data from M5StickC Marauder viewer (networks, RSSI, BSSID, ESSID)",
+        "icon": "WF",
+        "timeout": 30,
+    },
+    "m5stick_networks": {
+        "name": "M5Stick Networks",
+        "category": "System",
+        "description": "Poll WiFi networks + clients from M5Stick Plus 2 Evil-M5Project viewer",
+        "icon": "M5",
+        "timeout": 30,
+    },
 }
 
 CATEGORIES = ["Network Recon", "Web Security", "Vulnerability", "System", "OSINT", "Email Security"]
@@ -296,6 +311,16 @@ SPECIAL_TOOLS = {
         "input_label": None,
         "input_placeholder": None,
         "input_type": "none",
+    },
+    "wifi_marauder_scan": {
+        "input_label": "Marauder Viewer URL",
+        "input_placeholder": "http://127.0.0.1:5000",
+        "input_type": "text",
+    },
+    "m5stick_networks": {
+        "input_label": "M5Stick Viewer URL",
+        "input_placeholder": "http://127.0.0.1:5000",
+        "input_type": "text",
     },
 }
 

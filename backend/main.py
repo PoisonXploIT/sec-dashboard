@@ -582,11 +582,25 @@ async def create_scan(body: ScanCreate):
                 "status": status,
                 "elapsed_seconds": result.get("elapsed_seconds", 0),
             })
-            # Splunk auto-index
+            # Splunk auto-index (metadata)
             await splunk.index_scan_event(
                 scan_id, body.tool, effective_target, status,
                 result.get("elapsed_seconds", 0), result.get("success", False)
             )
+            # Splunk full results export for rich JSON tools
+            if result.get("success") and body.tool in splunk.RICH_JSON_TOOLS:
+                tool_result = result.get("result", {})
+                if body.tool == "ps_security_audit":
+                    # Send one event per audit module (granular Splunk search)
+                    audit_results = tool_result.get("results", {})
+                    audit_folder = tool_result.get("output_folder", "")
+                    if audit_results:
+                        await splunk.index_audit_modules(
+                            scan_id, body.tool, audit_results, audit_folder
+                        )
+                else:
+                    # WiFi tools: send full JSON as single event
+                    await splunk.index_full_results(body.tool, tool_result)
             return {"scan_id": scan_id, "status": status, "result": result}
         except asyncio.CancelledError:
             db2 = await get_db()

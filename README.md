@@ -1,6 +1,6 @@
 # Sec-Dashboard
 
-Local-first security dashboard for reconnaissance, vulnerability assessment, and monitoring. 27 tools across 5 categories, multi-phase pipeline engine, real-time WebSocket updates, and export in JSON/PDF.
+Local-first security dashboard for reconnaissance, vulnerability assessment, and monitoring. 35 tools across 6 categories, multi-phase pipeline engine, real-time WebSocket updates, and export in JSON/PDF.
 
 Built with FastAPI + vanilla JS. No cloud dependencies, no accounts — runs entirely on your machine.
 
@@ -8,14 +8,14 @@ Built with FastAPI + vanilla JS. No cloud dependencies, no accounts — runs ent
 
 ## Features
 
-**27 Security Tools** organized in 6 categories:
+**35 Security Tools** organized in 6 categories:
 
 | Category | Tools |
 |----------|-------|
 | Network Recon | Port Scanner, DNS Recon, Subdomain Enum, HTTP Probe, Whois Lookup, Ping Sweep, Traceroute, SSL Analyzer, CAA Checker |
 | Web Security | Header Analyzer, Dir Fuzzer, SQLi Scanner, XSS Scanner, CORS Checker, CSP Analyzer, Tech Detector, Open Redirect, HTTP Methods, Robots.txt Analyzer |
 | Vulnerability | CVE Search, Hash Checker, Password Audit |
-| System | Network Connections, Process Monitor, System Info |
+| System | Network Connections, Process Monitor, System Info, PS Security Audit, WiFi Marauder Scan, M5Stick Networks |
 | OSINT | ASN Lookup, Reverse DNS, Certificate Transparency, Shodan Lookup, IP Geolocation |
 | Email Security | DNSSEC Checker, Email Security (SPF/DKIM/DMARC) |
 
@@ -24,6 +24,9 @@ Built with FastAPI + vanilla JS. No cloud dependencies, no accounts — runs ent
 - **Password Audit**: input a password to check strength and breach status
 - **CVE Search**: input a keyword or CVE ID to search NIST NVD
 - **System tools**: run on the local machine, no target needed
+- **PS Security Audit**: full enterprise audit via PowerShell (Windows only, requires [Auditing_with_PowerShell](https://github.com/PoisonXploIT/Auditing_with_PowerShell) cloned locally)
+- **WiFi Marauder Scan**: poll WiFi scan data from [wifi-marauder-viewer](https://github.com/PoisonXploIT/wifi-marauder-viewer) Flask app (M5StickC + Marauder firmware)
+- **M5Stick Networks**: poll WiFi networks + clients from [Visualizacion_extendida_M5StickPlus2](https://github.com/PoisonXploIT/Visualizacion_extendida_M5StickPlus2) Flask app (M5Stick Plus 2 + Evil-M5Project firmware)
 
 **Pipeline Engine** — Multi-phase automated scans:
 - **Fast** (4 tools) — Quick recon + port scan
@@ -39,7 +42,7 @@ Built with FastAPI + vanilla JS. No cloud dependencies, no accounts — runs ent
 - Built-in integrated guide and API reference
 - Cancel running scans and pipelines
 - Webhook notifications (Discord, Slack, generic HTTP)
-- Splunk integration with auto-indexing via REST API
+- Splunk integration with auto-indexing via REST API — scan metadata always indexed; rich JSON tools (PS Audit, WiFi scans) export full results with custom sourcetypes (`powershell:audit`, `wifi:marauder`, `m5stick:networks`)
 - SSRF protection in remote mode (blocks private/loopback/metadata IPs)
 - Search and pagination in scan history
 - Pipeline results with per-tool formatted output

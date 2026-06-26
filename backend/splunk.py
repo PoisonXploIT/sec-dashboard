@@ -30,14 +30,20 @@ def set_splunk_config(config: dict):
     _splunk_config.update({k: v for k, v in config.items() if k in _splunk_config})
 
 
-async def _send_to_splunk(event: dict):
-    """Send a single event to Splunk via REST API receivers/simple."""
+async def _send_to_splunk(event: dict, sourcetype: str = None):
+    """Send a single event to Splunk via REST API receivers/simple.
+
+    Args:
+        event: The event dict to send.
+        sourcetype: Optional sourcetype override (e.g. 'wifi:marauder').
+                    Falls back to config default if not provided.
+    """
     if not _splunk_config["enabled"]:
         return
 
     url = _splunk_config["url"]
     index = _splunk_config["index"]
-    sourcetype = _splunk_config["sourcetype"]
+    st = sourcetype or _splunk_config["sourcetype"]
     auth = aiohttp.BasicAuth(_splunk_config["username"], _splunk_config["password"])
     verify_ssl = _splunk_config["verify_ssl"]
 
@@ -47,7 +53,7 @@ async def _send_to_splunk(event: dict):
         ssl_ctx.check_hostname = False
         ssl_ctx.verify_mode = ssl.CERT_NONE
 
-    endpoint = f"{url}/services/receivers/simple?index={index}&sourcetype={sourcetype}"
+    endpoint = f"{url}/services/receivers/simple?index={index}&sourcetype={st}"
 
     try:
         connector = aiohttp.TCPConnector(ssl=ssl_ctx) if ssl_ctx else None
@@ -219,6 +225,68 @@ async def bulk_export_to_splunk() -> dict:
                 pass
 
         ok = await _send_to_splunk(event)
+        if ok:
+            sent += 1
+        else:
+            failed += 1
+
+    return {"sent": sent, "failed": failed, "total": sent + failed}
+
+
+# ── Full results export (rich JSON tools) ──────────────────────
+
+# Tools that produce rich JSON output worth indexing in full
+RICH_JSON_TOOLS = {
+    "ps_security_audit": "powershell:audit",
+    "wifi_marauder_scan": "wifi:marauder",
+    "m5stick_networks": "m5stick:networks",
+}
+
+
+async def index_full_results(tool: str, result_data: dict, sourcetype: str = None):
+    """Send full tool results to Splunk as a single JSON event.
+
+    Used by tools that produce rich JSON output (WiFi scans, etc.).
+    For the PS audit, use index_audit_modules() instead to send
+    one event per module.
+    """
+    if not _splunk_config["enabled"]:
+        return
+
+    st = sourcetype or RICH_JSON_TOOLS.get(tool, _splunk_config["sourcetype"])
+    event = {
+        "event": f"sec_dashboard_{tool}_results",
+        "timestamp": datetime.utcnow().isoformat(),
+        "tool": tool,
+        "data": result_data,
+    }
+    await _send_to_splunk(event, sourcetype=st)
+
+
+async def index_audit_modules(scan_id: int, tool: str, results: dict,
+                               audit_folder: str = ""):
+    """Send PS audit module results to Splunk — one event per module.
+
+    Each module (01_Sistema, 02_Usuarios, etc.) becomes a separate
+    Splunk event with sourcetype 'powershell:audit', enabling granular
+    SPL searches like: sourcetype=powershell:audit module=02_Usuarios
+    """
+    if not _splunk_config["enabled"]:
+        return
+
+    sent = 0
+    failed = 0
+    for module_name, module_data in results.items():
+        event = {
+            "event": "sec_dashboard_ps_audit_module",
+            "timestamp": datetime.utcnow().isoformat(),
+            "scan_id": scan_id,
+            "tool": tool,
+            "module": module_name,
+            "audit_folder": audit_folder,
+            "data": module_data,
+        }
+        ok = await _send_to_splunk(event, sourcetype="powershell:audit")
         if ok:
             sent += 1
         else:
