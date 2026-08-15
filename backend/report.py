@@ -186,200 +186,258 @@ def _sanitize_dict(obj):
 
 
 def _render_scan_results(pdf, tool: str, result: dict):
-    """Render tool-specific findings into the PDF."""
-    # Sanitize all string values in result
-    result = _sanitize_dict(result)
-    if tool == "port_scanner":
-        pdf.kv_row("Host", result.get("host", ""))
-        pdf.kv_row("Open Ports", f"{result.get('open_count', 0)}/{result.get('scanned_ports', 0)}")
-        pdf.kv_row("Elapsed", f"{result.get('elapsed_seconds', '')}s")
-        if result.get("open_ports"):
-            pdf.ln(2)
-            pdf.set_font("Helvetica", "B", 8)
-            pdf.cell(15, 5, "Port", border=1)
-            pdf.cell(20, 5, "State", border=1)
-            pdf.cell(45, 5, "Service", border=1, new_x="LMARGIN", new_y="NEXT")
-            pdf.set_font("Helvetica", "", 8)
-            for p in result["open_ports"]:
-                pdf.cell(15, 5, str(p.get("port", "")), border=1)
-                pdf.cell(20, 5, p.get("state", ""), border=1)
-                pdf.cell(45, 5, p.get("service", ""), border=1, new_x="LMARGIN", new_y="NEXT")
+    """Render tool-specific findings into the PDF (dispatch via _RENDERERS)."""
+    renderer = _RENDERERS.get(tool)
+    if renderer is None:
+        pdf.add_json_block(_sanitize_dict(result), max_lines=30)
+        return
+    renderer(pdf, _sanitize_dict(result))
 
-    elif tool == "dns_recon":
-        pdf.kv_row("Records", str(result.get("record_count", "")))
-        records = result.get("records", {})
-        for rtype, entries in records.items():
-            if entries:
-                vals = ", ".join(str(e.get("value", e)) if isinstance(e, dict) else str(e) for e in entries[:5])
-                pdf.kv_row(f"  {rtype}", vals)
 
-    elif tool == "subdomain_enum":
-        pdf.kv_row("Found", str(result.get("count", "")))
-        pdf.kv_row("Wordlist", str(result.get("wordlist_size", "")))
-        pdf.kv_row("Elapsed", f"{result.get('elapsed_seconds', '')}s")
-        if result.get("subdomains_found"):
-            pdf.ln(2)
-            pdf.set_font("Helvetica", "B", 8)
-            pdf.cell(60, 5, "Subdomain", border=1)
-            pdf.cell(40, 5, "IP", border=1, new_x="LMARGIN", new_y="NEXT")
-            pdf.set_font("Helvetica", "", 8)
-            for sub in result["subdomains_found"]:
-                pdf.cell(60, 5, sub.get("subdomain", ""), border=1)
-                pdf.cell(40, 5, sub.get("ip", ""), border=1, new_x="LMARGIN", new_y="NEXT")
+_RENDERERS: dict = {}
 
-    elif tool == "http_probe":
-        pdf.kv_row("URL", result.get("url", ""))
-        pdf.kv_row("Status", str(result.get("status_code", "")))
-        pdf.kv_row("Server", result.get("server", ""))
-        pdf.kv_row("Content-Type", result.get("content_type", ""))
-        pdf.kv_row("Size", f"{result.get('content_length', 0)} bytes")
-        pdf.kv_row("Redirect", result.get("redirect_url", "None"))
 
-    elif tool == "whois_lookup":
-        pdf.kv_row("Domain", result.get("domain", ""))
-        pdf.kv_row("Registrar", result.get("registrar", ""))
-        pdf.kv_row("Created", result.get("creation_date", ""))
-        pdf.kv_row("Expires", result.get("expiration_date", ""))
-        pdf.kv_row("Name Servers", ", ".join(result.get("name_servers", [])[:3]))
-        pdf.kv_row("Country", result.get("country", ""))
+def _register(*tool_ids):
+    """Decorator: register a PDF renderer for one or more tool ids."""
+    def deco(fn):
+        for tid in tool_ids:
+            _RENDERERS[tid] = fn
+        return fn
+    return deco
 
-    elif tool == "ssl_analyzer":
-        pdf.kv_row("TLS Version", result.get("tls_version", ""))
-        pdf.kv_row("Cipher", result.get("cipher_suite", ""))
-        pdf.kv_row("Bits", str(result.get("cipher_bits", "")))
-        pdf.kv_row("Valid", str(result.get("valid", "")))
-        pdf.kv_row("Not After", result.get("not_after", ""))
-        pdf.kv_row("Issuer", str(result.get("issuer", {})))
-        if result.get("subject"):
-            pdf.kv_row("Subject", str(result["subject"]))
 
-    elif tool == "header_analyzer":
-        pdf.kv_row("Grade", result.get("grade", ""))
-        pdf.kv_row("Score", f"{result.get('score', '')}/10")
-        pdf.kv_row("URL", result.get("url", ""))
-        if result.get("security_headers_present"):
-            pdf.ln(1)
-            pdf.set_font("Helvetica", "B", 8)
-            pdf.cell(0, 5, "Present:", new_x="LMARGIN", new_y="NEXT")
-            pdf.set_font("Helvetica", "", 8)
-            for h in result["security_headers_present"]:
-                pdf.cell(0, 5, f"  + {h.get('header', '')}: {h.get('value', '')[:60]}", new_x="LMARGIN", new_y="NEXT")
-        if result.get("security_headers_missing"):
-            pdf.ln(1)
-            pdf.set_font("Helvetica", "B", 8)
-            pdf.set_text_color(200, 0, 0)
-            pdf.cell(0, 5, "Missing:", new_x="LMARGIN", new_y="NEXT")
-            pdf.set_text_color(0, 0, 0)
-            pdf.set_font("Helvetica", "", 8)
-            for h in result["security_headers_missing"]:
-                pdf.cell(0, 5, f"  - {h.get('header', '')}: {h.get('description', '')[:60]}", new_x="LMARGIN", new_y="NEXT")
+@_register("port_scanner")
+def _render_port_scanner(pdf, result: dict):
+    pdf.kv_row("Host", result.get("host", ""))
+    pdf.kv_row("Open Ports", f"{result.get('open_count', 0)}/{result.get('scanned_ports', 0)}")
+    pdf.kv_row("Elapsed", f"{result.get('elapsed_seconds', '')}s")
+    if result.get("open_ports"):
+        pdf.ln(2)
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.cell(15, 5, "Port", border=1)
+        pdf.cell(20, 5, "State", border=1)
+        pdf.cell(45, 5, "Service", border=1, new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font("Helvetica", "", 8)
+        for p in result["open_ports"]:
+            pdf.cell(15, 5, str(p.get("port", "")), border=1)
+            pdf.cell(20, 5, p.get("state", ""), border=1)
+            pdf.cell(45, 5, p.get("service", ""), border=1, new_x="LMARGIN", new_y="NEXT")
 
-    elif tool == "tech_detector":
-        pdf.kv_row("URL", result.get("url", ""))
-        pdf.kv_row("Status", str(result.get("status", "")))
-        pdf.kv_row("Server", result.get("server", ""))
-        pdf.kv_row("Total Detected", str(result.get("total_detected", "")))
-        for cat, techs in result.get("technologies", {}).items():
-            pdf.kv_row(f"  {cat}", ", ".join(techs))
 
-    elif tool == "dir_fuzzer":
-        pdf.kv_row("Found", str(result.get("count", "")))
-        if result.get("found_paths"):
-            pdf.ln(2)
-            pdf.set_font("Helvetica", "B", 8)
-            pdf.cell(60, 5, "Path", border=1)
-            pdf.cell(15, 5, "Status", border=1)
-            pdf.cell(20, 5, "Size", border=1, new_x="LMARGIN", new_y="NEXT")
-            pdf.set_font("Helvetica", "", 8)
-            for p in result["found_paths"][:20]:
-                pdf.cell(60, 5, p.get("path", "")[:40], border=1)
-                pdf.cell(15, 5, str(p.get("status", "")), border=1)
-                pdf.cell(20, 5, str(p.get("size", "")), border=1, new_x="LMARGIN", new_y="NEXT")
+@_register("dns_recon")
+def _render_dns_recon(pdf, result: dict):
+    pdf.kv_row("Records", str(result.get("record_count", "")))
+    records = result.get("records", {})
+    for rtype, entries in records.items():
+        if entries:
+            vals = ", ".join(str(e.get("value", e)) if isinstance(e, dict) else str(e) for e in entries[:5])
+            pdf.kv_row(f"  {rtype}", vals)
 
-    elif tool == "password_audit":
-        pdf.kv_row("Strength", result.get("strength", ""))
-        pdf.kv_row("Score", str(result.get("score", "")))
-        analysis = result.get("analysis", {})
-        pdf.kv_row("Length", str(analysis.get("length", "")))
-        pdf.kv_row("Entropy", str(analysis.get("entropy", "")))
-        pdf.kv_row("Breached", str(result.get("breached", "")))
 
-    elif tool == "cve_search":
-        pdf.kv_row("CVEs Found", str(result.get("count", "")))
-        for cve in result.get("cves", [])[:10]:
-            pdf.kv_row(f"  {cve.get('id', '')}", cve.get("summary", "")[:80])
+@_register("subdomain_enum")
+def _render_subdomain_enum(pdf, result: dict):
+    pdf.kv_row("Found", str(result.get("count", "")))
+    pdf.kv_row("Wordlist", str(result.get("wordlist_size", "")))
+    pdf.kv_row("Elapsed", f"{result.get('elapsed_seconds', '')}s")
+    if result.get("subdomains_found"):
+        pdf.ln(2)
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.cell(60, 5, "Subdomain", border=1)
+        pdf.cell(40, 5, "IP", border=1, new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font("Helvetica", "", 8)
+        for sub in result["subdomains_found"]:
+            pdf.cell(60, 5, sub.get("subdomain", ""), border=1)
+            pdf.cell(40, 5, sub.get("ip", ""), border=1, new_x="LMARGIN", new_y="NEXT")
 
-    elif tool == "ping_sweep":
-        alive = result.get("alive_hosts", [])
-        pdf.kv_row("Alive Hosts", str(len(alive)))
-        for h in alive[:10]:
-            pdf.kv_row(f"  {h.get('ip', '')}", f"{h.get('rtt_ms', '')}ms")
 
-    elif tool == "traceroute":
-        hops = result.get("hops", [])
-        pdf.kv_row("Hops", str(len(hops)))
-        for h in hops[:15]:
-            pdf.kv_row(f"  {h.get('hop', '')}", f"{h.get('host', h.get('ip', ''))}  {h.get('rtt_ms', '')}ms")
+@_register("http_probe")
+def _render_http_probe(pdf, result: dict):
+    pdf.kv_row("URL", result.get("url", ""))
+    pdf.kv_row("Status", str(result.get("status_code", "")))
+    pdf.kv_row("Server", result.get("server", ""))
+    pdf.kv_row("Content-Type", result.get("content_type", ""))
+    pdf.kv_row("Size", f"{result.get('content_length', 0)} bytes")
+    pdf.kv_row("Redirect", result.get("redirect_url", "None"))
 
-    elif tool == "asn_lookup":
-        pdf.kv_row("ASN", result.get("asn", ""))
-        pdf.kv_row("Name", result.get("name", ""))
-        pdf.kv_row("Country", result.get("country", ""))
-        pdf.kv_row("CIDR", result.get("cidr", ""))
 
-    elif tool == "reverse_dns":
-        pdf.kv_row("IP", result.get("ip", ""))
-        pdf.kv_row("Hostname", result.get("hostname", ""))
+@_register("whois_lookup")
+def _render_whois_lookup(pdf, result: dict):
+    pdf.kv_row("Domain", result.get("domain", ""))
+    pdf.kv_row("Registrar", result.get("registrar", ""))
+    pdf.kv_row("Created", result.get("creation_date", ""))
+    pdf.kv_row("Expires", result.get("expiration_date", ""))
+    pdf.kv_row("Name Servers", ", ".join(result.get("name_servers", [])[:3]))
+    pdf.kv_row("Country", result.get("country", ""))
 
-    elif tool == "ct_logs":
-        pdf.kv_row("Certificates", str(result.get("cert_count", "")))
-        pdf.kv_row("Subdomains", str(result.get("unique_subdomains", "")))
-        for sub in result.get("subdomains", [])[:10]:
-            pdf.cell(0, 5, f"  {sub}", new_x="LMARGIN", new_y="NEXT")
 
-    elif tool == "ip_geolocation":
-        pdf.kv_row("IP", result.get("ip", ""))
-        pdf.kv_row("Country", f"{result.get('country', '')} ({result.get('country_code', '')})")
-        pdf.kv_row("City", result.get("city", ""))
-        pdf.kv_row("ISP", result.get("isp", ""))
-        pdf.kv_row("Org", result.get("org", ""))
-        pdf.kv_row("Coordinates", f"{result.get('lat', '')}, {result.get('lon', '')}")
+@_register("ssl_analyzer")
+def _render_ssl_analyzer(pdf, result: dict):
+    pdf.kv_row("TLS Version", result.get("tls_version", ""))
+    pdf.kv_row("Cipher", result.get("cipher_suite", ""))
+    pdf.kv_row("Bits", str(result.get("cipher_bits", "")))
+    pdf.kv_row("Valid", str(result.get("valid", "")))
+    pdf.kv_row("Not After", result.get("not_after", ""))
+    pdf.kv_row("Issuer", str(result.get("issuer", {})))
+    if result.get("subject"):
+        pdf.kv_row("Subject", str(result["subject"]))
 
-    elif tool == "shodan_lookup":
-        pdf.kv_row("IP", result.get("ip", ""))
-        pdf.kv_row("Ports", ", ".join(str(p) for p in result.get("ports", [])[:10]))
-        pdf.kv_row("OS", result.get("os", ""))
-        pdf.kv_row("Org", result.get("org", ""))
 
-    elif tool == "cors_checker":
-        pdf.kv_row("Vulnerable", str(result.get("vulnerable", False)))
-        for finding in result.get("findings", [])[:5]:
-            pdf.kv_row(f"  {finding.get('name', '')}", finding.get("description", "")[:60])
+@_register("header_analyzer")
+def _render_header_analyzer(pdf, result: dict):
+    pdf.kv_row("Grade", result.get("grade", ""))
+    pdf.kv_row("Score", f"{result.get('score', '')}/10")
+    pdf.kv_row("URL", result.get("url", ""))
+    if result.get("security_headers_present"):
+        pdf.ln(1)
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.cell(0, 5, "Present:", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font("Helvetica", "", 8)
+        for h in result["security_headers_present"]:
+            pdf.cell(0, 5, f"  + {h.get('header', '')}: {h.get('value', '')[:60]}", new_x="LMARGIN", new_y="NEXT")
+    if result.get("security_headers_missing"):
+        pdf.ln(1)
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.set_text_color(200, 0, 0)
+        pdf.cell(0, 5, "Missing:", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_font("Helvetica", "", 8)
+        for h in result["security_headers_missing"]:
+            pdf.cell(0, 5, f"  - {h.get('header', '')}: {h.get('description', '')[:60]}", new_x="LMARGIN", new_y="NEXT")
 
-    elif tool == "csp_analyzer":
-        pdf.kv_row("Grade", result.get("grade", ""))
-        pdf.kv_row("Score", str(result.get("score", "")))
-        for issue in result.get("issues", [])[:5]:
-            pdf.kv_row(f"  {issue.get('severity', '')}", issue.get("description", "")[:60])
 
-    elif tool == "sqli_scanner":
-        pdf.kv_row("Vulnerable", str(result.get("vulnerable_count", 0)))
-        for finding in result.get("findings", [])[:5]:
-            pdf.kv_row(f"  {finding.get('param', '')}", finding.get("type", ""))
+@_register("tech_detector")
+def _render_tech_detector(pdf, result: dict):
+    pdf.kv_row("URL", result.get("url", ""))
+    pdf.kv_row("Status", str(result.get("status", "")))
+    pdf.kv_row("Server", result.get("server", ""))
+    pdf.kv_row("Total Detected", str(result.get("total_detected", "")))
+    for cat, techs in result.get("technologies", {}).items():
+        pdf.kv_row(f"  {cat}", ", ".join(techs))
 
-    elif tool == "xss_scanner":
-        pdf.kv_row("Vulnerable", str(result.get("vulnerable_count", 0)))
-        for finding in result.get("findings", [])[:5]:
-            pdf.kv_row(f"  {finding.get('param', '')}", finding.get("type", ""))
 
-    elif tool == "open_redirect":
-        pdf.kv_row("Vulnerable", str(result.get("vulnerable", False)))
-        for finding in result.get("findings", [])[:5]:
-            pdf.kv_row(f"  {finding.get('param', '')}", finding.get("url", "")[:60])
+@_register("dir_fuzzer")
+def _render_dir_fuzzer(pdf, result: dict):
+    pdf.kv_row("Found", str(result.get("count", "")))
+    if result.get("found_paths"):
+        pdf.ln(2)
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.cell(60, 5, "Path", border=1)
+        pdf.cell(15, 5, "Status", border=1)
+        pdf.cell(20, 5, "Size", border=1, new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font("Helvetica", "", 8)
+        for p in result["found_paths"][:20]:
+            pdf.cell(60, 5, p.get("path", "")[:40], border=1)
+            pdf.cell(15, 5, str(p.get("status", "")), border=1)
+            pdf.cell(20, 5, str(p.get("size", "")), border=1, new_x="LMARGIN", new_y="NEXT")
 
-    else:
-        # Generic fallback
-        pdf.add_json_block(result, max_lines=30)
+
+@_register("password_audit")
+def _render_password_audit(pdf, result: dict):
+    pdf.kv_row("Strength", result.get("strength", ""))
+    pdf.kv_row("Score", str(result.get("score", "")))
+    analysis = result.get("analysis", {})
+    pdf.kv_row("Length", str(analysis.get("length", "")))
+    pdf.kv_row("Entropy", str(analysis.get("entropy", "")))
+    pdf.kv_row("Breached", str(result.get("breached", "")))
+
+
+@_register("cve_search")
+def _render_cve_search(pdf, result: dict):
+    pdf.kv_row("CVEs Found", str(result.get("count", "")))
+    for cve in result.get("cves", [])[:10]:
+        pdf.kv_row(f"  {cve.get('id', '')}", cve.get("summary", "")[:80])
+
+
+@_register("ping_sweep")
+def _render_ping_sweep(pdf, result: dict):
+    alive = result.get("alive_hosts", [])
+    pdf.kv_row("Alive Hosts", str(len(alive)))
+    for h in alive[:10]:
+        pdf.kv_row(f"  {h.get('ip', '')}", f"{h.get('rtt_ms', '')}ms")
+
+
+@_register("traceroute")
+def _render_traceroute(pdf, result: dict):
+    hops = result.get("hops", [])
+    pdf.kv_row("Hops", str(len(hops)))
+    for h in hops[:15]:
+        pdf.kv_row(f"  {h.get('hop', '')}", f"{h.get('host', h.get('ip', ''))}  {h.get('rtt_ms', '')}ms")
+
+
+@_register("asn_lookup")
+def _render_asn_lookup(pdf, result: dict):
+    pdf.kv_row("ASN", result.get("asn", ""))
+    pdf.kv_row("Name", result.get("name", ""))
+    pdf.kv_row("Country", result.get("country", ""))
+    pdf.kv_row("CIDR", result.get("cidr", ""))
+
+
+@_register("reverse_dns")
+def _render_reverse_dns(pdf, result: dict):
+    pdf.kv_row("IP", result.get("ip", ""))
+    pdf.kv_row("Hostname", result.get("hostname", ""))
+
+
+@_register("ct_logs")
+def _render_ct_logs(pdf, result: dict):
+    pdf.kv_row("Certificates", str(result.get("cert_count", "")))
+    pdf.kv_row("Subdomains", str(result.get("unique_subdomains", "")))
+    for sub in result.get("subdomains", [])[:10]:
+        pdf.cell(0, 5, f"  {sub}", new_x="LMARGIN", new_y="NEXT")
+
+
+@_register("ip_geolocation")
+def _render_ip_geolocation(pdf, result: dict):
+    pdf.kv_row("IP", result.get("ip", ""))
+    pdf.kv_row("Country", f"{result.get('country', '')} ({result.get('country_code', '')})")
+    pdf.kv_row("City", result.get("city", ""))
+    pdf.kv_row("ISP", result.get("isp", ""))
+    pdf.kv_row("Org", result.get("org", ""))
+    pdf.kv_row("Coordinates", f"{result.get('lat', '')}, {result.get('lon', '')}")
+
+
+@_register("shodan_lookup")
+def _render_shodan_lookup(pdf, result: dict):
+    pdf.kv_row("IP", result.get("ip", ""))
+    pdf.kv_row("Ports", ", ".join(str(p) for p in result.get("ports", [])[:10]))
+    pdf.kv_row("OS", result.get("os", ""))
+    pdf.kv_row("Org", result.get("org", ""))
+
+
+@_register("cors_checker")
+def _render_cors_checker(pdf, result: dict):
+    pdf.kv_row("Vulnerable", str(result.get("vulnerable", False)))
+    for finding in result.get("findings", [])[:5]:
+        pdf.kv_row(f"  {finding.get('name', '')}", finding.get("description", "")[:60])
+
+
+@_register("csp_analyzer")
+def _render_csp_analyzer(pdf, result: dict):
+    pdf.kv_row("Grade", result.get("grade", ""))
+    pdf.kv_row("Score", str(result.get("score", "")))
+    for issue in result.get("issues", [])[:5]:
+        pdf.kv_row(f"  {issue.get('severity', '')}", issue.get("description", "")[:60])
+
+
+@_register("sqli_scanner")
+def _render_sqli_scanner(pdf, result: dict):
+    pdf.kv_row("Vulnerable", str(result.get("vulnerable_count", 0)))
+    for finding in result.get("findings", [])[:5]:
+        pdf.kv_row(f"  {finding.get('param', '')}", finding.get("type", ""))
+
+
+@_register("xss_scanner")
+def _render_xss_scanner(pdf, result: dict):
+    pdf.kv_row("Vulnerable", str(result.get("vulnerable_count", 0)))
+    for finding in result.get("findings", [])[:5]:
+        pdf.kv_row(f"  {finding.get('param', '')}", finding.get("type", ""))
+
+
+@_register("open_redirect")
+def _render_open_redirect(pdf, result: dict):
+    pdf.kv_row("Vulnerable", str(result.get("vulnerable", False)))
+    for finding in result.get("findings", [])[:5]:
+        pdf.kv_row(f"  {finding.get('param', '')}", finding.get("url", "")[:60])
 
 
 def generate_all_pdf(scans: list, pipelines: list, targets: list) -> bytes:
