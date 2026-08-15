@@ -18,7 +18,17 @@ async def cve_search(query: str, max_results: int = 10, **kw) -> dict:
     if re.match(r"CVE-\d{4}-\d+", query.upper()):
         params = {"cveId": query.upper()}
     else:
-        params = {"keywordSearch": query, "resultsPerPage": max_results}
+        # NVD 2.0 has no server-side sort (pages oldest first) and caps date
+        # ranges at 120 days. Search the last 90 days first (recent CVEs),
+        # fall back to unfiltered if empty.
+        from datetime import datetime, timezone, timedelta
+        now = datetime.now(timezone.utc)
+        params = {
+            "keywordSearch": query,
+            "resultsPerPage": max(max_results * 4, 40),
+            "pubStartDate": (now - timedelta(days=90)).isoformat(timespec="milliseconds"),
+            "pubEndDate": now.isoformat(timespec="milliseconds"),
+        }
 
     try:
         async with aiohttp.ClientSession(
@@ -27,8 +37,18 @@ async def cve_search(query: str, max_results: int = 10, **kw) -> dict:
             async with session.get(url, params=params) as resp:
                 if resp.status == 200:
                     data = await resp.json()
+                    vulns = data.get("vulnerabilities", [])
+                    # Fallback: if the date filter returned nothing, retry without it
+                    if not vulns and "pubStartDate" in params:
+                        params.pop("pubStartDate"), params.pop("pubEndDate")
+                        async with session.get(url, params=params) as resp2:
+                            if resp2.status == 200:
+                                data = await resp2.json()
+                                vulns = data.get("vulnerabilities", [])
+                            else:
+                                return {"query": query, "error": f"API returned status {resp2.status}"}
                     cves = []
-                    for vuln in data.get("vulnerabilities", [])[:max_results]:
+                    for vuln in vulns:
                         cve_data = vuln.get("cve", {})
                         metrics = cve_data.get("metrics", {})
 
@@ -55,6 +75,9 @@ async def cve_search(query: str, max_results: int = 10, **kw) -> dict:
                             "last_modified": cve_data.get("lastModified"),
                         })
 
+                    # Sort newest first, then trim to max_results
+                    cves.sort(key=lambda c: c.get("published") or "", reverse=True)
+                    cves = cves[:max_results]
                     return {
                         "query": query,
                         "total_results": data.get("totalResults", 0),

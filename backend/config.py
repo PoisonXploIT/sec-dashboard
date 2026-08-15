@@ -329,7 +329,7 @@ PIPELINES = {
     "fast": {
         "name": "Fast Scan",
         "description": "Quick recon + port scan (~1 min)",
-        "icon": "",
+        "icon": "F",
         "phases": [
             {"name": "Recon", "tools": ["whois_lookup", "dns_recon", "http_probe"]},
             {"name": "Scan", "tools": ["port_scanner"]},
@@ -338,7 +338,7 @@ PIPELINES = {
     "deep": {
         "name": "Deep Scan",
         "description": "Full recon + web + OSINT (~5 min)",
-        "icon": "",
+        "icon": "DP",
         "phases": [
             {"name": "Recon", "tools": ["whois_lookup", "dns_recon", "subdomain_enum", "http_probe"]},
             {"name": "Scan", "tools": ["port_scanner", "ssl_analyzer"]},
@@ -349,7 +349,7 @@ PIPELINES = {
     "nuclear": {
         "name": "Nuclear Scan",
         "description": "Comprehensive security audit (~7 min)",
-        "icon": "",
+        "icon": "NU",
         "phases": [
             {"name": "Recon", "tools": ["whois_lookup", "dns_recon", "subdomain_enum", "http_probe", "caa_checker"]},
             {"name": "Scan", "tools": ["port_scanner", "ssl_analyzer"]},

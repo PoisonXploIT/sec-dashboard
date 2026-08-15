@@ -489,7 +489,7 @@
         setTimeout(() => el.remove(), 4000);
     }
 
-    function esc(str) { return String(str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+    function esc(str) { return String(str||'').replace(/\\/g,'&#92;').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/'/g,'&#39;'); }
     function catIcon(cat) { return {'Network Recon':'','Web Security':'','Vulnerability':'','System':'','OSINT':'OS','Email Security':'EM'}[cat]||''; }
     function catClass(cat) { return {'Network Recon':'network','Web Security':'web','Vulnerability':'vuln','System':'system','OSINT':'osint','Email Security':'emailsec'}[cat]||'network'; }
 
@@ -824,7 +824,24 @@
         }
 
         try {
-            const result = await api.post('/scans', { target_id: targetId, tool: toolId, params: params, direct_input: directInput });
+            // Non-blocking start + poll (avoids long-held HTTP requests)
+            const start = await api.post('/scans', { target_id: targetId, tool: toolId, params: params, direct_input: directInput, wait: false });
+            let result;
+            if (start.result) {
+                result = start; // finished immediately
+            } else {
+                result = await new Promise((resolve, reject) => {
+                    const poll = async () => {
+                        try {
+                            const scan = await api.get(`/scans/${start.scan_id}`);
+                            if (scan.status === 'running' || scan.status === 'pending') { setTimeout(poll, 1500); return; }
+                            const parsed = scan.result ? JSON.parse(scan.result) : { success: false, error: 'No result' };
+                            resolve({ scan_id: start.scan_id, status: scan.status, result: parsed });
+                        } catch (e) { reject(e); }
+                    };
+                    setTimeout(poll, 1500);
+                });
+            }
             const toolResult = result.result || {};
             if (card) { card.className = `tool-card ${toolResult.success ? 'success' : 'error'}`; const elapsed = card.querySelector('.elapsed'); if (!elapsed) { const e = document.createElement('span'); e.className='elapsed'; e.textContent=`${toolResult.elapsed_seconds}s`; card.appendChild(e); } else { elapsed.textContent=`${toolResult.elapsed_seconds}s`; } }
 
