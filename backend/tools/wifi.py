@@ -14,8 +14,29 @@ If empty, defaults to http://127.0.0.1:5000.
 """
 import asyncio
 from datetime import datetime
+from urllib.parse import urlparse
 
 import aiohttp
+
+from backend.validators import is_remote_mode
+
+
+def _validate_viewer_url(base_url: str) -> str | None:
+    """Validate the viewer URL. Returns error message or None if OK.
+
+    In remote mode these tools are disabled entirely (SSRF bypass risk:
+    the viewer URL is arbitrary user input that could target cloud
+    metadata endpoints or internal networks).
+    In local mode, only http/https schemes are allowed.
+    """
+    if is_remote_mode():
+        return "WiFi hardware tools are disabled in remote deployments (they poll a viewer running on your local machine)"
+    parsed = urlparse(base_url)
+    if parsed.scheme not in ("http", "https"):
+        return f"Invalid URL scheme '{parsed.scheme}' -- only http/https allowed"
+    if not parsed.hostname:
+        return "Invalid URL -- no hostname"
+    return None
 
 
 async def _fetch_json(url: str, timeout: int = 15) -> dict:
@@ -47,6 +68,10 @@ async def wifi_marauder_scan(target: str = "", **kw) -> dict:
     """
     base_url = (target or "http://127.0.0.1:5000").rstrip("/")
     api_url = f"{base_url}/api/scan.json"
+
+    url_error = _validate_viewer_url(base_url)
+    if url_error:
+        return {"error": url_error, "url": api_url}
 
     try:
         data = await _fetch_json(api_url, timeout=15)
@@ -99,6 +124,10 @@ async def m5stick_networks(target: str = "", **kw) -> dict:
     """
     base_url = (target or "http://127.0.0.1:5000").rstrip("/")
     api_url = f"{base_url}/api/networks.json"
+
+    url_error = _validate_viewer_url(base_url)
+    if url_error:
+        return {"error": url_error, "url": api_url}
 
     try:
         data = await _fetch_json(api_url, timeout=15)

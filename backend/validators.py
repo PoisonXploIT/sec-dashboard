@@ -1,18 +1,19 @@
-"""Target validation -- SSRF protection for remote deployments."""
+﻿"""Target validation -- SSRF protection for remote deployments."""
 import ipaddress
+import os
 import socket
 from pathlib import Path
 
-# Config flag: set to True to block private/loopback/link-local targets
-# Auto-detect: if PORT env var is set (Railway), enforce validation
-import os
-_ENFORCE = os.environ.get("SEC_DASHBOARD_REMOTE", "").lower() in ("1", "true", "yes")
-if os.environ.get("PORT"):
-    _ENFORCE = True
-
 
 def is_remote_mode() -> bool:
-    return _ENFORCE
+    """True if SSRF protection is enforced.
+
+    Auto-detect: if PORT env var is set (Railway), enforce validation.
+    Evaluated at call time so the env var can change at runtime.
+    """
+    if os.environ.get("SEC_DASHBOARD_REMOTE", "").lower() in ("1", "true", "yes"):
+        return True
+    return bool(os.environ.get("PORT"))
 
 
 def validate_target(host: str) -> tuple[bool, str]:
@@ -29,14 +30,14 @@ def validate_target(host: str) -> tuple[bool, str]:
     # Check for AWS/GCP/Azure metadata endpoints
     metadata_hosts = {"169.254.169.254", "metadata.google.internal", "metadata"}
     if host.lower() in metadata_hosts:
-        if _ENFORCE:
+        if is_remote_mode():
             return False, "Metadata endpoint blocked (SSRF protection)"
         return True, "Metadata endpoint (allowed in local mode)"
 
     # Try to parse as IP
     try:
         ip = ipaddress.ip_address(host)
-        if _ENFORCE:
+        if is_remote_mode():
             if ip.is_private:
                 return False, f"Private IP blocked (SSRF protection): {host}"
             if ip.is_loopback:
@@ -52,7 +53,7 @@ def validate_target(host: str) -> tuple[bool, str]:
     # Check for localhost variants
     localhost_names = {"localhost", "localhost.localdomain", "0.0.0.0"}
     if host.lower() in localhost_names:
-        if _ENFORCE:
+        if is_remote_mode():
             return False, f"Localhost blocked (SSRF protection): {host}"
         return True, "Localhost (allowed in local mode)"
 
@@ -60,12 +61,12 @@ def validate_target(host: str) -> tuple[bool, str]:
     internal_tlds = [".internal", ".local", ".corp", ".lan", ".intranet"]
     for tld in internal_tlds:
         if host.lower().endswith(tld):
-            if _ENFORCE:
+            if is_remote_mode():
                 return False, f"Internal hostname blocked (SSRF protection): {host}"
             return True, f"Internal hostname (allowed in local mode)"
 
     # Try DNS resolution to check if it resolves to private IP
-    if _ENFORCE:
+    if is_remote_mode():
         try:
             resolved = socket.getaddrinfo(host, None)
             for family, _, _, _, sockaddr in resolved:

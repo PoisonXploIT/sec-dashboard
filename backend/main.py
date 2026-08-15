@@ -28,15 +28,11 @@ from backend import splunk
 
 app = FastAPI(title="Sec-Dashboard", version="1.0.0")
 
+_same_origin = ["http://localhost:8444", "http://127.0.0.1:8444"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:8444",
-        "http://127.0.0.1:8444",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "https://sec.sammideblas.com",
-    ],
+    allow_origins=_same_origin + (["https://sec.sammideblas.com"] if is_remote_mode() else []),
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -56,13 +52,20 @@ class ProxyConfig(BaseModel):
 @app.get("/api/proxy")
 async def get_proxy():
     config = get_proxy_config()
+    config["password"] = "***" if config.get("password") else ""
     tor = get_tor_status()
     return {"config": config, "tor_status": tor}
 
 @app.post("/api/proxy")
 async def update_proxy(body: ProxyConfig):
-    set_proxy_config(body.dict())
-    return {"status": "updated", "config": get_proxy_config()}
+    config = body.dict()
+    # Don't overwrite password if masked
+    if config.get("password") == "***":
+        config["password"] = get_proxy_config().get("password", "")
+    set_proxy_config(config)
+    config = get_proxy_config()
+    config["password"] = "***" if config.get("password") else ""
+    return {"status": "updated", "config": config}
 
 @app.get("/api/proxy/tor-ip")
 async def get_tor_exit_ip():
@@ -256,6 +259,7 @@ class ScanCreate(BaseModel):
     tool: str
     params: dict = {}
     direct_input: str = ""  # For special tools
+    wait: bool = True  # False = return immediately, poll GET /api/scans/{id}
 
 class PipelineCreate(BaseModel):
     target_id: int
@@ -373,7 +377,7 @@ async def dashboard_stats():
         cur = await db.execute(
             "SELECT p.id, p.mode, p.status, p.started_at, p.finished_at, p.progress, "
             "t.name as target_name, t.host as target_host "
-            "FROM pipelines p JOIN targets t ON p.target_id = t.id "
+            "FROM pipelines p LEFT JOIN targets t ON p.target_id = t.id "
             "ORDER BY p.started_at DESC LIMIT 5"
         )
         recent_pipelines = [dict(r) for r in await cur.fetchall()]
@@ -632,8 +636,29 @@ async def create_scan(body: ScanCreate):
     task = asyncio.create_task(_run_scan())
     _running_scans[scan_id] = task
 
+    if not body.wait:
+        # Non-blocking: client polls GET /api/scans/{id} or listens on the WebSocket
+        return {"scan_id": scan_id, "status": "running"}
+
     # Wait for it to complete (blocking endpoint -- returns when done)
     return await task
+
+
+@app.get("/api/scans/{scan_id}")
+async def get_scan(scan_id: int):
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT s.*, t.name as target_name, t.host as target_host "
+            "FROM scans s LEFT JOIN targets t ON s.target_id = t.id WHERE s.id = ?",
+            (scan_id,)
+        )
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(404, "Scan not found")
+        return dict(row)
+    finally:
+        await db.close()
 
 
 @app.delete("/api/scans/{scan_id}")
@@ -669,7 +694,7 @@ async def pipeline_history():
     try:
         cursor = await db.execute(
             "SELECT p.*, t.name as target_name, t.host as target_host "
-            "FROM pipelines p JOIN targets t ON p.target_id = t.id "
+            "FROM pipelines p LEFT JOIN targets t ON p.target_id = t.id "
             "ORDER BY p.started_at DESC LIMIT 20"
         )
         rows = await cursor.fetchall()
@@ -815,6 +840,23 @@ class WebhookCreate(BaseModel):
     enabled: bool = True
 
 
+def _validate_webhook_url(url: str):
+    """Reject webhook URLs that could be used for blind SSRF."""
+    from urllib.parse import urlparse
+    if not url or not url.strip():
+        raise HTTPException(status_code=400, detail="URL cannot be empty")
+    parsed = urlparse(url.strip())
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(status_code=400, detail=f"Invalid URL scheme '{parsed.scheme}' -- only http/https allowed")
+    if not parsed.hostname:
+        raise HTTPException(status_code=400, detail="Invalid URL -- no hostname")
+    if is_remote_mode():
+        ok, reason = validate_target(parsed.hostname)
+        if not ok:
+            raise HTTPException(status_code=400, detail=f"Webhook URL blocked: {reason}")
+    return url.strip()
+
+
 @app.get("/api/webhooks")
 async def list_webhooks_endpoint():
     return {"webhooks": await webhooks.list_webhooks()}
@@ -822,12 +864,14 @@ async def list_webhooks_endpoint():
 
 @app.post("/api/webhooks")
 async def create_webhook_endpoint(body: WebhookCreate):
-    return await webhooks.create_webhook(body.name, body.url, body.type, body.events, body.enabled)
+    url = _validate_webhook_url(body.url)
+    return await webhooks.create_webhook(body.name, url, body.type, body.events, body.enabled)
 
 
 @app.put("/api/webhooks/{webhook_id}")
 async def update_webhook_endpoint(webhook_id: int, body: WebhookCreate):
-    return await webhooks.update_webhook(webhook_id, name=body.name, url=body.url,
+    url = _validate_webhook_url(body.url)
+    return await webhooks.update_webhook(webhook_id, name=body.name, url=url,
                                          type=body.type, events=body.events, enabled=body.enabled)
 
 
