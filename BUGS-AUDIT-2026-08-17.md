@@ -147,24 +147,30 @@ guardado (el resultado en vivo puede seguir devolviéndolo).
 
 ## 🔵 LOW
 
-### L1 — `ping_sweep`/`traceroute` solo funcionan en Windows
+### L1 — `ping_sweep`/`traceroute` solo funcionan en Windows ✅ FIXED
+Detección con `platform.system()`: `-n/-c` y `tracert/traceroute -n -m`.
+Verificado en Windows; la rama Linux es la que usará el deploy en Railway.
 **Estático.** `network.py:327` tiene `param = "-n" if True else "-c"` (código
 muerto, siempre Windows) y `traceroute` llama a `tracert`. En Linux/Docker
 (Railway) ambos fallan con FileNotFoundError.
 **Plan:** `platform.system()` → elegir `-n/-c` y `tracert/traceroute`.
 
-### L2 — `/api/status`: campo `uptime` es en realidad la epoch actual
+### L2 — `/api/status`: campo `uptime` es en realidad la epoch actual ✅ FIXED
+Verificado: ahora devuelve segundos de uptime reales (ej. `17`).
 **Verificado** (`"uptime":1786996733.79` — es `time.time()`, no uptime).
 Ya existe `uptime_seconds` correcto en `/api/dashboard/stats`.
 **Plan:** cambiar a `time.time() - START_TIME` o eliminar el campo.
 
-### L3 — `get_tor_status` bloquea el event loop
+### L3 — `get_tor_status` bloquea el event loop ✅ FIXED
+Verificado: `asyncio.to_thread` + timeout reducido 3s→0.5s por puerto.
+`/api/proxy` pasa de ~6s a ~1.5s y ya no congela el event loop.
 **Estático.** `proxy.py:121-135` hace `socket.connect_ex` con timeout 3s
 síncrono dentro del endpoint async `/api/proxy` — hasta 9s de bloqueo (3
 puertos × 3s) si hay filtrado de paquetes.
 **Plan:** envolver en `asyncio.to_thread(...)` o reducir timeout a 0.5s.
 
-### L4 — `delete_target`/`delete_scan`/`delete_pipeline` devuelven `{"deleted": true}` aunque no exista
+### L4 — `delete_target`/`delete_scan`/`delete_pipeline` devuelven `{"deleted": true}` aunque no exista ✅ FIXED
+Verificado: los tres devuelven 404 cuando `rowcount == 0`.
 **Estático.** No comprueban `cursor.rowcount`; siempre 200.
 **Plan:** si `rowcount == 0` → `HTTPException(404)`.
 
