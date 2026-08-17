@@ -40,15 +40,24 @@ app.add_middleware(
 # ── API key auth (C2) ─────────────────────────────────────────
 # If SEC_DASHBOARD_API_KEY is set, every /api/* request must send
 # header X-API-Key (or ?key= for the WebSocket). Unset = open (local use).
+# Cloudflare Access (portfolio mode): requests that already passed the
+# Access policy carry Cf-Access-Authenticated-User-Email (injected by
+# Cloudflare, only reachable through it) and are allowed without a key.
 API_KEY = os.environ.get("SEC_DASHBOARD_API_KEY", "")
+
+
+def _passed_cloudflare_access(request: Request) -> bool:
+    """True if Cloudflare Access authenticated this request (SSO login)."""
+    return bool(request.headers.get("Cf-Access-Authenticated-User-Email"))
 
 
 @app.middleware("http")
 async def require_api_key(request: Request, call_next):
     if API_KEY and request.url.path.startswith("/api"):
         # Let CORS preflight through so the browser can negotiate
-        if request.method != "OPTIONS" and request.headers.get("X-API-Key") != API_KEY:
-            return JSONResponse({"detail": "Invalid or missing API key"}, status_code=401)
+        if request.method != "OPTIONS":
+            if not _passed_cloudflare_access(request) and request.headers.get("X-API-Key") != API_KEY:
+                return JSONResponse({"detail": "Invalid or missing API key"}, status_code=401)
     return await call_next(request)
 
 
@@ -990,7 +999,8 @@ async def reset_all(confirm: bool = Query(False)):
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     # C2: when API key auth is enabled, require ?key= on the WS handshake
-    if API_KEY and ws.query_params.get("key") != API_KEY:
+    # (unless the handshake already passed Cloudflare Access SSO)
+    if API_KEY and not _passed_cloudflare_access(ws) and ws.query_params.get("key") != API_KEY:
         await ws.close(code=4401)
         return
     await ws.accept()
