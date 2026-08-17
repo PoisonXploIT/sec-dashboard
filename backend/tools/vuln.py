@@ -110,7 +110,8 @@ async def hash_checker(hash_value: str, **kw) -> dict:
     results = {"hash": hash_value, "hash_type": hash_type, "sources": {}}
 
     # Try MalwareBazaar (abuse.ch) — requires free Auth-Key (env MALWAREBAZAAR_API_KEY)
-    # M2: the API requires lowercase hash-type keys (md5/sha1/sha256)
+    # M2+2026-08-17: the API only accepts the generic `hash` field (md5/sha1/sha256
+    # as field names return query_status=no_hash_provided), value = the hash itself.
     import os
     mb_auth_key = os.environ.get("MALWAREBAZAAR_API_KEY", "")
     if not mb_auth_key:
@@ -118,13 +119,12 @@ async def hash_checker(hash_value: str, **kw) -> dict:
             "error": "No MALWAREBAZAAR_API_KEY set — abuse.ch requires a free Auth-Key"
         }
     else:
-        mb_key = {"MD5": "md5", "SHA-1": "sha1", "SHA-256": "sha256"}.get(hash_type, "md5")
         try:
             async with aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=15)
             ) as session:
                 mb_url = "https://mb-api.abuse.ch/api/v1/"
-                data = {"query": "get_info", mb_key: hash_value}
+                data = {"query": "get_info", "hash": hash_value}
                 async with session.post(mb_url, data=data,
                                         headers={"Auth-Key": mb_auth_key}) as resp:
                     if resp.status == 200:
