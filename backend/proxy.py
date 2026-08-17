@@ -125,7 +125,7 @@ def get_tor_status() -> dict:
     for port in [9150, 9050, 9151]:
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(3)
+            s.settimeout(0.5)  # L3: 3s per port made /api/proxy take up to 9s
             result = s.connect_ex(("127.0.0.1", port))
             s.close()
             if result == 0:

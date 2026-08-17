@@ -324,7 +324,8 @@ async def _raw_whois(domain: str) -> dict:
 # ── 6. Ping Sweep ──────────────────────────────────────────────
 async def ping_sweep(host: str, count: int = 4, **kw) -> dict:
     """ICMP ping reachability check."""
-    param = "-n" if True else "-c"  # Windows
+    import platform
+    param = "-n" if platform.system() == "Windows" else "-c"  # L1
     cmd = ["ping", param, str(count), host]
 
     try:
@@ -357,7 +358,11 @@ async def ping_sweep(host: str, count: int = 4, **kw) -> dict:
 # ── 7. Traceroute ──────────────────────────────────────────────
 async def traceroute(host: str, max_hops: int = 15, **kw) -> dict:
     """Network path tracing."""
-    cmd = ["tracert", "-d", "-h", str(max_hops), host]
+    import platform
+    if platform.system() == "Windows":  # L1
+        cmd = ["tracert", "-d", "-h", str(max_hops), host]
+    else:
+        cmd = ["traceroute", "-n", "-m", str(max_hops), host]
 
     try:
         proc = await asyncio.create_subprocess_exec(

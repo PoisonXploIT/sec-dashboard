@@ -373,8 +373,13 @@
     const WS_BASE = window.WS_BASE || '';
 
     const api = {
+        _headers() {
+            const key = localStorage.getItem('sec_api_key');
+            return key ? {'X-API-Key': key} : {};
+        },
         async get(path) {
-            const r = await fetch(`${API_BASE}/api${path}`);
+            const r = await fetch(`${API_BASE}/api${path}`, { headers: api._headers() });
+            if (r.status === 401) { promptApiKey(); throw new Error('API key requerida (401)'); }
             if (!r.ok) {
                 let err;
                 try { err = await r.json(); } catch { err = {detail: r.statusText}; }
@@ -383,7 +388,8 @@
             return r.json();
         },
         async post(path, data) {
-            const r = await fetch(`${API_BASE}/api${path}`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) });
+            const r = await fetch(`${API_BASE}/api${path}`, { method: 'POST', headers: {'Content-Type': 'application/json', ...api._headers()}, body: JSON.stringify(data) });
+            if (r.status === 401) { promptApiKey(); throw new Error('API key requerida (401)'); }
             if (!r.ok) {
                 let err;
                 try { err = await r.json(); } catch { err = {detail: r.statusText}; }
@@ -392,7 +398,8 @@
             return r.json();
         },
         async del(path) {
-            const r = await fetch(`${API_BASE}/api${path}`, { method: 'DELETE' });
+            const r = await fetch(`${API_BASE}/api${path}`, { method: 'DELETE', headers: api._headers() });
+            if (r.status === 401) { promptApiKey(); throw new Error('API key requerida (401)'); }
             if (!r.ok) {
                 let err;
                 try { err = await r.json(); } catch { err = {detail: r.statusText}; }
@@ -402,15 +409,22 @@
         },
     };
 
+    function promptApiKey() {
+        const key = prompt('Este dashboard requiere API key (SEC_DASHBOARD_API_KEY). Introdúcela:');
+        if (key) { localStorage.setItem('sec_api_key', key); location.reload(); }
+    }
+
     // WebSocket
     function connectWS() {
         let wsUrl;
+        const wsKey = localStorage.getItem('sec_api_key');
+        const keySuffix = wsKey ? `?key=${encodeURIComponent(wsKey)}` : '';
         if (WS_BASE) {
             const proto = WS_BASE.startsWith('https') ? 'wss:' : 'ws:';
-            wsUrl = `${proto}//${new URL(WS_BASE).host}/ws`;
+            wsUrl = `${proto}//${new URL(WS_BASE).host}/ws${keySuffix}`;
         } else {
             const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-            wsUrl = `${proto}//${location.host}/ws`;
+            wsUrl = `${proto}//${location.host}/ws${keySuffix}`;
         }
         state.ws = new WebSocket(wsUrl);
         state.ws.onopen = () => { document.getElementById('ws-dot').className = 'ws-dot'; document.getElementById('ws-label').textContent = 'Connected'; };

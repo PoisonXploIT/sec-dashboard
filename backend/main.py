@@ -7,9 +7,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -37,6 +37,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ── API key auth (C2) ─────────────────────────────────────────
+# If SEC_DASHBOARD_API_KEY is set, every /api/* request must send
+# header X-API-Key (or ?key= for the WebSocket). Unset = open (local use).
+API_KEY = os.environ.get("SEC_DASHBOARD_API_KEY", "")
+
+
+@app.middleware("http")
+async def require_api_key(request: Request, call_next):
+    if API_KEY and request.url.path.startswith("/api"):
+        # Let CORS preflight through so the browser can negotiate
+        if request.method != "OPTIONS" and request.headers.get("X-API-Key") != API_KEY:
+            return JSONResponse({"detail": "Invalid or missing API key"}, status_code=401)
+    return await call_next(request)
+
 
 
 
@@ -53,7 +67,8 @@ class ProxyConfig(BaseModel):
 async def get_proxy():
     config = get_proxy_config()
     config["password"] = "***" if config.get("password") else ""
-    tor = get_tor_status()
+    # L3: TOR detection does blocking socket connects -- run off the event loop
+    tor = await asyncio.to_thread(get_tor_status)
     return {"config": config, "tor_status": tor}
 
 @app.post("/api/proxy")
@@ -332,7 +347,7 @@ async def status():
         "version": "1.0.0",
         "tools_count": len(TOOLS),
         "categories": CATEGORIES,
-        "uptime": time.time(),
+        "uptime": int(time.time() - START_TIME),  # L2: real uptime, not epoch
         "remote_mode": is_remote_mode(),
     }
 
@@ -436,6 +451,21 @@ async def run_single_tool(tool_id: str, body: ToolRun):
 
     # For special tools, use direct_input as the target
     effective_target = body.direct_input if body.direct_input and tool_id in SPECIAL_TOOLS else body.target
+
+    # C1: SSRF validation -- this endpoint takes a raw target, bypassing
+    # create_target's validation. System tools ignore the target and WiFi
+    # tools validate the viewer URL themselves, so only check the rest.
+    _no_check = {"network_connections", "process_monitor", "system_info",
+                 "ps_security_audit", "wifi_marauder_scan", "m5stick_networks"}
+    if tool_id not in SPECIAL_TOOLS and tool_id not in _no_check:
+        host_to_check = effective_target
+        if "://" in host_to_check:
+            from urllib.parse import urlparse
+            host_to_check = urlparse(host_to_check).hostname or host_to_check
+        valid, reason = validate_target(host_to_check)
+        if not valid:
+            raise HTTPException(400, f"Invalid target: {reason}")
+
     result = await run_tool(tool_id, effective_target, **body.params)
     return result
 
@@ -481,8 +511,10 @@ async def delete_target(target_id: int):
     try:
         await db.execute("DELETE FROM scans WHERE target_id = ?", (target_id,))
         await db.execute("DELETE FROM pipelines WHERE target_id = ?", (target_id,))
-        await db.execute("DELETE FROM targets WHERE id = ?", (target_id,))
+        cur = await db.execute("DELETE FROM targets WHERE id = ?", (target_id,))
         await db.commit()
+        if cur.rowcount == 0:  # L4
+            raise HTTPException(404, "Target not found")
         return {"deleted": True}
     finally:
         await db.close()
@@ -563,15 +595,22 @@ async def create_scan(body: ScanCreate):
     else:
         effective_target = target_host
 
+    # M4: never persist audited passwords (DB, webhooks, Splunk)
+    _redact = body.tool == "password_audit"
+    notified_target = "(redacted)" if _redact else effective_target
+
     async def _run_scan():
         try:
             result = await run_tool(body.tool, effective_target, **body.params)
             db2 = await get_db()
             try:
                 status = "completed" if result.get("success") else "failed"
+                stored = dict(result)
+                if _redact:
+                    stored["target"] = "(redacted)"
                 await db2.execute(
                     "UPDATE scans SET status = ?, result = ?, finished_at = ? WHERE id = ?",
-                    (status, json.dumps(result), datetime.utcnow().isoformat(), scan_id)
+                    (status, json.dumps(stored), datetime.utcnow().isoformat(), scan_id)
                 )
                 await db2.commit()
             finally:
@@ -582,13 +621,13 @@ async def create_scan(body: ScanCreate):
             await webhooks.notify("scan_complete", {
                 "scan_id": scan_id,
                 "tool": body.tool,
-                "target": effective_target,
+                "target": notified_target,
                 "status": status,
                 "elapsed_seconds": result.get("elapsed_seconds", 0),
             })
             # Splunk auto-index (metadata)
             await splunk.index_scan_event(
-                scan_id, body.tool, effective_target, status,
+                scan_id, body.tool, notified_target, status,
                 result.get("elapsed_seconds", 0), result.get("success", False)
             )
             # Splunk full results export for rich JSON tools
@@ -665,8 +704,10 @@ async def get_scan(scan_id: int):
 async def delete_scan(scan_id: int):
     db = await get_db()
     try:
-        await db.execute("DELETE FROM scans WHERE id = ?", (scan_id,))
+        cur = await db.execute("DELETE FROM scans WHERE id = ?", (scan_id,))
         await db.commit()
+        if cur.rowcount == 0:  # L4
+            raise HTTPException(404, "Scan not found")
         return {"deleted": True}
     finally:
         await db.close()
@@ -814,8 +855,10 @@ async def pipeline_result(pipeline_id: int):
 async def delete_pipeline(pipeline_id: int):
     db = await get_db()
     try:
-        await db.execute("DELETE FROM pipelines WHERE id = ?", (pipeline_id,))
+        cur = await db.execute("DELETE FROM pipelines WHERE id = ?", (pipeline_id,))
         await db.commit()
+        if cur.rowcount == 0:  # L4
+            raise HTTPException(404, "Pipeline not found")
         return {"deleted": True}
     finally:
         await db.close()
@@ -946,6 +989,10 @@ async def reset_all(confirm: bool = Query(False)):
 # ── WebSocket ──────────────────────────────────────────────────
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
+    # C2: when API key auth is enabled, require ?key= on the WS handshake
+    if API_KEY and ws.query_params.get("key") != API_KEY:
+        await ws.close(code=4401)
+        return
     await ws.accept()
     ws_clients.add(ws)
     try:

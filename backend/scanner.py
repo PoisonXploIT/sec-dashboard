@@ -113,13 +113,14 @@ async def run_tool(tool_name: str, target: str, **kwargs) -> dict:
         }
     except Exception as e:
         elapsed = round(time.time() - start, 2)
+        # M1: log full traceback server-side, but never leak it to the client
+        traceback.print_exc()
         return {
             "tool": tool_name,
             "target": target,
             "success": False,
             "elapsed_seconds": elapsed,
             "error": str(e),
-            "traceback": traceback.format_exc(),
         }
 
 

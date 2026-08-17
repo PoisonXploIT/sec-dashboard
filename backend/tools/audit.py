@@ -91,6 +91,14 @@ async def ps_security_audit(**kw) -> dict:
     ]
 
     try:
+        # M3: snapshot existing output folders BEFORE running so we pick
+        # the folder created by THIS run, not a concurrent/previous one
+        script_dir = Path(script_path).parent
+        folders_before = {
+            d for d in script_dir.iterdir()
+            if d.is_dir() and d.name.startswith("Auditoria_")
+        }
+
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
@@ -101,6 +109,12 @@ async def ps_security_audit(**kw) -> dict:
         stdout_text = stdout.decode("utf-8", errors="replace")
         stderr_text = stderr.decode("utf-8", errors="replace")
     except asyncio.TimeoutError:
+        # M3: kill the orphaned PowerShell process before returning
+        try:
+            proc.kill()
+            await proc.wait()
+        except Exception:
+            pass
         return {
             "error": "Audit timed out after 600s",
             "script": script_path,
@@ -111,13 +125,21 @@ async def ps_security_audit(**kw) -> dict:
             "script": script_path,
         }
 
-    # Find the output folder (Auditoria_<timestamp>)
+    # Find the output folder created by THIS run (Auditoria_<timestamp>)
     script_dir = Path(script_path).parent
     audit_folders = sorted(
-        [d for d in script_dir.iterdir() if d.is_dir() and d.name.startswith("Auditoria_")],
+        [d for d in script_dir.iterdir()
+         if d.is_dir() and d.name.startswith("Auditoria_") and d not in folders_before],
         key=lambda x: x.stat().st_mtime,
         reverse=True,
     )
+    if not audit_folders:
+        # Fallback: newest folder overall (single-run scenario tolerance)
+        audit_folders = sorted(
+            [d for d in script_dir.iterdir() if d.is_dir() and d.name.startswith("Auditoria_")],
+            key=lambda x: x.stat().st_mtime,
+            reverse=True,
+        )[:1]
 
     if not audit_folders:
         return {
