@@ -286,3 +286,21 @@ def score_findings(findings: list[Finding]) -> int:
         w = SEVERITY_WEIGHT.get(f.severity, 0)
         total += w * max(0.0, min(1.0, f.confidence))
     return int(min(100, round(total)))
+
+
+def score_finding_dicts(findings: list[dict]) -> int:
+    """Same as score_findings but for serialized findings (dicts).
+
+    Used to aggregate per-tool findings already turned into dicts by the
+    scanner/pipeline (e.g. pipeline-level totals after Fase 0.4).
+    """
+    weight_by_value = {sev.value: w for sev, w in SEVERITY_WEIGHT.items()}
+    total = 0.0
+    for f in findings:
+        w = weight_by_value.get(f.get("severity", "info"), 0)
+        try:
+            conf = float(f.get("confidence", 1.0))
+        except (TypeError, ValueError):
+            conf = 0.0
+        total += w * max(0.0, min(1.0, conf))
+    return int(min(100, round(total)))

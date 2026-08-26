@@ -332,6 +332,81 @@ async def startup():
     finally:
         await db.close()
 
+    # Migrate (Fase 0.4): add findings + score columns to scans
+    db = await get_db()
+    try:
+        cur = await db.execute("PRAGMA table_info(scans)")
+        cols = {c["name"] for c in await cur.fetchall()}
+        if "findings" not in cols:
+            await db.execute("PRAGMA foreign_keys=OFF")
+            await db.execute("ALTER TABLE scans RENAME TO scans_old")
+            await db.execute(
+                "CREATE TABLE scans ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                "target_id INTEGER, "
+                "tool TEXT NOT NULL, "
+                "status TEXT DEFAULT 'pending', "
+                "result TEXT, "
+                "findings TEXT DEFAULT '[]', "
+                "score INTEGER DEFAULT 0, "
+                "started_at TIMESTAMP, "
+                "finished_at TIMESTAMP, "
+                "FOREIGN KEY (target_id) REFERENCES targets(id) ON DELETE CASCADE"
+                ")"
+            )
+            await db.execute(
+                "INSERT INTO scans (id, target_id, tool, status, result, started_at, finished_at) "
+                "SELECT id, target_id, tool, status, result, started_at, finished_at FROM scans_old"
+            )
+            await db.execute("DROP TABLE scans_old")
+            await db.execute("PRAGMA foreign_keys=ON")
+            await db.commit()
+            print("[startup] Migrated scans table: added findings + score columns")
+    except Exception as e:
+        print(f"[startup] Migration check (scans findings): {e}")
+    finally:
+        await db.close()
+
+    # Migrate (Fase 0.4): add findings + score columns to pipelines
+    db = await get_db()
+    try:
+        cur = await db.execute("PRAGMA table_info(pipelines)")
+        cols = {c["name"] for c in await cur.fetchall()}
+        if "findings" not in cols:
+            await db.execute("PRAGMA foreign_keys=OFF")
+            await db.execute("ALTER TABLE pipelines RENAME TO pipelines_old")
+            await db.execute(
+                "CREATE TABLE pipelines ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                "target_id INTEGER NOT NULL, "
+                "mode TEXT NOT NULL, "
+                "status TEXT DEFAULT 'pending', "
+                "progress REAL DEFAULT 0.0, "
+                "current_phase TEXT, "
+                "current_tool TEXT, "
+                "result TEXT, "
+                "findings TEXT DEFAULT '[]', "
+                "score INTEGER DEFAULT 0, "
+                "started_at TIMESTAMP, "
+                "finished_at TIMESTAMP, "
+                "FOREIGN KEY (target_id) REFERENCES targets(id) ON DELETE CASCADE"
+                ")"
+            )
+            await db.execute(
+                "INSERT INTO pipelines (id, target_id, mode, status, progress, current_phase, "
+                "current_tool, result, started_at, finished_at) "
+                "SELECT id, target_id, mode, status, progress, current_phase, "
+                "current_tool, result, started_at, finished_at FROM pipelines_old"
+            )
+            await db.execute("DROP TABLE pipelines_old")
+            await db.execute("PRAGMA foreign_keys=ON")
+            await db.commit()
+            print("[startup] Migrated pipelines table: added findings + score columns")
+    except Exception as e:
+        print(f"[startup] Migration check (pipelines findings): {e}")
+    finally:
+        await db.close()
+
     # Clean up orphaned scans left as 'running' from a previous crash/restart
     db = await get_db()
     try:
@@ -554,6 +629,44 @@ async def list_scans(target_id: int = None, offset: int = 0, limit: int = 50):
         await db.close()
 
 
+async def _persist_scan_result(scan_id: int, status: str, result: dict):
+    """Persist a finished scan's result plus normalized findings and score (Fase 0.4)."""
+    db = await get_db()
+    try:
+        findings_json = json.dumps(result.get("findings", []))
+        try:
+            score = int(result.get("score") or 0)
+        except (TypeError, ValueError):
+            score = 0
+        await db.execute(
+            "UPDATE scans SET status = ?, result = ?, findings = ?, score = ?, finished_at = ? WHERE id = ?",
+            (status, json.dumps(result), findings_json, score,
+             datetime.utcnow().isoformat(), scan_id)
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def _persist_pipeline_result(pipeline_id: int, status: str, result: dict):
+    """Persist a finished pipeline's result plus aggregated findings and score (Fase 0.4)."""
+    db = await get_db()
+    try:
+        findings_json = json.dumps(result.get("findings", []))
+        try:
+            score = int(result.get("score") or 0)
+        except (TypeError, ValueError):
+            score = 0
+        await db.execute(
+            "UPDATE pipelines SET status = ?, result = ?, findings = ?, score = ?, progress = 100, finished_at = ? WHERE id = ?",
+            (status, json.dumps(result), findings_json, score,
+             datetime.utcnow().isoformat(), pipeline_id)
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
 @app.post("/api/scans")
 async def create_scan(body: ScanCreate):
     if body.tool not in TOOLS:
@@ -611,19 +724,14 @@ async def create_scan(body: ScanCreate):
     async def _run_scan():
         try:
             result = await run_tool(body.tool, effective_target, **body.params)
-            db2 = await get_db()
-            try:
-                status = "completed" if result.get("success") else "failed"
-                stored = dict(result)
-                if _redact:
-                    stored["target"] = "(redacted)"
-                await db2.execute(
-                    "UPDATE scans SET status = ?, result = ?, finished_at = ? WHERE id = ?",
-                    (status, json.dumps(stored), datetime.utcnow().isoformat(), scan_id)
-                )
-                await db2.commit()
-            finally:
-                await db2.close()
+            status = "completed" if result.get("success") else "failed"
+            stored = dict(result)
+            if _redact:
+                # M4: never persist audited passwords (DB, webhooks, Splunk)
+                stored["target"] = "(redacted)"
+                for f in stored.get("findings", []):
+                    f["target"] = "(redacted)"
+            await _persist_scan_result(scan_id, status, stored)
 
             await broadcast({"type": "scan_complete", "scan_id": scan_id, "status": status, "tool": body.tool})
             # Webhook notification
@@ -783,16 +891,8 @@ async def create_pipeline(body: PipelineCreate):
         async def run_and_save():
             try:
                 result = await runner.run()
-                db2 = await get_db()
-                try:
-                    status = "completed" if result.get("status") == "completed" else "failed"
-                    await db2.execute(
-                        "UPDATE pipelines SET status = ?, result = ?, progress = 100, finished_at = ? WHERE id = ?",
-                        (status, json.dumps(result), datetime.utcnow().isoformat(), pipeline_id)
-                    )
-                    await db2.commit()
-                finally:
-                    await db2.close()
+                status = "completed" if result.get("status") == "completed" else "failed"
+                await _persist_pipeline_result(pipeline_id, status, result)
                 # Webhook notification
                 await webhooks.notify("pipeline_complete", {
                     "pipeline_id": pipeline_id,

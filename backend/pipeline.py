@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any, Callable
 
 from backend.config import PIPELINES, TOOLS
+from backend.findings import score_finding_dicts
 from backend.scanner import run_tool, run_parallel
 
 
@@ -86,6 +87,15 @@ class PipelineRunner:
         elapsed = round(time.time() - self.start_time, 2)
         self.status = "completed"
 
+        # Fase 0.4: per-tool findings already live inside each phase result;
+        # aggregate them here so the pipeline row stores one combined list
+        # plus a total score (decision: both per-tool AND aggregated).
+        aggregated_findings: list[dict] = []
+        for phase_results in all_results.values():
+            for tool_result in phase_results.values():
+                if isinstance(tool_result, dict):
+                    aggregated_findings.extend(tool_result.get("findings", []))
+
         await self._emit({
             "type": "pipeline_complete",
             "elapsed": elapsed,
@@ -99,6 +109,8 @@ class PipelineRunner:
             "elapsed_seconds": elapsed,
             "phases": all_results,
             "total_tools": sum(len(p["tools"]) for p in phases),
+            "findings": aggregated_findings,
+            "score": score_finding_dicts(aggregated_findings),
         }
 
     async def _run_single(self, tool_name: str, phase: str) -> dict:

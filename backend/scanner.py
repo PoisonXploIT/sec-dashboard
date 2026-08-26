@@ -5,6 +5,7 @@ import traceback
 from typing import Callable, Any
 
 from backend.config import TOOLS, SPECIAL_TOOLS
+from backend.findings import extract_findings, score_findings
 from backend.tools.network import (
     port_scanner, dns_recon, subdomain_enum, http_probe,
     whois_lookup, ping_sweep, traceroute, ssl_analyzer,
@@ -78,7 +79,8 @@ async def run_tool(tool_name: str, target: str, **kwargs) -> dict:
     target is ignored.
     """
     if tool_name not in HANDLERS:
-        return {"error": f"Unknown tool: {tool_name}", "success": False}
+        return {"error": f"Unknown tool: {tool_name}", "success": False,
+                "findings": [], "score": 0}
 
     handler = HANDLERS[tool_name]
     tool_config = TOOLS.get(tool_name, {})
@@ -95,12 +97,17 @@ async def run_tool(tool_name: str, target: str, **kwargs) -> dict:
         else:
             result = await asyncio.wait_for(handler(target, **kwargs), timeout=timeout)
         elapsed = round(time.time() - start, 2)
+        # Fase 0.4: normalized findings ride along with the human-readable
+        # result; the UI keeps consuming `result` untouched.
+        findings = extract_findings(tool_name, result, target)
         return {
             "tool": tool_name,
             "target": target,
             "success": True,
             "elapsed_seconds": elapsed,
             "result": result,
+            "findings": [f.to_dict() for f in findings],
+            "score": score_findings(findings),
         }
     except asyncio.TimeoutError:
         elapsed = round(time.time() - start, 2)
@@ -110,6 +117,8 @@ async def run_tool(tool_name: str, target: str, **kwargs) -> dict:
             "success": False,
             "elapsed_seconds": elapsed,
             "error": f"Timed out after {timeout}s",
+            "findings": [],
+            "score": 0,
         }
     except Exception as e:
         elapsed = round(time.time() - start, 2)
@@ -121,6 +130,8 @@ async def run_tool(tool_name: str, target: str, **kwargs) -> dict:
             "success": False,
             "elapsed_seconds": elapsed,
             "error": str(e),
+            "findings": [],
+            "score": 0,
         }
 
 

@@ -17,6 +17,8 @@ CREATE TABLE IF NOT EXISTS scans (
     tool TEXT NOT NULL,
     status TEXT DEFAULT 'pending',
     result TEXT,
+    findings TEXT DEFAULT '[]',  -- Fase 0.4: normalized findings (JSON)
+    score INTEGER DEFAULT 0,     -- Fase 0.4: 0-100 target risk score
     started_at TIMESTAMP,
     finished_at TIMESTAMP,
     FOREIGN KEY (target_id) REFERENCES targets(id) ON DELETE CASCADE
@@ -31,6 +33,8 @@ CREATE TABLE IF NOT EXISTS pipelines (
     current_phase TEXT,
     current_tool TEXT,
     result TEXT,
+    findings TEXT DEFAULT '[]',  -- Fase 0.4: aggregated findings (JSON)
+    score INTEGER DEFAULT 0,     -- Fase 0.4: total 0-100 risk score
     started_at TIMESTAMP,
     finished_at TIMESTAMP,
     FOREIGN KEY (target_id) REFERENCES targets(id) ON DELETE CASCADE
