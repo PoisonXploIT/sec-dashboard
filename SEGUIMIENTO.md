@@ -13,9 +13,9 @@
 - **Repo local**: `C:\Users\Sammi\sec-dashboard`
 - **Repo remoto**: `https://github.com/PoisonXploIT/sec-dashboard.git` (origin, rama `master`)
 - **Deploy productivo**: Railway, dominio `sec.sammideblas.com` (Cloudflare Access + API key).
-- **Último commit**: `10ed28f` — "feat: Phase 2 — executive PDF (generate_executive_pdf) + /executive-pdf endpoint"
+- **Último commit**: `b4d8cc9` (docs; último de código `10ed28f`).
 - **Fecha del commit**: 2026-08-26.
-- **Estado del plan**: Fase 1 completa salvo F1-FAVICON (backlog opcional Fase 2/3, decisión Opción A). **Fase 2 en curso**: Full Depth pipeline HECHO (`a0cf16a`), reporte ejecutivo PDF HECHO (`10ed28f`); pendiente: comparativa histórica en History.
+- **Estado del plan**: Fase 1 completa salvo F1-FAVICON (backlog opcional Fase 2/3, decisión Opción A). **Fase 2 en curso**: Full Depth pipeline HECHO (`a0cf16a`), reporte ejecutivo PDF HECHO (`10ed28f`); pendiente: comparativa histórica en History (diseño aprobado, ver registro).
 
 ### Comandos de referencia (siempre desde el repo)
 
@@ -94,7 +94,7 @@ Reglas de ejecución por tool (repetir para cada ID):
 - Scoring por target 0–100: HECHO. `score_findings()` en findings.py; persistido en DB desde Fase 0.4.
 - Pipeline "Full Depth": HECHO (`a0cf16a`). Modo `full_depth` en `PIPELINES`: 5 fases secuenciales, una tool por fase (subdomain_enum, subdomain_takeover, tech_detector, cve_correlation, secret_leak_scan); card + mapas JS en UI; test que pinta la cadena (`test_full_depth_pipeline_chain`).
 - Reporte ejecutivo PDF: HECHO (`10ed28f`). `generate_executive_pdf` en report.py (portada con score grande grayscale por umbrales 60/30, top 10 por peso de severidad x confidence, heatmap categoría x severidad celdas grayscale, apéndice técnico por fase/tool + JSON comprimido); helpers puros `executive_findings_from_pipeline` / `executive_top_findings` / `executive_heatmap`; endpoint `/api/pipelines/{id}/executive-pdf` + botón "Exec" en 3 sitios de la UI. El PDF técnico (`generate_pipeline_pdf`) se conserva intacto.
-- Comparativa histórica en History (evolución de un target entre scans): PENDIENTE — siguiente micro-paso.
+- Comparativa histórica en History (evolución de un target entre scans): PENDIENTE — siguiente micro-paso. Diseño aprobado por el usuario (ver entrada "Comparativa histórica: diseño aprobado" de la sección 6): endpoint dedicado `/api/pipelines/compare?target_id=N` + tabla de evolución en frontend, SIN delta de findings en el MVP.
 
 ### Fase 3 — Usabilidad y hardware
 - 3E: CLI headless (`python -m backend.cli --target ... --pipeline nuclear --json`), dark mode persistente, búsqueda en History.
@@ -303,6 +303,15 @@ Convención: cada sesión añade una entrada al FINAL de la lista (la más recie
 - Decisiones: escala solo grayscale (regla no emojis/simbolos de color estricta); top 10 con confidence por defecto 1.0 si falta; categoria vacia = "uncategorized"; el PDF tecnico sigue disponible como antes (los dos conviven).
 - Siguiente micro-paso: comparativa historica en History (evolucion de un target entre scans). Mantener visible el bug cosmetico del sidebar (35 tools hardcodeadas vs 40 reales) para el pase de pulido.
 
+### 2026-08-26 — Comparativa histórica: diseño aprobado (arranque, cierre de Phase 2)
+- Validación previa del usuario: 143 passed, ruff limpio, compileall OK, master == origin/master @ `b4d8cc9`, working tree limpio.
+- Decisión: arrancar la comparativa histórica como cierre natural de Phase 2; los datos ya están listos (columnas `score` y `findings` en la tabla `pipelines` desde Fase 0.4, ver `_persist_pipeline_result`).
+- Enfoque aprobado (recomendación opción 1): **endpoint dedicado** `GET /api/pipelines/compare?target_id=N`. Query: `SELECT id, mode, score, findings, started_at, finished_at FROM pipelines WHERE target_id = ? ORDER BY started_at ASC`. Devolver lista de runs con `findings_count` y `score` parseados. **SIN delta de findings en el MVP** (new/fixed/persistent comparando `finding_id` entre runs adyacentes): queda como micro-paso 3b opcional si el endpoint base queda limpio.
+- Frontend: vista History mejorada — al hacer clic en un target o en una fila de pipeline, tabla de evolución (runs con score, fecha, modo) + mini gráfico de líneas simple con `<canvas>` o sparkline ASCII para evitar librerías nuevas. Bonus (3b): listado de findings que aparecieron/desaparecieron entre la run actual y la anterior.
+- Alternativa descartada para el MVP: extender `/api/pipelines/history` con `?target_id=` y filtrar en frontend (menos trabajo backend, más frontend) — se prefiere el endpoint dedicado por limpieza.
+- Tests: 2-3 tests del endpoint con 2-3 pipelines para el mismo target verificando orden cronológico y score, con DB temporal (monkeypatch de `models.DB_PATH`, patrón Fase 0.4 en tests/test_fase04_findings.py).
+- Siguiente micro-paso: implementar ese diseño (endpoint + tabla evolutiva), commit `feat:`, suite verde antes de push.
+
 ## 7. Reglas y restricciones del proyecto (NO VIOLAR)
 
 1. **NO emojis, flechas de texto ni símbolos de color** en ninguna salida, nota, script o commit (regla global del usuario). Escribir las palabras.
@@ -336,7 +345,7 @@ M5 Stick + CC1101 + nRF24 (Bruce), WiFi Marauder ESP32 v6, LilyGo T-Embed + Bus 
 
 **PROMPT PARA LA PRÓXIMA SESIÓN** (arrancar con contexto nuevo):
 Eres el agente de sec-dashboard. Primero lee este archivo entero (la sección 7 son reglas NO VIOLAR). Estado: Fase 1 completa salvo F1-FAVICON (backlog opcional Fase 2/3 por decisión Opción A registrada arriba); **Fase 2 a medias**: Full Depth pipeline HECHO (`a0cf16a`, modo `full_depth`) y reporte ejecutivo PDF HECHO (`10ed28f`, `generate_executive_pdf` + endpoint `/api/pipelines/{id}/executive-pdf`); suite 143 tests en verde, ruff limpio; master == origin/master en `10ed28f`.
-Tarea: **comparativa histórica en History** (último item de Fase 2): evolución de un target entre scans — comparar score/findings de pipelines pasados del mismo target (la columna `score` y `findings` ya persisten en la tabla `pipelines` desde Fase 0.4; ver `_persist_pipeline_result` en main.py y el endpoint `/api/pipelines/history`).
+Tarea: **comparativa histórica en History** (último item de Fase 2). DISEÑO APROBADO (ver entrada "Comparativa histórica: diseño aprobado" de la sección 6): endpoint dedicado `GET /api/pipelines/compare?target_id=N` (SELECT id, mode, score, findings, started_at, finished_at ... WHERE target_id = ? ORDER BY started_at ASC; runs con findings_count y score parseados) + tabla de evolución en frontend (score/fecha/modo por run + mini gráfico de líneas con canvas o sparkline ASCII, sin librerías nuevas). SIN delta de findings en el MVP (new/fixed/persistent por finding_id = micro-paso 3b opcional). Tests: 2-3 con DB temporal (monkeypatch models.DB_PATH) y 2-3 pipelines del mismo target verificando orden cronológico y score.
 Antes de tocar nada: leer `backend/main.py` (endpoint history + `_persist_pipeline_result`), `backend/report.py` (patron `generate_executive_pdf`, helpers puros) y la vista History del frontend (`filteredPipelines` en index.html).
 NO OLVIDAR (bug cosmetico registrado arriba): el sidebar derecho dice "35 tools • 6 categories" hardcodeado en `frontend/index.html` (~linea 341) pero hay 40 tools registradas; si se toca la UI, actualizarlo (mejor: contarlo dinamicamente desde `/api/tools`).
 Reglas: MVP sin dependencias nuevas, tests sin red, commits `feat:`/`fix:`, push solo con suite verde, sin emojis.
