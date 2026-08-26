@@ -34,7 +34,7 @@ git push origin master                        # dispara CI en GitHub
 Dashboard de seguridad tipo "recon suite" con:
 
 - **Backend**: FastAPI + SQLite (aiosqlite) + WebSockets + SPA en un solo HTML (`frontend/index.html`).
-- **35 tools operativas** en Python puro (sin binarios externos), en `backend/tools/`:
+- **40 tools operativas** en Python puro (sin binarios externos), en `backend/tools/`:
   `network.py`, `web.py`, `vuln.py`, `system.py`, `osint.py`, `emailsec.py`, `audit.py`, `wifi.py`.
 - **Pipeline engine** (`backend/pipeline.py`): 3 modos — `fast`, `deep`, `nuclear`.
 - **Integración Splunk** (`backend/splunk.py`): export JSON con sourcetypes personalizados.
