@@ -140,6 +140,13 @@ TOOLS = {
         "icon": "#!",
         "timeout": 30,
     },
+    "cve_correlation": {
+        "name": "CVE Correlation",
+        "category": "Vulnerability",
+        "description": "Cross-check detected stack against NVD + CISA KEV",
+        "icon": "#C",
+        "timeout": 90,
+    },
     "hash_checker": {
         "name": "Hash Lookup",
         "category": "Vulnerability",

@@ -575,6 +575,177 @@ async def tech_detector(url: str, **kw) -> dict:
         return {"url": url, "error": str(e)}
 
 
+# ── CVE Correlation (Fase 1 / F1-CVE) ─────────────────────────
+KEV_FEED_URL = (
+    "https://raw.githubusercontent.com/cisagov/known-exploited-vulnerabilities-feeds/"
+    "main/CISA_KEV_Json_Feed.json"
+)
+
+# Tech name (as emitted by tech_detector) -> NVD keyword search term.
+_NVD_SEARCH_TERMS = {
+    "WordPress": "wordpress",
+    "Joomla": "joomla",
+    "Drupal": "drupal",
+    "Laravel": "laravel",
+    "Django": "django",
+    "Flask": "flask python",
+    "Express": "express node.js",
+    "Ruby on Rails": "ruby on rails",
+    "Spring": "spring framework",
+    "ASP.NET": "asp.net",
+    "PHP": "php",
+    "nginx": "nginx",
+    "Apache": "apache http server",
+    "IIS": "internet information services",
+}
+
+_NVD_MAX_TECHS = 8
+_NVD_MAX_CVES_PER_TECH = 5
+
+
+def _extract_versions(server_header: str) -> dict:
+    """Parse 'name/version' pairs out of an HTTP Server header."""
+    out = {}
+    for m in re.finditer(r"([A-Za-z][A-Za-z0-9_.\-]*)/(\d[\w.\-]*)", server_header or ""):
+        name, version = m.group(1), m.group(2)
+        if name.lower() not in ("unknown", "ok", "other"):
+            out.setdefault(name, version)
+    return out
+
+
+async def _nvd_product_search(term: str) -> list[dict]:
+    """Keyword search on NVD 2.0; returns normalized CVE dicts ([] on failure)."""
+    url = "https://services.nvd.nist.gov/rest/json/cves/2.0"
+    try:
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=25)
+        ) as session:
+            async with session.get(url, params={
+                "keywordSearch": term,
+                "resultsPerPage": _NVD_MAX_CVES_PER_TECH * 4,
+            }) as resp:
+                if resp.status != 200:
+                    return []
+                data = await resp.json()
+    except Exception:
+        return []
+
+    first_word = term.lower().split()[0]
+    out: list[dict] = []
+    for vuln in data.get("vulnerabilities", []):
+        cve_data = vuln.get("cve", {})
+        metrics = cve_data.get("metrics", {})
+        cvss_score, severity = None, None
+        for key in ("cvssMetricV40", "cvssMetricV31", "cvssMetricV30", "cvssMetricV2"):
+            metric_list = metrics.get(key, [])
+            if metric_list:
+                cvss_data = metric_list[0].get("cvssData", {})
+                cvss_score = cvss_data.get("baseScore")
+                severity = cvss_data.get("baseSeverity")
+                break
+        desc_en = next(
+            (d["value"] for d in cve_data.get("descriptions", []) if d.get("lang") == "en"),
+            "",
+        )
+        # Keep only CVEs that plausibly belong to the searched product.
+        if first_word not in (desc_en or "").lower():
+            continue
+        out.append({
+            "id": cve_data.get("id"),
+            "description": desc_en[:200],
+            "cvss_score": cvss_score,
+            "severity": severity,
+            "published": cve_data.get("published"),
+        })
+        if len(out) >= _NVD_MAX_CVES_PER_TECH:
+            break
+    return out
+
+
+async def _fetch_kev() -> list[dict]:
+    """CISA KEV feed entries ([] on failure — correlation still works)."""
+    try:
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=25)
+        ) as session:
+            async with session.get(KEV_FEED_URL) as resp:
+                if resp.status != 200:
+                    return []
+                data = await resp.json()
+    except Exception:
+        return []
+    return data.get("vulnerabilities", [])
+
+
+async def cve_correlation(url: str, **kw) -> dict:
+    """Correlate the detected web stack against NVD CVEs and CISA KEV.
+
+    Runs tech_detector first, extracts versions from the Server header,
+    searches NVD per detected product and flags anything in the Known
+    Exploited Vulnerabilities catalog.
+    """
+    if not url.startswith(("http://", "https://")):
+        url = f"https://{url}"
+
+    tech_result = await tech_detector(url)
+    if "error" in tech_result:
+        return {"url": url, "error": tech_result["error"]}
+
+    techs: dict = tech_result.get("technologies", {})
+    flat = [t for cat, items in techs.items() if cat != "Meta" for t in items]
+    versions = _extract_versions(tech_result.get("server", ""))
+
+    search_terms: list[str] = []
+    for name in flat:
+        term = _NVD_SEARCH_TERMS.get(name)
+        if term and term not in search_terms:
+            search_terms.append(term)
+    search_terms = search_terms[:_NVD_MAX_TECHS]
+
+    nvd_results = await asyncio.gather(*(_nvd_product_search(t) for t in search_terms))
+
+    cves: list[dict] = []
+    seen: set[str] = set()
+    for term, res in zip(search_terms, nvd_results):
+        for cve in res:
+            cid = cve.get("id")
+            if not cid or cid in seen:
+                continue
+            seen.add(cid)
+            cves.append({"tech": term, **cve})
+
+    kev_entries = await _fetch_kev()
+    kev_by_id = {e.get("cveID"): e for e in kev_entries}
+    for cve in cves:
+        cve["in_kev"] = cve.get("id") in kev_by_id
+
+    kev_matches: list[dict] = []
+    for term, _ in zip(search_terms, nvd_results):
+        first_word = term.lower().split()[0]
+        for e in kev_entries:
+            if first_word in (e.get("vulnerability_name") or "").lower():
+                kev_matches.append({
+                    "tech": term,
+                    "id": e.get("cveID"),
+                    "vulnerability_name": e.get("vulnerability_name"),
+                    "due_date": e.get("dueDate"),
+                    "required_action": e.get("requiredAction"),
+                })
+
+    cves.sort(key=lambda c: (not c["in_kev"], -(c.get("cvss_score") or 0)))
+
+    return {
+        "url": str(tech_result.get("url", url)),
+        "status": tech_result.get("status"),
+        "server": tech_result.get("server"),
+        "technologies": techs,
+        "versions": versions,
+        "cves": cves,
+        "kev_matches": kev_matches,
+        "count": len(cves),
+    }
+
+
 # ── 15. CSP Analyzer ──────────────────────────────────────────
 async def csp_analyzer(url: str, **kw) -> dict:
     """Content Security Policy strength analysis."""

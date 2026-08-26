@@ -234,6 +234,55 @@ def _adapt_cve_search(result: dict, target: str) -> list[Finding]:
     return out
 
 
+@register("cve_correlation")
+def _adapt_cve_correlation(result: dict, target: str) -> list[Finding]:
+    """KEV hits are CRITICAL; NVD critical/high CVEs on the live stack HIGH.
+
+    Lower severities are intentionally dropped to keep the score meaningful:
+    a WordPress install has hundreds of historical CVEs and only the ones
+    actively exploited (KEV) or still critical matter for a recon report.
+    """
+    sev_map = {
+        "CRITICAL": Severity.CRITICAL, "HIGH": Severity.HIGH,
+        "MEDIUM": Severity.MEDIUM, "LOW": Severity.LOW,
+    }
+    out: list[Finding] = []
+    for m in result.get("kev_matches", []):
+        out.append(Finding(
+            tool="cve_correlation", category="Vulnerability",
+            severity=Severity.CRITICAL,
+            title=f"Known exploited vulnerability: {m.get('id', '')}",
+            description=m.get("vulnerability_name", ""),
+            evidence={"tech": m.get("tech"), "due_date": m.get("due_date")},
+            cve=m.get("id"),
+            remediation="Patch immediately: CISA lists this as actively exploited.",
+            target=target, confidence=0.95,
+        ))
+    kev_ids = {m.get("id") for m in result.get("kev_matches", [])}
+    emitted = 0
+    for cve in result.get("cves", []):
+        if emitted >= 10:
+            break
+        cid = cve.get("id")
+        if cid in kev_ids:  # already covered by the KEV finding above
+            continue
+        sev_str = str(cve.get("severity") or "").upper()
+        if sev_str not in ("CRITICAL", "HIGH"):
+            continue
+        emitted += 1
+        out.append(Finding(
+            tool="cve_correlation", category="Vulnerability",
+            severity=Severity.HIGH,
+            title=f"{cid} on {cve.get('tech', '')} (CVSS {cve.get('cvss_score', '?')})",
+            description=cve.get("description", ""),
+            evidence={"tech": cve.get("tech"), "cvss_score": cve.get("cvss_score")},
+            cve=cid,
+            remediation="Verify the deployed version is affected and patch.",
+            target=target, confidence=0.8,
+        ))
+    return out
+
+
 @register("tech_detector")
 def _adapt_tech_detector(result: dict, target: str) -> list[Finding]:
     """Informational only: detected stack feeds later CVE correlation."""
