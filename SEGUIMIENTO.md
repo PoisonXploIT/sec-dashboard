@@ -248,6 +248,14 @@ Convención: cada sesión añade una entrada al FINAL de la lista (la más recie
 - **Desviación del diseño fijado (requiere revisión)**: las rutas `/wp-content/plugins/**/*.js` y `/wp-content/themes/**/*.js` NO se implementaron porque no son enumerables sin crawl (los nombres de plugin/tema varían por sitio) y el crawl quedó fuera del MVP. Quedan como mejora futura junto al crawl limitado. Si se quiere cubrir en Fase 2, la vía natural es un GET de la home para extraer `script src` reales.
 - Siguiente micro-paso: F1-SSL (SSL Deep Analyzer).
 
+### 2026-08-26 — F1-SECRETS aprobado + refactor backlog (cierre de sesión)
+- Aprobado por el usuario: la deferral de `/wp-content/plugins|themes/**/*.js` es correcta (no son known-paths fijas; necesitan crawl o parsear `script src` de la home, fuera del MVP) y la solución al incidente de push protection (token fake construido por partes) fue la correcta.
+- Refactor pendiente de F1-SECRETS (no bloqueante, hacer al pulir la tool):
+  1. `_secret_fetch` crea un `aiohttp.ClientSession` por URL (~22 requests/scan): hoisting de una sola sesión fuera del gather y pasarla a cada fetch.
+  2. `_scan_text` hace return tras el primer match: un archivo con varios secretos solo reporta uno. Cambiar `search` → `finditer` y deduplicar por posición.
+- Nota para F1-SSL: `cryptography` NO está en requirements.txt ni requirements-dev.txt; el MVP va stdlib-only (`ssl`/`socket`). Si OCSP/HSTS o grades la requieren, añadir dependencia es una decisión a registrar antes de instalarla.
+- Siguiente micro-paso: F1-SSL (SSL Deep Analyzer) — grade A+ a F, cipher suites, TLS 1.0/1.1, HSTS, OCSP stapling.
+
 ## 7. Reglas y restricciones del proyecto (NO VIOLAR)
 
 1. **NO emojis, flechas de texto ni símbolos de color** en ninguna salida, nota, script o commit (regla global del usuario). Escribir las palabras.
@@ -277,4 +285,4 @@ M5 Stick + CC1101 + nRF24 (Bruce), WiFi Marauder ESP32 v6, LilyGo T-Embed + Bus 
 
 ---
 
-*Última actualización: 2026-08-26, post-F1-SECRETS (commit 56cbc67). Próxima sesión: leer este archivo entero y arrancar F1-SSL (SSL Deep Analyzer); revisar la desviación de wp-content registrada en el log.*
+*Última actualización: 2026-08-26, cierre post-F1-SECRETS (feat 56cbc67 aprobado; refactor backlog y nota de dependencias registrados). Próxima sesión: leer este archivo entero y arrancar F1-SSL (SSL Deep Analyzer) stdlib-only.*
