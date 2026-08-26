@@ -283,6 +283,32 @@ def _adapt_cve_correlation(result: dict, target: str) -> list[Finding]:
     return out
 
 
+@register("subdomain_takeover")
+def _adapt_subdomain_takeover(result: dict, target: str) -> list[Finding]:
+    """Every dangling CNAME is CRITICAL: the resource is claimable now."""
+    out: list[Finding] = []
+    seen: set[str] = set()
+    for t in result.get("takeovers", []):
+        sub = t.get("sub") or ""
+        if not sub or sub in seen:
+            continue
+        seen.add(sub)
+        out.append(Finding(
+            tool="subdomain_takeover", category="Vulnerability",
+            severity=Severity.CRITICAL,
+            title=f"Subdomain takeover: {sub} -> {t.get('cname', '')}",
+            description=(
+                f"Dangling CNAME pointing at {t.get('platform', '')}: the "
+                "upstream resource is unclaimed and an attacker can take over "
+                "this subdomain."
+            ),
+            evidence={"cname": t.get("cname"), "platform": t.get("platform")},
+            remediation="Reclaim the resource on the platform or remove the DNS record.",
+            target=target, confidence=0.95,
+        ))
+    return out[:20]
+
+
 @register("tech_detector")
 def _adapt_tech_detector(result: dict, target: str) -> list[Finding]:
     """Informational only: detected stack feeds later CVE correlation."""

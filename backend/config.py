@@ -147,6 +147,13 @@ TOOLS = {
         "icon": "#C",
         "timeout": 90,
     },
+    "subdomain_takeover": {
+        "name": "Subdomain Takeover",
+        "category": "Vulnerability",
+        "description": "Dangling CNAME detection via CT logs (GitHub Pages / Heroku / S3)",
+        "icon": "TK",
+        "timeout": 90,
+    },
     "hash_checker": {
         "name": "Hash Lookup",
         "category": "Vulnerability",

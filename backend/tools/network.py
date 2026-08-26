@@ -1,13 +1,17 @@
 """Network Recon tools — pure Python, no external binaries required."""
 import asyncio
+import re
 import socket
 import ssl
 import struct
 import time
 import json
 from typing import Any
+from urllib.parse import urlparse
 
 import aiohttp
+
+from backend.tools.osint import _is_ip, ct_logs
 
 
 # ── 1. Port Scanner ────────────────────────────────────────────
@@ -179,6 +183,123 @@ async def subdomain_enum(domain: str, wordlist: str = "quick", **kw) -> dict:
         "wordlist_size": len(words),
         "elapsed_seconds": elapsed,
     }
+
+
+# ── Subdomain Takeover ───────────────────────────────────
+_TAKEOVER_MAX_SUBS = 50
+
+
+def _match_platform(cname: str) -> str | None:
+    """Map a CNAME target to the platform that would serve it."""
+    c = (cname or "").lower().rstrip(".")
+    if c.endswith((".github.io", ".githubpages.dev")):
+        return "github_pages"
+    if c.endswith((".herokuapp.com", ".onheroku.com")):
+        return "heroku"
+    if re.search(r"\.s3[a-z0-9.-]*\.amazonaws\.com$", c) or c.endswith(".website.amazonaws.com"):
+        return "s3"
+    return None
+
+
+async def _takeover_dns(host: str) -> dict:
+    """CNAME + A resolution for one candidate (dnspython in a thread)."""
+    import dns.resolver
+    import dns.exception
+
+    info = {"cname": None, "a_resolved": False, "nxdomain": False}
+    try:
+        answers = await asyncio.to_thread(
+            dns.resolver.resolve, host, "CNAME", lifetime=4
+        )
+        info["cname"] = str(answers[0]).rstrip(".")
+    except dns.resolver.NXDOMAIN:
+        info["nxdomain"] = True
+        return info
+    except (dns.resolver.NoAnswer, dns.exception.Timeout, dns.resolver.NoNameservers):
+        pass
+    except Exception:
+        pass
+    try:
+        await asyncio.to_thread(dns.resolver.resolve, host, "A", lifetime=4)
+        info["a_resolved"] = True
+    except dns.resolver.NXDOMAIN:
+        info["nxdomain"] = True
+    except (dns.resolver.NoAnswer, dns.exception.Timeout, dns.resolver.NoNameservers):
+        pass
+    except Exception:
+        pass
+    return info
+
+
+async def _takeover_probe(sub: str) -> int | None:
+    """HTTPS status of the candidate; None when unreachable."""
+    try:
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=10),
+            connector=aiohttp.TCPConnector(ssl=False)
+        ) as session:
+            async with session.get(f"https://{sub}", allow_redirects=True) as resp:
+                return resp.status
+    except Exception:
+        return None
+
+
+async def subdomain_takeover(domain: str, **kw) -> dict:
+    """Dangling CNAME detection for GitHub Pages / Heroku / S3.
+
+    Candidate subdomains come from CT logs (crt.sh). Each one is resolved
+    for its CNAME; targets pointing at a claimable platform are probed and
+    flagged when nothing live answers (no A record, unreachable or 404/503).
+    External sources failing degrade the result instead of breaking the scan.
+    """
+    target = domain or ""
+    if "://" in target:
+        target = urlparse(target).netloc or target
+    host = target.split("/")[0].split(":")[0].strip().lower()
+    if not host or _is_ip(host):
+        return {"domain": host, "error": "Takeover requires a domain, not an IP"}
+
+    ct = await ct_logs(host)
+    subs = [s for s in ct.get("subdomains", []) if s != host][:_TAKEOVER_MAX_SUBS]
+
+    async def check(sub: str) -> dict | None:
+        info = await _takeover_dns(sub)
+        if info["nxdomain"] or not info["cname"]:
+            return None
+        platform = _match_platform(info["cname"])
+        if not platform:
+            return {
+                "sub": sub,
+                "cname": info["cname"],
+                "platform": None,
+                "dangling": False,
+                "http_status": None,
+            }
+        status = await _takeover_probe(sub)
+        dangling = (not info["a_resolved"]) or (status is None) or status in (404, 503)
+        return {
+            "sub": sub,
+            "cname": info["cname"],
+            "platform": platform,
+            "dangling": dangling,
+            "http_status": status,
+        }
+
+    results = await asyncio.gather(*(check(s) for s in subs))
+    hits = [r for r in results if r is not None]
+    takeovers = [h for h in hits if h["platform"] and h["dangling"]]
+
+    out = {
+        "domain": host,
+        "checked": len(subs),
+        "candidates_with_cname": len(hits),
+        "takeovers": takeovers,
+        "count": len(takeovers),
+    }
+    if ct.get("error"):
+        out["ct_error"] = ct["error"]
+    return out
+
 
 
 # ── 4. HTTP Probe ──────────────────────────────────────────────

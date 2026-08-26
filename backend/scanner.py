@@ -9,6 +9,7 @@ from backend.findings import extract_findings, score_findings
 from backend.tools.network import (
     port_scanner, dns_recon, subdomain_enum, http_probe,
     whois_lookup, ping_sweep, traceroute, ssl_analyzer,
+    subdomain_takeover,
 )
 from backend.tools.web import (
     header_analyzer, dir_fuzzer, sqli_scanner, xss_scanner,
@@ -45,6 +46,7 @@ HANDLERS: dict[str, Callable] = {
     # Vulnerability
     "cve_search": cve_search,
     "cve_correlation": cve_correlation,
+    "subdomain_takeover": subdomain_takeover,
     "hash_checker": hash_checker,
     "password_audit": password_audit,
     # System
