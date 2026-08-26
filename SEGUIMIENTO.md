@@ -13,9 +13,9 @@
 - **Repo local**: `C:\Users\Sammi\sec-dashboard`
 - **Repo remoto**: `https://github.com/PoisonXploIT/sec-dashboard.git` (origin, rama `master`)
 - **Deploy productivo**: Railway, dominio `sec.sammideblas.com` (Cloudflare Access + API key).
-- **Último commit**: `3fdbcfe` — "fix: F1-DNS SPKI parser walks RSAPublicKey modulus (real-world DKIM keys)"
-- **Fecha del commit**: 2026-08-26 (F1-DNS + revisión).
-- **Estado del plan**: Fase 1 completa salvo F1-FAVICON (backlog opcional Fase 2/3, decisión Opción A). Siguiente: Fase 2 — Full Depth pipeline.
+- **Último commit**: `10ed28f` — "feat: Phase 2 — executive PDF (generate_executive_pdf) + /executive-pdf endpoint"
+- **Fecha del commit**: 2026-08-26.
+- **Estado del plan**: Fase 1 completa salvo F1-FAVICON (backlog opcional Fase 2/3, decisión Opción A). **Fase 2 en curso**: Full Depth pipeline HECHO (`a0cf16a`), reporte ejecutivo PDF HECHO (`10ed28f`); pendiente: comparativa histórica en History.
 
 ### Comandos de referencia (siempre desde el repo)
 
@@ -91,10 +91,10 @@ Reglas de ejecución por tool (repetir para cada ID):
 5. Commit con mensaje `feat: F1-<ID> ...`, push solo cuando la suite esté en verde; actualizar esta tabla y el registro de la sección 6.
 
 ### Fase 2 — Motor de severidad y scoring
-- Scoring por target 0–100 (agregación de findings). Base ya lista: `score_findings()` en findings.py.
-- Pipeline "Full Depth": subdomain_enum → takeover → tech_detector → cve_correlation → secret_leaks.
-- Reporte ejecutivo PDF: portada con score, top 10 findings, heatmap por categoría, apéndice técnico.
-- Comparativa histórica en History (evolución de un target entre scans).
+- Scoring por target 0–100: HECHO. `score_findings()` en findings.py; persistido en DB desde Fase 0.4.
+- Pipeline "Full Depth": HECHO (`a0cf16a`). Modo `full_depth` en `PIPELINES`: 5 fases secuenciales, una tool por fase (subdomain_enum, subdomain_takeover, tech_detector, cve_correlation, secret_leak_scan); card + mapas JS en UI; test que pinta la cadena (`test_full_depth_pipeline_chain`).
+- Reporte ejecutivo PDF: HECHO (`10ed28f`). `generate_executive_pdf` en report.py (portada con score grande grayscale por umbrales 60/30, top 10 por peso de severidad x confidence, heatmap categoría x severidad celdas grayscale, apéndice técnico por fase/tool + JSON comprimido); helpers puros `executive_findings_from_pipeline` / `executive_top_findings` / `executive_heatmap`; endpoint `/api/pipelines/{id}/executive-pdf` + botón "Exec" en 3 sitios de la UI. El PDF técnico (`generate_pipeline_pdf`) se conserva intacto.
+- Comparativa histórica en History (evolución de un target entre scans): PENDIENTE — siguiente micro-paso.
 
 ### Fase 3 — Usabilidad y hardware
 - 3E: CLI headless (`python -m backend.cli --target ... --pipeline nuclear --json`), dark mode persistente, búsqueda en History.
@@ -297,6 +297,12 @@ Convención: cada sesión añade una entrada al FINAL de la lista (la más recie
 - Mínimo y cosmético, NO bloqueante; decisión del usuario: no tocar ahora, que no se olvide.
 - Fix sugerido para el pase de pulido (o dentro de Phase 2 si se toca la UI): o bien contar dinámicamente desde `/api/tools` al renderizar el sidebar, o actualizar el literal a 40 + categorías reales. Si se hace en Phase 2, commit `fix:` y suite verde antes de push.
 
+### 2026-08-26 — Phase 2 arranca: Full Depth pipeline + reporte ejecutivo PDF
+- Commit `a0cf16a`: modo `full_depth` en `PIPELINES` (5 fases secuenciales, una tool por fase, todos handlers existentes; findings/score fluyen solos por Fase 0.4). Card "Full Depth" en UI + entradas en los 2 mapas JS hardcodeados. Test nuevo que pinta la cadena exacta del plan. Suite 137 en verde.
+- Commit `10ed28f`: reporte ejecutivo PDF según diseño aprobado por el usuario: (1) `generate_executive_pdf(pipeline, target)` NUEVO, sin reescribir `generate_pipeline_pdf`; (2) portada "Executive Report" con score grande 0-100 y relleno grayscale por umbrales (>=60 oscuro / >=30 medio / <30 claro; n/a si falta); (3) top 10 findings ordenados por peso de severidad x confidence descendente (severity, category, title, description truncado, evidence resumido); (4) heatmap categoría x severidad (CRITICAL/HIGH/MEDIUM/LOW/INFO) con conteos y celdas rellenas grayscale por intensidad; (5) apéndice técnico: resumen por fase/tool (OK/FAIL, elapsed, n findings) + bloque JSON comprimido. Helpers puros testables: `executive_findings_from_pipeline` (fallback [] / None si result falta o esta roto), `executive_top_findings`, `executive_heatmap`. Endpoint `/api/pipelines/{id}/executive-pdf` en main.py (mismo patron que export/pdf) + boton "Exec" en history, viewPipelineResult y filteredPipelines + fila en la tabla de endpoints. Tests: 6 nuevos con extractor de texto PDF real (zlib sobre streams Flate) — %PDF, score "72/100" y target presentes, CRITICAL antes que LOW, conteos del heatmap, fallback n/a. Suite 143 en verde, ruff limpio, compileall OK; smoke 30 findings con saltos de pagina OK.
+- Decisiones: escala solo grayscale (regla no emojis/simbolos de color estricta); top 10 con confidence por defecto 1.0 si falta; categoria vacia = "uncategorized"; el PDF tecnico sigue disponible como antes (los dos conviven).
+- Siguiente micro-paso: comparativa historica en History (evolucion de un target entre scans). Mantener visible el bug cosmetico del sidebar (35 tools hardcodeadas vs 40 reales) para el pase de pulido.
+
 ## 7. Reglas y restricciones del proyecto (NO VIOLAR)
 
 1. **NO emojis, flechas de texto ni símbolos de color** en ninguna salida, nota, script o commit (regla global del usuario). Escribir las palabras.
@@ -326,12 +332,12 @@ M5 Stick + CC1101 + nRF24 (Bruce), WiFi Marauder ESP32 v6, LilyGo T-Embed + Bus 
 
 ---
 
-*Última actualización: 2026-08-26, post-revisión F1-DNS `3fdbcfe` (suite 136 tests en verde; ruff limpio). master == origin/master.*
+*Última actualización: 2026-08-26, Phase 2 a medias — Full Depth (`a0cf16a`) + executive PDF (`10ed28f`); suite 143 tests en verde; ruff limpio. master == origin/master.*
 
 **PROMPT PARA LA PRÓXIMA SESIÓN** (arrancar con contexto nuevo):
-Eres el agente de sec-dashboard. Primero lee este archivo entero (la sección 7 son reglas NO VIOLAR). Estado: Fase 1 completa salvo F1-FAVICON (backlog opcional Fase 2/3 por decisión Opción A registrada arriba); suite 136 tests en verde, ruff limpio; master == origin/master en `3fdbcfe`.
-Tarea: **Phase 2 — Full Depth pipeline** (ver "Fase 2" de la sección 3): orquestar el pipeline `subdomain_enum → subdomain_takeover → tech_detector → cve_correlation → secret_leak_scan` reutilizando los handlers existentes; el scoring por target 0–100 ya existe (`score_findings`) y 0.4 ya persiste findings/score en pipelines.
-Antes de tocar nada: leer `backend/pipeline.py`, `backend/scanner.py` y `PIPELINES` de `backend/config.py` para ver qué estructura ya hay (no reescribir lo que existe).
-NO OLVIDAR (bug cosmético registrado arriba): el sidebar derecho dice "35 tools • 6 categories" hardcodeado en `frontend/index.html` (~línea 341) pero hay 40 tools registradas; si Phase 2 toca la UI, actualizarlo (mejor: contarlo dinámicamente desde `/api/tools`).
+Eres el agente de sec-dashboard. Primero lee este archivo entero (la sección 7 son reglas NO VIOLAR). Estado: Fase 1 completa salvo F1-FAVICON (backlog opcional Fase 2/3 por decisión Opción A registrada arriba); **Fase 2 a medias**: Full Depth pipeline HECHO (`a0cf16a`, modo `full_depth`) y reporte ejecutivo PDF HECHO (`10ed28f`, `generate_executive_pdf` + endpoint `/api/pipelines/{id}/executive-pdf`); suite 143 tests en verde, ruff limpio; master == origin/master en `10ed28f`.
+Tarea: **comparativa histórica en History** (último item de Fase 2): evolución de un target entre scans — comparar score/findings de pipelines pasados del mismo target (la columna `score` y `findings` ya persisten en la tabla `pipelines` desde Fase 0.4; ver `_persist_pipeline_result` en main.py y el endpoint `/api/pipelines/history`).
+Antes de tocar nada: leer `backend/main.py` (endpoint history + `_persist_pipeline_result`), `backend/report.py` (patron `generate_executive_pdf`, helpers puros) y la vista History del frontend (`filteredPipelines` en index.html).
+NO OLVIDAR (bug cosmetico registrado arriba): el sidebar derecho dice "35 tools • 6 categories" hardcodeado en `frontend/index.html` (~linea 341) pero hay 40 tools registradas; si se toca la UI, actualizarlo (mejor: contarlo dinamicamente desde `/api/tools`).
 Reglas: MVP sin dependencias nuevas, tests sin red, commits `feat:`/`fix:`, push solo con suite verde, sin emojis.
 Al cerrar sesión: actualizar las tablas/sección 6 de este archivo y el footer con el siguiente micro-paso.
