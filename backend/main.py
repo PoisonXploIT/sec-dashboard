@@ -21,6 +21,7 @@ from backend.proxy import get_proxy_config, set_proxy_config, get_tor_status, ge
 from backend.report import (
     generate_scan_json, generate_pipeline_json, generate_all_json,
     generate_scan_pdf, generate_pipeline_pdf, generate_all_pdf,
+    generate_executive_pdf,
 )
 from backend.validators import validate_target, is_remote_mode
 from backend import webhooks
@@ -217,6 +218,26 @@ async def export_pipeline_pdf_endpoint(pipeline_id: int):
         pdf_bytes = generate_pipeline_pdf(pipeline, target)
         return FastResponse(content=pdf_bytes, media_type="application/pdf",
             headers={"Content-Disposition": f'attachment; filename="pipeline_{pipeline_id}.pdf"'})
+    finally:
+        await db.close()
+
+@app.get("/api/pipelines/{pipeline_id}/executive-pdf")
+async def export_pipeline_executive_pdf_endpoint(pipeline_id: int):
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT * FROM pipelines WHERE id = ?", (pipeline_id,))
+        pipeline = await cursor.fetchone()
+        if not pipeline:
+            raise HTTPException(404, "Pipeline not found")
+        pipeline = dict(pipeline)
+        target = None
+        if pipeline.get("target_id"):
+            cur2 = await db.execute("SELECT * FROM targets WHERE id = ?", (pipeline["target_id"],))
+            row = await cur2.fetchone()
+            if row: target = dict(row)
+        pdf_bytes = generate_executive_pdf(pipeline, target)
+        return FastResponse(content=pdf_bytes, media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="pipeline_{pipeline_id}_executive.pdf"'})
     finally:
         await db.close()
 

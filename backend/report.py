@@ -6,6 +6,8 @@ from typing import Any
 
 from fpdf import FPDF
 
+from backend.findings import SEVERITY_WEIGHT, Severity
+
 
 class ReportPDF(FPDF):
     """Custom PDF with sec-dashboard branding."""
@@ -748,5 +750,239 @@ def generate_pipeline_pdf(pipeline: dict, target: dict = None) -> bytes:
     pdf.add_page()
     pdf.section_title("Raw JSON Output")
     pdf.add_json_block(result_data, max_lines=100)
+
+    return bytes(pdf.output())
+
+
+# ── Executive PDF (Phase 2) ────────────────────────────────
+
+_SEVERITY_NAMES = ["critical", "high", "medium", "low", "info"]
+_SEVERITY_WEIGHT_BY_VALUE = {sev.value: w for sev, w in SEVERITY_WEIGHT.items()}
+
+
+def _pipeline_result_data(pipeline: dict) -> dict:
+    """Parse the persisted pipeline result JSON ({} on any failure)."""
+    if not pipeline.get("result"):
+        return {}
+    try:
+        data = json.loads(pipeline["result"])
+        return data if isinstance(data, dict) else {}
+    except (json.JSONDecodeError, TypeError):
+        return {}
+
+
+def executive_findings_from_pipeline(pipeline: dict) -> tuple[list[dict], int | None]:
+    """Extract aggregated findings + score from a persisted pipeline row.
+
+    Fase 0.4 stores both in the result JSON; fallback is [] / None when
+    missing or malformed so the executive report still renders.
+    """
+    data = _pipeline_result_data(pipeline)
+    raw = data.get("findings")
+    findings = [f for f in raw if isinstance(f, dict)] if isinstance(raw, list) else []
+    score = data.get("score")
+    try:
+        score = int(score)
+    except (TypeError, ValueError):
+        score = None
+    return findings, score
+
+
+def executive_top_findings(findings: list[dict], limit: int = 10) -> list[dict]:
+    """Top findings ordered by severity weight x confidence, descending."""
+    def _rank(f: dict) -> float:
+        sev = str(f.get("severity", "info")).lower()
+        try:
+            conf = float(f.get("confidence") or 1.0)
+        except (TypeError, ValueError):
+            conf = 1.0
+        return _SEVERITY_WEIGHT_BY_VALUE.get(sev, 0) * conf
+    return sorted(findings, key=_rank, reverse=True)[:limit]
+
+
+def executive_heatmap(findings: list[dict]) -> dict[str, dict[str, int]]:
+    """Category x severity count matrix (fixed severity columns per row)."""
+    matrix: dict[str, dict[str, int]] = {}
+    for f in findings:
+        cat = str(f.get("category") or "uncategorized")
+        sev = str(f.get("severity", "info")).lower()
+        row = matrix.setdefault(cat, {s: 0 for s in _SEVERITY_NAMES})
+        if sev in row:
+            row[sev] += 1
+    return matrix
+
+
+def _heat_fill(count: int) -> tuple | None:
+    """Grayscale fill for a heatmap cell by count (None = no fill)."""
+    if count <= 0:
+        return None
+    if count == 1:
+        return (235, 235, 235)
+    if count <= 3:
+        return (190, 190, 190)
+    if count <= 7:
+        return (140, 140, 140)
+    return (60, 60, 60)
+
+
+def generate_executive_pdf(pipeline: dict, target: dict = None) -> bytes:
+    """Generate the executive PDF report (Phase 2).
+
+    Cover with big score, top 10 findings by weight x confidence, category x
+    severity heatmap and a technical appendix. Grayscale only (project rule:
+    no color symbols). The technical report (generate_pipeline_pdf) is kept.
+    """
+    pdf = ReportPDF()
+    pdf.alias_nb_pages()
+
+    mode = str(pipeline.get("mode", "Unknown"))
+    host = target.get("host", "") if target else ""
+    data = _pipeline_result_data(pipeline)
+    findings, score = executive_findings_from_pipeline(pipeline)
+    top = executive_top_findings(findings)
+    matrix = executive_heatmap(findings)
+
+    # ── Cover ────────────────────────────────────────────────
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 24)
+    pdf.cell(0, 14, _sanitize("Executive Report"), align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_font("Helvetica", "", 12)
+    subtitle = f"Pipeline {mode}" + (f"  |  {host}" if host else "")
+    pdf.cell(0, 8, _sanitize(subtitle), align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(4)
+    if target:
+        pdf.set_font("Helvetica", "", 10)
+        pdf.cell(0, 6, _sanitize(f"{target.get('name', '')} ({host})"), align="C",
+                 new_x="LMARGIN", new_y="NEXT")
+    pdf.ln(2)
+
+    # Big score block (grayscale by threshold: >=60 dark, >=30 mid, else light)
+    if score is None:
+        label, fill = "n/a", None
+    else:
+        label = f"{score}/100"
+        fill = (30, 30, 30) if score >= 60 else (128, 128, 128) if score >= 30 else (220, 220, 220)
+    box_w, box_h = 60, 24
+    x0, y0 = (210 - box_w) / 2, pdf.get_y() + 4
+    if fill:
+        pdf.set_fill_color(*fill)
+        pdf.rect(x0, y0, box_w, box_h, style="FILL")
+    pdf.set_font("Helvetica", "B", 26)
+    score_white = fill is not None and score is not None and score >= 30
+    pdf.set_text_color(255, 255, 255 if score_white else 0)
+    pdf.set_xy(x0 + (box_w - 50) / 2, y0 + 4)
+    pdf.cell(50, 16, label, align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_text_color(96, 96, 96)
+    pdf.set_font("Helvetica", "", 8)
+    pdf.cell(0, 5, "Score scale (grayscale): 60-100 severe / 30-59 elevated / 0-29 low",
+             align="C", new_x="LMARGIN", new_y="NEXT")
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(8)
+
+    # Metadata
+    pdf.kv_row("Pipeline ID", str(pipeline.get("id", "")))
+    pdf.kv_row("Mode", mode)
+    pdf.kv_row("Status", str(pipeline.get("status", "")))
+    pdf.kv_row("Started", str(pipeline.get("started_at", "")))
+    pdf.kv_row("Finished", str(pipeline.get("finished_at", "")))
+    if data.get("elapsed_seconds") is not None:
+        pdf.kv_row("Elapsed", f"{data.get('elapsed_seconds')}s")
+    pdf.kv_row("Total Findings", str(len(findings)))
+
+    # ── Top 10 findings ───────────────────────────────────────
+    pdf.add_page()
+    pdf.section_title("Top Findings (severity weight x confidence)")
+    if not top:
+        pdf.set_font("Helvetica", "", 9)
+        pdf.cell(0, 6, "No findings recorded for this pipeline.", new_x="LMARGIN", new_y="NEXT")
+    else:
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.cell(24, 5, "Severity", border=1)
+        pdf.cell(34, 5, "Category", border=1)
+        pdf.cell(132, 5, "Title", border=1, new_x="LMARGIN", new_y="NEXT")
+        for f in top:
+            sev = str(f.get("severity", "info")).upper()
+            title = _sanitize(str(f.get("title", "")))[:80]
+            desc = _sanitize(str(f.get("description", "")))[:120]
+            ev = _sanitize(str(f.get("evidence", "")))[:80]
+            if pdf.get_y() > 250:
+                pdf.add_page()
+            pdf.set_font("Helvetica", "B", 8)
+            pdf.cell(24, 5, sev[:10], border=1)
+            pdf.set_font("Helvetica", "", 8)
+            pdf.cell(34, 5, _sanitize(str(f.get("category", "")))[:32], border=1)
+            pdf.cell(132, 5, title, border=1, new_x="LMARGIN", new_y="NEXT")
+            detail = f"{desc}" + (f"  |  evidence: {ev}" if ev else "")
+            pdf.set_font("Helvetica", "I", 7)
+            pdf.multi_cell(0, 4, detail, new_x="LMARGIN", new_y="NEXT")
+
+    # ── Heatmap: category x severity ───────────────────────────
+    pdf.add_page()
+    pdf.section_title("Findings Heatmap (category x severity)")
+    if not matrix:
+        pdf.set_font("Helvetica", "", 9)
+        pdf.cell(0, 6, "Nothing to map.", new_x="LMARGIN", new_y="NEXT")
+    else:
+        col_w = 26
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.cell(45, 6, "Category", border=1)
+        for s in _SEVERITY_NAMES:
+            pdf.cell(col_w, 6, s.upper()[:8], border=1, align="C")
+        pdf.cell(15, 6, "Total", border=1, align="C", new_x="LMARGIN", new_y="NEXT")
+        for cat, row in matrix.items():
+            if pdf.get_y() > 250:
+                pdf.add_page()
+            total = sum(row.values())
+            pdf.set_font("Helvetica", "", 8)
+            pdf.cell(45, 6, _sanitize(cat)[:43], border=1)
+            for s in _SEVERITY_NAMES:
+                n = row[s]
+                fillc = _heat_fill(n)
+                white = fillc is not None and n > 3
+                if fillc:
+                    pdf.set_fill_color(*fillc)
+                pdf.set_text_color(255, 255, 255 if white else 0)
+                pdf.cell(col_w, 6, str(n), border=1, align="C", fill=fillc is not None)
+            pdf.set_text_color(0, 0, 0)
+            pdf.cell(15, 6, str(total), border=1, align="C", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_text_color(0, 0, 0)
+
+    # ── Technical appendix ────────────────────────────────────
+    pdf.add_page()
+    pdf.section_title("Technical Appendix (phase / tool summary)")
+    phases = data.get("phases") or {}
+    if not isinstance(phases, dict):
+        phases = {}
+    compact: dict[str, Any] = {
+        "mode": mode,
+        "status": pipeline.get("status"),
+        "score": score,
+        "total_findings": len(findings),
+        "phases": {},
+    }
+    for phase_name, tools in phases.items():
+        if not isinstance(tools, dict):
+            continue
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.cell(0, 6, _sanitize(str(phase_name)), new_x="LMARGIN", new_y="NEXT")
+        compact["phases"][str(phase_name)] = {}
+        for tool_name, tr in tools.items():
+            if not isinstance(tr, dict):
+                continue
+            ok = bool(tr.get("success"))
+            n_findings = len(tr.get("findings") or []) if isinstance(tr.get("findings"), list) else 0
+            elapsed = tr.get("elapsed_seconds", "")
+            mark = "[OK]" if ok else "[FAIL]"
+            pdf.set_font("Helvetica", "", 8)
+            pdf.cell(0, 5, f"  {mark} {_sanitize(str(tool_name))} ({elapsed}s, {n_findings} findings)",
+                      new_x="LMARGIN", new_y="NEXT")
+            compact["phases"][str(phase_name)][str(tool_name)] = {
+                "success": ok,
+                "elapsed_seconds": elapsed,
+                "findings": n_findings,
+            }
+    pdf.ln(4)
+    pdf.section_title("Compressed JSON Summary")
+    pdf.add_json_block(compact, max_lines=60)
 
     return bytes(pdf.output())
