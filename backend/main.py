@@ -868,14 +868,32 @@ async def list_pipelines():
 
 
 @app.get("/api/pipelines/history")
-async def pipeline_history():
+async def pipeline_history(mode: str | None = None, status: str | None = None, q: str | None = None):
+    """Pipeline history with optional filters (3E sub-micro-paso 3).
+
+    mode/status are exact matches; q is a case-insensitive LIKE over mode +
+    target name + target host. No params = previous behavior.
+    """
     db = await get_db()
     try:
-        cursor = await db.execute(
-            "SELECT p.*, t.name as target_name, t.host as target_host "
-            "FROM pipelines p LEFT JOIN targets t ON p.target_id = t.id "
-            "ORDER BY p.started_at DESC LIMIT 20"
-        )
+        sql = ("SELECT p.*, t.name as target_name, t.host as target_host "
+               "FROM pipelines p LEFT JOIN targets t ON p.target_id = t.id")
+        clauses: list[str] = []
+        params: list[str] = []
+        if mode:
+            clauses.append("p.mode = ?")
+            params.append(mode)
+        if status:
+            clauses.append("p.status = ?")
+            params.append(status)
+        if q:
+            like = f"%{q}%"
+            clauses.append("(p.mode LIKE ? OR t.name LIKE ? OR t.host LIKE ?)")
+            params.extend([like] * 3)
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY p.started_at DESC LIMIT 20"
+        cursor = await db.execute(sql, params)
         rows = await cursor.fetchall()
         return {"pipelines": [dict(r) for r in rows]}
     finally:

@@ -361,7 +361,7 @@
     const state = {
         page: 'dashboard', tools: [], targets: [], selectedTarget: null,
         pipelines: {}, ws: null, categoryFilter: null, toolSearch: '',
-        historyTab: 'scans', historySearch: '', historyOffset: 0, historyLimit: 50,
+        historyTab: 'scans', historySearch: '', historyPMode: '', historyPStatus: '', historyOffset: 0, historyLimit: 50,
         activePipelineId: null, activeScanId: null,
     };
 
@@ -1640,7 +1640,10 @@
         content.innerHTML = '<div class="skeleton" style="height:200px;margin-bottom:16px"></div>'.repeat(2);
 
         const scansPromise = api.get(`/scans?offset=${state.historyOffset}&limit=${state.historyLimit}`);
-        const pipelinesPromise = api.get('/pipelines/history');
+        const pParams = new URLSearchParams();
+        if (state.historyPMode) pParams.set('mode', state.historyPMode);
+        if (state.historyPStatus) pParams.set('status', state.historyPStatus);
+        const pipelinesPromise = api.get('/pipelines/history' + (pParams.toString() ? `?${pParams}` : ''));
         const [scans, pipelines] = await Promise.all([scansPromise, pipelinesPromise]);
 
         const allScans = scans.scans || [];
@@ -1686,6 +1689,17 @@
             <div class="search-bar mb-16">
                 <input type="text" placeholder="Search by tool, target, status..." value="${esc(state.historySearch)}" oninput="state.historySearch=this.value;renderHistoryPage()">
             </div>
+            ${activeTab==='pipelines' ? `
+                <div class="flex gap-8 items-center mb-16">
+                    <select style="width:150px" onchange="state.historyPMode=this.value;renderHistoryPage()">
+                        <option value="" ${!state.historyPMode?'selected':''}>All modes</option>
+                        ${['fast','deep','full_depth','nuclear'].map(m => `<option value="${m}" ${state.historyPMode===m?'selected':''}>${m}</option>`).join('')}
+                    </select>
+                    <select style="width:150px" onchange="state.historyPStatus=this.value;renderHistoryPage()">
+                        <option value="" ${!state.historyPStatus?'selected':''}>All statuses</option>
+                        ${['completed','running','failed','cancelled'].map(s => `<option value="${s}" ${state.historyPStatus===s?'selected':''}>${s}</option>`).join('')}
+                    </select>
+                </div>` : ''}
             ${activeTab === 'scans' ? `
                 <div class="card">
                     ${filteredScans.length ? `<table><thead><tr><th>Tool</th><th>Target</th><th>Status</th><th>Started</th><th>Actions</th></tr></thead><tbody>
