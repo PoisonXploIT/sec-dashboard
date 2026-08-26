@@ -292,6 +292,11 @@ Convención: cada sesión añade una entrada al FINAL de la lista (la más recie
 - Suite 136 en verde, ruff limpio.
 - Decisión de ruta (Opción A, la recomendada): F1-FAVICON pasa a backlog opcional de Fase 2/3 y se arranca Phase 2 Full Depth pipeline. Queda registrada para que la próxima sesión no tenga que releer el plan.
 
+### 2026-08-26 — Bug cosmético registrado (sidebar: contador de tools)
+- El sidebar derecho muestra "35 tools • 6 categories" hardcodeado en `frontend/index.html` (línea ~341), pero `backend/config.py` registra **40** tools. El número no se actualiza al añadir tools nuevas.
+- Mínimo y cosmético, NO bloqueante; decisión del usuario: no tocar ahora, que no se olvide.
+- Fix sugerido para el pase de pulido (o dentro de Phase 2 si se toca la UI): o bien contar dinámicamente desde `/api/tools` al renderizar el sidebar, o actualizar el literal a 40 + categorías reales. Si se hace en Phase 2, commit `fix:` y suite verde antes de push.
+
 ## 7. Reglas y restricciones del proyecto (NO VIOLAR)
 
 1. **NO emojis, flechas de texto ni símbolos de color** en ninguna salida, nota, script o commit (regla global del usuario). Escribir las palabras.
@@ -327,5 +332,6 @@ M5 Stick + CC1101 + nRF24 (Bruce), WiFi Marauder ESP32 v6, LilyGo T-Embed + Bus 
 Eres el agente de sec-dashboard. Primero lee este archivo entero (la sección 7 son reglas NO VIOLAR). Estado: Fase 1 completa salvo F1-FAVICON (backlog opcional Fase 2/3 por decisión Opción A registrada arriba); suite 136 tests en verde, ruff limpio; master == origin/master en `3fdbcfe`.
 Tarea: **Phase 2 — Full Depth pipeline** (ver "Fase 2" de la sección 3): orquestar el pipeline `subdomain_enum → subdomain_takeover → tech_detector → cve_correlation → secret_leak_scan` reutilizando los handlers existentes; el scoring por target 0–100 ya existe (`score_findings`) y 0.4 ya persiste findings/score en pipelines.
 Antes de tocar nada: leer `backend/pipeline.py`, `backend/scanner.py` y `PIPELINES` de `backend/config.py` para ver qué estructura ya hay (no reescribir lo que existe).
+NO OLVIDAR (bug cosmético registrado arriba): el sidebar derecho dice "35 tools • 6 categories" hardcodeado en `frontend/index.html` (~línea 341) pero hay 40 tools registradas; si Phase 2 toca la UI, actualizarlo (mejor: contarlo dinámicamente desde `/api/tools`).
 Reglas: MVP sin dependencias nuevas, tests sin red, commits `feat:`/`fix:`, push solo con suite verde, sin emojis.
 Al cerrar sesión: actualizar las tablas/sección 6 de este archivo y el footer con el siguiente micro-paso.
