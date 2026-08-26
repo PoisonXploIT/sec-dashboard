@@ -942,28 +942,32 @@ def _redact(value: str) -> str:
 
 
 def _scan_text(text: str, source: str, findings: list[dict]) -> None:
-    """Scan one fetched document against the pattern table (first match wins)."""
+    """Scan one fetched document against the pattern table.
+
+    Uses finditer so a file with several secrets reports them all; matches
+    whose spans overlap are deduplicated by position (first pattern in the
+    table wins), so one secret region is never reported twice.
+    """
+    taken: list[tuple[int, int]] = []
     for ftype, tier, rx in _SECRET_PATTERNS:
-        m = rx.search(text)
-        if m:
+        for m in rx.finditer(text):
+            a, b = m.span()
+            if any(s < b and a < e for s, e in taken):
+                continue
+            taken.append((a, b))
             findings.append({
                 "source": source,
                 "type": ftype,
                 "tier": tier,
                 "evidence": _redact(m.group(0)),
             })
-            return
 
 
-async def _secret_fetch(url: str, timeout: float = 8.0) -> tuple[int | None, str]:
-    """GET one URL; (status, body). Unreachable hosts yield (None, "")."""
+async def _secret_fetch(url: str, session: aiohttp.ClientSession) -> tuple[int | None, str]:
+    """GET one URL on the shared session; (status, body). Unreachable hosts yield (None, "")."""
     try:
-        async with aiohttp.ClientSession(
-            timeout=aiohttp.ClientTimeout(total=timeout),
-            connector=aiohttp.TCPConnector(ssl=False)
-        ) as session:
-            async with session.get(url, allow_redirects=True) as resp:
-                return resp.status, (await resp.text(errors="ignore"))
+        async with session.get(url, allow_redirects=True) as resp:
+            return resp.status, (await resp.text(errors="ignore"))
     except Exception:
         return None, ""
 
@@ -987,9 +991,13 @@ async def secret_leak_scan(target: str, **kw) -> dict:
     robots_url = f"{parsed.scheme}://{host}/robots.txt"
     git_urls = [f"{parsed.scheme}://{host}{p}" for p in _GIT_EVIDENCE_PATHS]
 
-    fetched = await asyncio.gather(
-        *(_secret_fetch(u) for u in js_urls + [robots_url] + git_urls)
-    )
+    async with aiohttp.ClientSession(
+        timeout=aiohttp.ClientTimeout(total=8.0),
+        connector=aiohttp.TCPConnector(ssl=False)
+    ) as session:
+        fetched = await asyncio.gather(
+            *(_secret_fetch(u, session) for u in js_urls + [robots_url] + git_urls)
+        )
     js_results = fetched[:len(js_urls)]
     r_status, r_body = fetched[len(js_urls)]
     git_results = fetched[len(js_urls) + 1:]

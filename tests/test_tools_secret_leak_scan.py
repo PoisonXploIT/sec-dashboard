@@ -1,5 +1,6 @@
 """F1-SECRETS: secret_leak_scan tool + findings adapter (no network)."""
 import asyncio
+from urllib.parse import urlparse
 
 import backend.findings as findings
 import backend.tools.web as web
@@ -59,8 +60,7 @@ def test_redaction_hides_the_secret():
 # ── handler (stubbed HTTP) ──────────────────────────────────────
 def _stub(monkeypatch, bodies):
     """bodies: {path: (status, text)}; everything else is a 404."""
-    async def fake_fetch(url, timeout=8.0):
-        from urllib.parse import urlparse
+    async def fake_fetch(url, session):
         path = urlparse(url).path
         if path in bodies:
             return bodies[path]
@@ -121,6 +121,94 @@ def test_handler_normalizes_url_input(monkeypatch):
     _stub(monkeypatch, {})
     result = _run(web.secret_leak_scan("https://Example.com:8443/path?q=1"))
     assert result["target"] == "example.com"
+
+
+# ── shared session (real _secret_fetch, fake aiohttp) ─────────
+class _FakeResponse:
+    def __init__(self, status, body):
+        self.status = status
+        self._body = body
+
+    async def text(self, errors=None):
+        return self._body
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+class _FakeSession:
+    """Stands in for aiohttp.ClientSession; records how many are created."""
+    instances = 0
+    bodies: dict = {}
+
+    def __init__(self, *args, **kwargs):
+        _FakeSession.instances += 1
+        self.requests: list[str] = []
+
+    def get(self, url, **kwargs):
+        self.requests.append(url)
+        path = urlparse(url).path
+        behavior = _FakeSession.bodies.get(path, (404, ""))
+        if isinstance(behavior, Exception):
+            raise behavior
+        return _FakeResponse(*behavior)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+
+def test_handler_opens_one_shared_session_for_all_urls(monkeypatch):
+    _FakeSession.instances = 0
+    _FakeSession.bodies = {"/main.js": (200, f'const key = "{AWS_KEY}";')}
+    monkeypatch.setattr(web.aiohttp, "ClientSession", _FakeSession)
+    result = _run(web.secret_leak_scan("example.com"))
+    assert _FakeSession.instances == 1
+    assert result["count"] == 1
+    assert result["findings"][0]["type"] == "aws_access_key_id"
+
+
+def test_handler_shared_session_survives_fetch_errors(monkeypatch):
+    _FakeSession.instances = 0
+    _FakeSession.bodies = {
+        "/main.js": RuntimeError("boom"),
+        "/robots.txt": (200, 'api_key="abcdef1234567890"\n'),
+    }
+    monkeypatch.setattr(web.aiohttp, "ClientSession", _FakeSession)
+    result = _run(web.secret_leak_scan("example.com"))
+    assert _FakeSession.instances == 1
+    # the failing URL degrades to not-found; the rest of the scan completes
+    assert result["count"] == 1
+    assert result["findings"][0]["type"] == "generic_token"
+
+
+# ── _scan_text: multiple matches + position dedup ────────────
+def test_scan_text_reports_multiple_secrets_in_one_file():
+    found: list[dict] = []
+    text = f'const a = "{AWS_KEY}";\nconst b = "{GITHUB_TOKEN}";'
+    web._scan_text(text, "/main.js", found)
+    assert [f["type"] for f in found] == ["aws_access_key_id", "github_token"]
+    assert all(f["tier"] == "high" for f in found)
+
+
+def test_scan_text_dedups_overlapping_positions():
+    # The AWS key inside a quoted assignment is also caught by generic_token;
+    # the overlapping span must be reported once (high tier wins).
+    found: list[dict] = []
+    web._scan_text(f'password = "{AWS_KEY}"', "/main.js", found)
+    assert len(found) == 1
+    assert found[0]["type"] == "aws_access_key_id"
+
+
+def test_scan_text_clean_text_no_findings():
+    found: list[dict] = []
+    web._scan_text("var x = 1; // nothing secret here", "/main.js", found)
+    assert found == []
 
 
 # ── findings adapter ───────────────────────────────────────────
