@@ -255,6 +255,13 @@ TOOLS = {
         "icon": "EM",
         "timeout": 15,
     },
+    "dns_zone_hygiene": {
+        "name": "DNS Zone Hygiene",
+        "category": "Email Security",
+        "description": "SPF permissiveness, DKIM selector brute + key strength, DMARC policy, DNSKEY length",
+        "icon": "DZ",
+        "timeout": 60,
+    },
     "http_methods": {
         "name": "HTTP Methods",
         "category": "Web Security",

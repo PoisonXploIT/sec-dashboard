@@ -1,5 +1,6 @@
 """Email security and DNS hardening tools."""
 import asyncio
+import base64
 import socket
 from urllib.parse import urlparse
 
@@ -7,6 +8,7 @@ import aiohttp
 import dns.resolver
 
 from backend.proxy import get_aiohttp_connector
+from backend.tools.osint import _is_ip
 
 
 # ── DNSSEC Checker ─────────────────────────────────────────────
@@ -421,3 +423,292 @@ async def caa_checker(target: str, **kw) -> dict:
         results["recommendation"] = "No CAA records found. Any CA can issue certificates for this domain. Add CAA records to restrict."
 
     return results
+
+
+# ── DNS Zone Hygiene ───────────────────────────────────────────
+# Depth tool over the email/zone trust chain: SPF permissiveness, DKIM
+# selector brute + public key strength, DMARC policy and DNSKEY length.
+# Best-effort like the rest of the suite: a failed query degrades to a
+# status; 'missing' conclusions are only emitted for definitive answers.
+_DKIM_SELECTORS = [
+    "default", "google", "cf2024-1", "selector1", "selector2",
+    "s1", "s2", "mail", "mta", "sip", "krs", "dkim", "mx",
+]
+
+
+def _tlv(data: bytes, off: int) -> tuple[int, int, int]:
+    """Read one DER TLV header; returns (tag, content_len, content_offset)."""
+    tag = data[off]
+    ln = data[off + 1]
+    if ln < 0x80:
+        return tag, ln, off + 2
+    n = ln & 0x7F
+    length = int.from_bytes(data[off + 2:off + 2 + n], "big")
+    return tag, length, off + 2 + n
+
+
+def _spki_key_bits(p_b64: str) -> tuple[str, int | None]:
+    """Classify a DKIM public key (SPKI DER).
+
+    Returns ('rsa', bits), ('ec', 256) for ecdsa-with-SHA256 (RFC 6945
+    mandates P-256) or ('unknown', None) when it cannot be derived.
+    """
+    try:
+        der = base64.b64decode(p_b64.encode("ascii"), validate=True)
+    except Exception:
+        return "unknown", None
+    if len(der) < 8 or der[0] != 0x30:
+        return "unknown", None
+    try:
+        _, _, off = _tlv(der, 0)            # SubjectPublicKeyInfo SEQUENCE
+        atag, alen, aoff = _tlv(der, off)   # AlgorithmIdentifier SEQUENCE
+        if atag != 0x30:
+            return "unknown", None
+        otag, olen, ooff = _tlv(der, aoff)  # OID inside AlgorithmIdentifier
+        oid = der[ooff:ooff + olen]
+        bit_off = aoff + alen               # BIT STRING right after the algid
+        if der[bit_off] != 0x03:
+            return "unknown", None
+        _, blen, boff = _tlv(der, bit_off)
+        mpi = der[boff:boff + blen][1:]     # skip the unused-bits byte
+        if oid == bytes.fromhex("2a864886f70d010100"):  # rsaEncryption
+            return "rsa", int.from_bytes(mpi, "big").bit_length()
+        if oid == bytes.fromhex("2a8648ce3d030107"):    # ecdsa-with-SHA256
+            return "ec", 256
+        return "unknown", None
+    except Exception:
+        return "unknown", None
+
+
+_DNSKEY_EC_BITS = {5: 256}  # algorithm 5 = ECDSAP256 (RFC 8624)
+
+
+def _dnskey_bits(algorithm: int, publickey_b64: str) -> int | None:
+    """Key bit length from a DKIM/DNSKEY RDATA; None when not derivable.
+
+    RSA-family algorithms (1, 3) carry the modulus as a base-128 MPI in the
+    Public Key field, so its big-endian value gives the exact bit length.
+    """
+    if algorithm in _DNSKEY_EC_BITS:
+        return _DNSKEY_EC_BITS[algorithm]
+    if algorithm not in (1, 3):
+        return None
+    try:
+        key = base64.b64decode(publickey_b64)
+    except Exception:
+        return None
+    if not key:
+        return None
+    return int.from_bytes(key, "big").bit_length()
+
+
+def _spf_summary(record: str) -> dict:
+    """Summarize one v=spf1 record: permissive/hardfail + mechanism count."""
+    mechs = _parse_spf(record)
+    policies = [m.get("policy") for m in mechs if m.get("type") == "all"]
+    return {
+        "permissive": "+all" in policies,
+        "hardfail": "-all" in policies,
+        "mechanism_count": len(mechs),
+    }
+
+
+def _dmarc_issues(record: str) -> list[str]:
+    """Issue ids derivable from one v=DMARC1 record."""
+    pol = _parse_dmarc(record)
+    p = str(pol.get("policy", ""))
+    sp = str(pol.get("subdomain_policy", ""))
+    issues: list[str] = []
+    if p == "none":
+        issues.append("dmarc_p_none")
+    elif p in ("quarantine", "reject"):
+        try:
+            if int(str(pol.get("percentage", "")).strip()) < 100:
+                issues.append("dmarc_pct_partial")
+        except ValueError:
+            pass
+    order = {"none": 0, "quarantine": 1, "reject": 2}
+    if p in order and sp in order and sp != p and order[sp] < order[p]:
+        issues.append("dmarc_sp_weak")
+    return issues
+
+
+def _dkim_parse(record: str) -> dict:
+    """Parse one v=DKIM1 record → {'empty_key': bool, 'key_b64': str}."""
+    tags: dict[str, str] = {}
+    for part in record.split(";"):
+        part = part.strip()
+        if "=" in part:
+            k, _, v = part.partition("=")
+            tags[k.strip().lower()] = v.strip()
+    p = tags.get("p", "")
+    return {"empty_key": p == "", "key_b64": p}
+
+
+async def _hygiene_txt(name: str, lifetime: float = 8.0) -> tuple[str, list]:
+    """TXT query for one name; (status, records). Best-effort, never raises."""
+    try:
+        answers = await asyncio.to_thread(
+            dns.resolver.resolve, name, "TXT", lifetime=lifetime
+        )
+        return "ok", [str(rdata).strip('"') for rdata in answers]
+    except dns.resolver.NXDOMAIN:
+        return "nxdomain", []
+    except dns.resolver.NoAnswer:
+        return "noanswer", []
+    except Exception:
+        return "error", []
+
+
+async def _hygiene_dnskey(domain: str, lifetime: float = 8.0) -> tuple[str, list]:
+    """DNSKEY query for the apex; (status, [{algorithm, flags, publickey}])."""
+    try:
+        answers = await asyncio.to_thread(
+            dns.resolver.resolve, domain, "DNSKEY", lifetime=lifetime
+        )
+        return "ok", [
+            {"algorithm": r.algorithm, "flags": r.flags, "publickey": r.publickey}
+            for r in answers
+        ]
+    except dns.resolver.NXDOMAIN:
+        return "nxdomain", []
+    except dns.resolver.NoAnswer:
+        return "noanswer", []
+    except Exception:
+        return "error", []
+
+
+async def dns_zone_hygiene(target: str, **kw) -> dict:
+    """DNS zone hygiene: SPF permissiveness, DKIM selector brute + key
+    strength, DMARC policy and DNSKEY length.
+
+    External failures degrade to per-area statuses; 'missing' conclusions
+    are only emitted for definitive answers (ok/noanswer), never on timeout.
+    """
+    t = target or ""
+    if "://" in t:
+        t = urlparse(t).netloc or t
+    host = t.split("/")[0].split(":")[0].strip().lower()
+    if not host or _is_ip(host):
+        return {"target": host, "error": "DNS hygiene requires a domain, not an IP"}
+
+    apex_status, apex_txt = await _hygiene_txt(host)
+    if apex_status == "nxdomain":
+        return {"target": host, "error": "Domain does not exist"}
+
+    issues: list[dict] = []
+
+    # ── SPF (TXT at the apex) ──
+    spf_records = [r for r in apex_txt if r.startswith("v=spf1")]
+    spf: dict = {"present": bool(spf_records)}
+    if apex_status == "error":
+        spf["status"] = "error"
+    if not spf_records and apex_status in ("ok", "noanswer"):
+        issues.append({"id": "spf_missing", "detail": "No v=spf1 record at the zone apex"})
+    if len(spf_records) > 1:
+        issues.append({
+            "id": "spf_multiple_records",
+            "detail": f"{len(spf_records)} v=spf1 records published (RFC 7208 requires one)",
+        })
+    if spf_records:
+        summary = _spf_summary(spf_records[0])
+        spf.update({
+            "terminal_hardfail": summary["hardfail"],
+            "mechanism_count": summary["mechanism_count"],
+        })
+        if summary["permissive"]:
+            issues.append({
+                "id": "spf_permissive_all",
+                "detail": "'+all' authorizes every host on the internet to send as this domain",
+            })
+        elif not summary["hardfail"]:
+            issues.append({
+                "id": "spf_no_hardfail",
+                "detail": "No terminal '-all': unauthorized senders are only soft-failed or neutral",
+            })
+
+    # ── DMARC (TXT at _dmarc.<host>) ──
+    dmarc_status, dmarc_txt = await _hygiene_txt(f"_dmarc.{host}")
+    dmarc_records = [r for r in dmarc_txt if r.startswith("v=DMARC1")]
+    dmarc: dict = {"present": bool(dmarc_records)}
+    if dmarc_status == "error":
+        dmarc["status"] = "error"
+    if not dmarc_records and dmarc_status in ("ok", "noanswer"):
+        issues.append({"id": "dmarc_missing", "detail": "No v=DMARC1 record at _dmarc"})
+    if dmarc_records:
+        pol = _parse_dmarc(dmarc_records[0])
+        dmarc.update({
+            "policy": str(pol.get("policy", "")),
+            "subpolicy": str(pol.get("subdomain_policy", "")),
+            "pct": str(pol.get("percentage", "")),
+        })
+        for iid in _dmarc_issues(dmarc_records[0]):
+            issues.append({"id": iid, "detail": f"DMARC record: {dmarc_records[0][:120]}"})
+
+    # ── DKIM (selector brute + key strength) ──
+    sel_results = await asyncio.gather(*(
+        _hygiene_txt(f"{s}._domainkey.{host}", lifetime=4.0) for s in _DKIM_SELECTORS
+    ))
+    found: list[dict] = []
+    definitive = 0
+    for sel, (status, txts) in zip(_DKIM_SELECTORS, sel_results):
+        if status == "error":
+            continue
+        definitive += 1
+        recs = [r for r in txts if r.startswith("v=DKIM1")]
+        if not recs:
+            continue
+        parsed = _dkim_parse(recs[0])
+        kind, bits = ("unknown", None)
+        if not parsed["empty_key"]:
+            kind, bits = _spki_key_bits(parsed["key_b64"])
+        found.append({"selector": sel, "key_kind": kind, "key_bits": bits})
+        if parsed["empty_key"]:
+            issues.append({
+                "id": "dkim_empty_key",
+                "detail": f"Selector '{sel}' published with an empty public key",
+            })
+        elif kind == "rsa":
+            if bits < 1024:
+                issues.append({
+                    "id": "dkim_key_weak",
+                    "detail": f"Selector '{sel}' RSA key is {bits} bits",
+                })
+            elif bits < 2048:
+                issues.append({
+                    "id": "dkim_key_legacy",
+                    "detail": f"Selector '{sel}' RSA key is {bits} bits (2048+ recommended)",
+                })
+    dkim: dict = {"selectors_checked": len(_DKIM_SELECTORS), "found": found, "count": len(found)}
+    if not found and definitive > 0:
+        issues.append({
+            "id": "dkim_missing",
+            "detail": f"No DKIM key under {len(_DKIM_SELECTORS)} common selectors",
+        })
+
+    # ── DNSKEY (apex zone keys) ──
+    dk_status, dk_keys = await _hygiene_dnskey(host)
+    dnskey: dict = {"present": bool(dk_keys), "keys": []}
+    if dk_status == "error":
+        dnskey["status"] = "error"
+    for k in dk_keys:
+        bits = _dnskey_bits(k["algorithm"], k["publickey"])
+        entry = dict(k)
+        entry["key_bits"] = bits
+        dnskey["keys"].append(entry)
+        if bits is not None and bits < 2048:
+            weak = bits < 1024
+            issues.append({
+                "id": "dnskey_weak" if weak else "dnskey_legacy",
+                "detail": f"DNSKEY algorithm {k['algorithm']} key is {bits} bits",
+            })
+
+    return {
+        "target": host,
+        "spf": spf,
+        "dmarc": dmarc,
+        "dkim": dkim,
+        "dnskey": dnskey,
+        "issues": issues,
+        "count": len(issues),
+    }

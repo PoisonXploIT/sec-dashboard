@@ -420,6 +420,94 @@ def _adapt_tech_detector(result: dict, target: str) -> list[Finding]:
     )]
 
 
+_DNS_HYGIENE_META = {
+    # id: (severity, confidence, title, remediation)
+    "spf_permissive_all": (
+        Severity.HIGH, 0.95, "SPF is fully permissive (+all)",
+        "Replace '+all' with '-all' so only listed senders are authorized.",
+    ),
+    "spf_missing": (
+        Severity.MEDIUM, 0.8, "No SPF record published",
+        "Publish a v=spf1 TXT covering all legitimate senders, ending in -all.",
+    ),
+    "spf_multiple_records": (
+        Severity.MEDIUM, 0.95, "Multiple SPF records (undefined behavior)",
+        "Consolidate to a single v=spf1 TXT record at the apex (RFC 7208).",
+    ),
+    "spf_no_hardfail": (
+        Severity.LOW, 0.8, "SPF has no terminal -all",
+        "End the SPF mechanism list with -all.",
+    ),
+    "dmarc_missing": (
+        Severity.MEDIUM, 0.8, "No DMARC record published",
+        "Publish _dmarc TXT starting with v=DMARC1; p=quarantine or p=reject plus rua reporting.",
+    ),
+    "dmarc_p_none": (
+        Severity.MEDIUM, 0.95, "DMARC policy is monitor-only (p=none)",
+        "Move to p=quarantine and then p=reject once spoofing volume is known.",
+    ),
+    "dmarc_sp_weak": (
+        Severity.LOW, 0.9, "DMARC subdomain policy weaker than apex",
+        "Align sp= with p= or document why subdomains stay weaker.",
+    ),
+    "dmarc_pct_partial": (
+        Severity.LOW, 0.9, "DMARC pct limits enforcement",
+        "Raise pct= to 100 once monitoring looks clean.",
+    ),
+    "dkim_missing": (
+        Severity.MEDIUM, 0.8, "No DKIM key under common selectors",
+        "Enable DKIM in the mail provider and publish the public key.",
+    ),
+    "dkim_empty_key": (
+        Severity.LOW, 0.9, "DKIM selector with empty public key",
+        "Publish a real key for that selector or remove the record.",
+    ),
+    "dkim_key_weak": (
+        Severity.HIGH, 0.95, "Weak DKIM RSA key",
+        "Re-sign with a 2048-bit (or larger) DKIM key.",
+    ),
+    "dkim_key_legacy": (
+        Severity.LOW, 0.9, "Legacy DKIM RSA key length",
+        "Rotate to a 2048-bit DKIM key at next re-sign.",
+    ),
+    "dnskey_weak": (
+        Severity.HIGH, 0.95, "Weak DNSKEY",
+        "Re-key the zone with a 2048-bit (or larger) key.",
+    ),
+    "dnskey_legacy": (
+        Severity.LOW, 0.9, "Legacy DNSKEY length",
+        "Re-key the zone with a 2048-bit key when convenient.",
+    ),
+}
+
+
+@register("dns_zone_hygiene")
+def _adapt_dns_zone_hygiene(result: dict, target: str) -> list[Finding]:
+    """Map zone-hygiene issue ids to severities; dedup by id + detail."""
+    out: list[Finding] = []
+    seen: set[str] = set()
+    for i in result.get("issues", []):
+        iid = i.get("id", "")
+        meta = _DNS_HYGIENE_META.get(iid)
+        if meta is None:
+            continue
+        key = f"{iid}|{i.get('detail', '')}"
+        if key in seen:
+            continue
+        seen.add(key)
+        sev, conf, title, remediation = meta
+        out.append(Finding(
+            tool="dns_zone_hygiene", category="Email Security",
+            severity=sev,
+            title=title,
+            description=i.get("detail", ""),
+            evidence={"check": iid},
+            remediation=remediation,
+            target=target, confidence=conf,
+        ))
+    return out[:20]
+
+
 def extract_findings(tool: str, result: dict, target: str = "") -> list[Finding]:
     """Translate a tool result into normalized findings.
 

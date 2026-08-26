@@ -21,7 +21,10 @@ from backend.tools.system import network_connections, process_monitor, system_in
 from backend.tools.audit import ps_security_audit
 from backend.tools.wifi import wifi_marauder_scan, m5stick_networks
 from backend.tools.osint import asn_lookup, reverse_dns, ct_logs, shodan_lookup, ip_geolocation
-from backend.tools.emailsec import dnssec_checker, email_security, http_methods, robots_analyzer, caa_checker
+from backend.tools.emailsec import (
+    dnssec_checker, email_security, dns_zone_hygiene,
+    http_methods, robots_analyzer, caa_checker,
+)
 
 # ── Tool → Handler mapping ─────────────────────────────────────
 HANDLERS: dict[str, Callable] = {
@@ -64,6 +67,7 @@ HANDLERS: dict[str, Callable] = {
     # Email Security
     "dnssec_checker": dnssec_checker,
     "email_security": email_security,
+    "dns_zone_hygiene": dns_zone_hygiene,
     # Web Security (additional)
     "http_methods": http_methods,
     "robots_analyzer": robots_analyzer,
