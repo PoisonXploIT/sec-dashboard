@@ -89,6 +89,18 @@ def test_build_checks_hsts_present_and_cert_ok():
     assert by_id["ocsp_unavailable"] == "pass"  # stapling yes
 
 
+def test_build_checks_tls13_is_pfs_by_design():
+    versions = {"1.0": False, "1.1": False, "1.2": True, "1.3": True,
+                "negotiated": {"version": "TLSv1.3",
+                              "cipher": "TLS_AES_256_GCM_SHA384"}}
+    hsts = {"present": True, "max_age": 63072000,
+            "include_subdomains": False, "preload": False}
+    checks = network._build_ssl_checks(versions, [], hsts,
+                                       {"stapling": "no", "responder": "x"}, None)
+    by_id = {c["id"]: c["status"] for c in checks}
+    assert by_id["no_forward_secrecy"] == "pass"
+
+
 def test_build_checks_expiring_soon():
     cert = {"self_signed": False, "expired": False, "days_left": 12}
     hsts = {"present": True, "max_age": 63072000,
@@ -99,6 +111,38 @@ def test_build_checks_expiring_soon():
                                        {"stapling": "no", "responder": "x"}, cert)
     by_id = {c["id"]: c["status"] for c in checks}
     assert by_id["cert_expiring"] == "warn"
+
+
+# ── weak-cipher classification ─────────────────────────────────
+def test_classify_weak_cipher_names():
+    assert network._classify_weak_cipher("TLSv1.3 AES_256_GCM_SHA384") is None
+    assert network._classify_weak_cipher("ECDHE-RSA-RC4-SHA") == "RC4"
+    assert network._classify_weak_cipher("DES-CBC3-SHA") == "3DES"   # not single DES
+    assert network._classify_weak_cipher("DES-EDE3-CBC-SHA") == "3DES"
+    assert network._classify_weak_cipher("DES-CBC-SHA") == "DES"
+    assert network._classify_weak_cipher("AES128-GCM-SHA256") is None
+    assert network._classify_weak_cipher(None) is None
+
+
+def test_probe_weak_ciphers_ignores_strong_negotiation(monkeypatch):
+    # Server lands on a strong TLS 1.3 suite despite the weak offer:
+    # nothing may be reported.
+    def fake_handshake(host, port, ctx, timeout=8.0):
+        return "TLSv1.3", "TLS_AES_256_GCM_SHA384"
+
+    monkeypatch.setattr(network, "_tls_handshake", fake_handshake)
+    assert network._probe_weak_ciphers("example.com", 443) == []
+
+
+def test_probe_weak_ciphers_reports_real_rc4(monkeypatch):
+    def fake_handshake(host, port, ctx, timeout=8.0):
+        return "TLSv1", "ECDHE-RSA-RC4-SHA"
+
+    monkeypatch.setattr(network, "_tls_handshake", fake_handshake)
+    # The stub answers every family with the same RC4 name; whatever
+    # families this OpenSSL can express, all hits must classify as RC4.
+    res = network._probe_weak_ciphers("example.com", 443)
+    assert res and set(res) == {"RC4"}
 
 
 # ── OCSP raw probe: hello builder + record parser ───────────────
@@ -247,3 +291,114 @@ def test_adapter_reports_failing_and_warn_checks():
 def test_adapter_empty_result():
     assert findings.extract_findings("ssl_deep_analyzer", {}, "x") == []
     assert findings.extract_findings("ssl_deep_analyzer", {"checks": []}, "x") == []
+
+
+# ── DER certificate fallback (getpeercert text form returns {}) ────
+def _t(tag, content: bytes) -> bytes:
+    if len(content) < 0x7F:
+        return bytes([tag, len(content)]) + content
+    lb = len(content).to_bytes(2, "big")
+    return bytes([tag, 0x82]) + lb + content
+
+
+def _name(cn: str) -> bytes:
+    """X509Name DER: SEQUENCE of RDN SETs (one CN AVA here)."""
+    val = _t(0x13, cn.encode())
+    ava = _t(0x30, _t(0x06, b"\x55\x04\x03") + val)
+    return _t(0x30, _t(0x31, ava))
+
+
+def _synthetic_cert_der() -> bytes:
+    issuer = _name("Example CA")
+    subject = _name("example.com")
+    validity = _t(0x30, _t(0x16, b"240101000000Z") + _t(0x16, b"270101000000Z"))
+    tbs = (_t(0xA0, _t(0x02, b"\x02"))          # version v3
+           + _t(0x02, b"\x01")                   # serial
+           + _t(0x30, b"")                     # signature algorithm
+           + issuer + validity + subject
+           + _t(0x30, b""))                    # public key (empty)
+    return _t(0x30, _t(0x30, tbs) + _t(0x03, b"\x00"))
+
+
+def test_parse_name_cn_from_real_cloudflare_subject_bytes():
+    subject = bytes.fromhex(
+        "31 18 30 16 06 03 55 04 03 13 0f 73 61 6d 6d 69 64 65 62 6c 61 73 "
+        "2e 63 6f 6d".replace(" ", ""))
+    assert network._parse_name_cn(subject) == "sammideblas.com"
+
+
+def test_parse_cert_der_synthetic():
+    facts = network._parse_cert_der(_synthetic_cert_der())
+    assert facts is not None
+    assert facts["subject"] == "example.com"
+    assert facts["issuer"] == "Example CA"
+    assert facts["not_after"] == "270101000000Z"
+    assert facts["san"] == []
+
+
+def test_parse_cert_der_garbage_returns_none():
+    assert network._parse_cert_der(b"\x01\x02\x03") is None
+    assert network._parse_cert_der(None) is None
+
+
+def test_cn_from_text_name_shape():
+    name = (((("commonName", "github.com"),),))
+    assert network._cn_from_text_name(name) == "github.com"
+    assert network._cn_from_text_name(()) == ""
+    assert network._cn_from_text_name(None) == ""
+
+
+def test_cert_facts_text_form_path():
+    text = {
+        "subject": ((("commonName", "github.com"),),),
+        "issuer": ((("commonName", "DigiCert"),),),
+        "notAfter": "Sep 30 23:59:59 2026 GMT",
+        "subjectAltName": [("DNS", "github.com")],
+        "OCSP": ["http://ocsp.example"],
+    }
+    facts = network._cert_facts(text, None)
+    assert facts["subject"] == "github.com"
+    assert facts["issuer"] == "DigiCert"
+    assert facts["san"] == ["github.com"]
+    assert facts["ocsp_responder"] == "http://ocsp.example"
+    assert facts["days_left"] is not None
+    assert facts["expired"] is False
+    assert facts["self_signed"] is False
+
+
+def test_cert_facts_der_fallback_when_text_empty():
+    facts = network._cert_facts({}, _synthetic_cert_der())
+    assert facts["subject"] == "example.com"
+    assert facts["issuer"] == "Example CA"
+    assert facts["not_after"] == "270101000000Z"
+    assert facts["days_left"] is not None
+    assert facts["expired"] is False
+    assert facts["self_signed"] is False
+
+
+def test_cert_facts_self_signed_from_der():
+    issuer = _name("example.com")
+    subject = _name("example.com")
+    validity = _t(0x30, _t(0x16, b"240101000000Z") + _t(0x16, b"270101000000Z"))
+    tbs = (_t(0xA0, _t(0x02, b"\x02")) + _t(0x02, b"\x01") + _t(0x30, b"")
+           + issuer + validity + subject + _t(0x30, b""))
+    der = _t(0x30, _t(0x30, tbs) + _t(0x03, b"\x00"))
+    facts = network._cert_facts({}, der)
+    assert facts["self_signed"] is True
+
+
+def test_parse_cert_der_extensions_san_and_aia():
+    san_value = _t(0x30, _t(0x82, _t(0x16, b"alt.example.com")))
+    san_ext = _t(0x30, _t(0x06, b"\x55\x1d\x11") + _t(0x04, san_value))
+    aia_value = _t(0x30, _t(0x86, _t(0x16, b"http://ocsp.internals")))
+    aia_ext = _t(0x30, _t(0x06, b"\x2b\x06\x01\x05\x05\x07\x30\x01") + _t(0x04, aia_value))
+    issuer = _name("Example CA")
+    subject = _name("example.com")
+    validity = _t(0x30, _t(0x16, b"240101000000Z") + _t(0x16, b"270101000000Z"))
+    tbs = (_t(0xA0, _t(0x02, b"\x02")) + _t(0x02, b"\x01") + _t(0x30, b"")
+           + issuer + validity + subject + _t(0x30, b"")
+           + _t(0xA3, _t(0x30, san_ext + aia_ext)))
+    der = _t(0x30, _t(0x30, tbs) + _t(0x03, b"\x00"))
+    facts = network._parse_cert_der(der)
+    assert facts["san"] == ["alt.example.com"]
+    assert facts["ocsp_responder"] == "http://ocsp.internals"

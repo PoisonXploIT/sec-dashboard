@@ -643,27 +643,51 @@ def _probe_tls_versions(host: str, port: int) -> dict:
     return {"supported": supported, "negotiated": negotiated}
 
 
+def _classify_weak_cipher(name: str | None) -> str | None:
+    """Map a negotiated OpenSSL cipher name to its weak family, if any.
+
+    Order matters: 3DES names (DES-CBC3 / DES-EDE3) contain the single-DES
+    marker as a substring, so they must be tested first.
+    """
+    if not name:
+        return None
+    if "NULL" in name:
+        return "NULL"
+    if "RC4" in name:
+        return "RC4"
+    if ("CBC3" in name) or ("EDE3" in name):
+        return "3DES"
+    if "DES" in name:
+        return "DES"
+    return None
+
+
 def _probe_weak_ciphers(host: str, port: int) -> list[str]:
     """Try to negotiate each weak family; only real successes are reported.
 
-    If the local OpenSSL build refuses a cipher string (set_ciphers raises),
-    that family is untestable and silently skipped: we never report a weak
-    cipher we did not actually negotiate.
+    The probe context is pinned below TLS 1.3 (weak suites do not exist in
+    1.3 and set_ciphers does not constrain 1.3 offers), and the negotiated
+    cipher name is re-checked against the family markers: a handshake that
+    lands on anything else is NOT reported.
     """
     found = []
     for cs in _WEAK_CIPHER_STRINGS:
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
+        if hasattr(ssl, "OP_NO_TLSv1_3"):
+            ctx.options |= ssl.OP_NO_TLSv1_3
         try:
             ctx.set_ciphers(cs)
         except (ssl.SSLError, ValueError):
-            continue
+            continue  # local OpenSSL cannot express this family: untestable
         try:
             _version, cipher = _tls_handshake(host, port, ctx)
         except Exception:
             continue
-        found.append(cipher or cs)
+        family = _classify_weak_cipher(cipher)
+        if family is not None:
+            found.append(family)
     return found
 
 
@@ -837,9 +861,189 @@ def _probe_ocsp_stapling(host: str, port: int) -> str:
         return "unknown"
 
 
+# ── Minimal ASN.1/DER certificate reader (fallback) ────────────
+# Some Python/OpenSSL builds return an empty dict from getpeercert() in
+# text form when the context is verification-free; the DER is always
+# available, so we parse only the fields we need directly.
+
+# Exact DER encodings of the OIDs we recognize (byte-compare, no decoder).
+_OID_COMMON_NAME = b"\x55\x04\x03"             # 2.5.4.3
+_OID_SUBJECT_ALT_NAME = b"\x55\x1d\x11"        # 2.5.29.17
+_OID_AIA = b"\x2b\x06\x01\x05\x05\x07\x30\x01"   # 1.3.6.1.5.5.7.48.1
+
+
+def _der_tlv(data: bytes, off: int) -> tuple[int, bytes, int]:
+    """Read one TLV at `off`; returns (tag, content, next_off)."""
+    tag = data[off]
+    i = off + 1
+    first = data[i]
+    i += 1
+    if first < 0x80:
+        length = first
+    else:
+        n = first & 0x7F
+        length = int.from_bytes(data[i:i + n], "big")
+        i += n
+    return tag, data[i:i + length], i + length
+
+
+def _der_string(tag: int, value: bytes) -> str:
+    if tag == 0x1E:  # BMPString (UTF-16BE)
+        return value.decode("utf-16-be", "replace").lstrip("\x00")
+    if tag in (0x0C, 0x13, 0x16):  # UTF8 / Printable / IA5
+        return value.decode("utf-8", "replace")
+    return value.decode("latin-1", "replace")
+
+
+def _parse_name_cn(name_der: bytes) -> str:
+    """Extract the commonName (2.5.4.3) from an X509Name DER encoding."""
+    cn = ""
+    off = 0
+    while off < len(name_der):
+        _tag, rdn_set, off = _der_tlv(name_der, off)
+        o = 0
+        while o < len(rdn_set):
+            _t2, ava, o = _der_tlv(rdn_set, o)
+            _t3, oid, o2 = _der_tlv(ava, 0)
+            t4, val, _ = _der_tlv(ava, o2)
+            if oid == _OID_COMMON_NAME:
+                cn = _der_string(t4, val)
+    return cn
+
+
+def _parse_cert_der(der: bytes | None) -> dict | None:
+    """Best-effort read of subject/issuer CN, validity and SAN from DER.
+
+    Returns None on any structural surprise (never raises).
+    """
+    if not der:
+        return None
+    try:
+        tag, cert_seq, _ = _der_tlv(der, 0)
+        if tag != 0x30:
+            return None
+        tag, tbs, _ = _der_tlv(cert_seq, 0)
+        off = 0
+        tag, first, off = _der_tlv(tbs, off)
+        if tag == 0xA0:
+            # explicit version (v3/v2): the serial INTEGER follows next;
+            # on v1-style certs `first` IS the serial, nothing to consume.
+            _tser, _serial, off = _der_tlv(tbs, off)
+        tag, sigalg, off = _der_tlv(tbs, off)
+        if tag != 0x30:
+            return None
+        tag, issuer, off = _der_tlv(tbs, off)
+        tag, validity, off = _der_tlv(tbs, off)
+        if tag != 0x30:
+            return None
+        _t1, not_before, o2 = _der_tlv(validity, 0)
+        _t2, not_after, _ = _der_tlv(validity, o2)
+        tag, subject, off = _der_tlv(tbs, off)
+        san: list[str] = []
+        ocsp_url: str | None = None
+        if off < len(tbs):
+            # SubjectPublicKeyInfo SEQ, then optional [3] EXPLICIT extensions
+            _t3, pubkey, off2 = _der_tlv(tbs, off)
+            if off2 < len(tbs):
+                t4, ext_block, _ = _der_tlv(tbs, off2)
+                if t4 == 0xA3:
+                    _t5, exts_seq, _ = _der_tlv(ext_block, 0)
+                    e = 0
+                    while e < len(exts_seq):
+                        _te, ext, e = _der_tlv(exts_seq, e)
+                        _to, ext_oid, cursor = _der_tlv(ext, 0)
+                        # optional critical BOOLEAN, then extnValue OCTET STRING
+                        tc, body, cursor2 = _der_tlv(ext, cursor)
+                        if tc == 0x01:
+                            _tc2, body, _ = _der_tlv(ext, cursor2)
+                        inner_tag, inner_seq, _ = _der_tlv(body, 0)
+                        if ext_oid == _OID_SUBJECT_ALT_NAME:
+                            p = 0
+                            while p < len(inner_seq):
+                                tp, san_seq, p = _der_tlv(inner_seq, p)
+                                if tp == 0x82:  # [2] EXPLICIT dNSName
+                                    _ts, san_bytes, _ = _der_tlv(san_seq, 0)
+                                    san.append(_der_string(0x16, san_bytes))
+                        elif ext_oid == _OID_AIA:
+                            p = 0
+                            while p < len(inner_seq):
+                                tp, name, p = _der_tlv(inner_seq, p)
+                                if tp == 0x86 and ocsp_url is None:  # [6] EXPLICIT IA5
+                                    _ts2, name_bytes, _ = _der_tlv(name, 0)
+                                    ocsp_url = _der_string(0x16, name_bytes)
+        return {
+            "subject": _parse_name_cn(subject),
+            "issuer": _parse_name_cn(issuer),
+            "san": san,
+            "not_before": _der_string(_t1, not_before),
+            "not_after": _der_string(_t2, not_after),
+            "ocsp_responder": ocsp_url,
+        }
+    except (IndexError, ValueError, UnicodeDecodeError):
+        return None
+
+
+def _cn_from_text_name(name) -> str:
+    """commonName from getpeercert()'s nested-tuple subject/issuer shape."""
+    for rdn in name or ():
+        for key, value in rdn:
+            if key == "commonName":
+                return value
+    return ""
+
+
+def _cert_facts(text_cert: dict | None, der: bytes | None) -> dict:
+    """Merge the text-form getpeercert() result with a DER fallback.
+
+    The text form is empty on some builds when the context is
+    verification-free; the DER parse covers subject/issuer CN, dates,
+    SAN and the AIA OCSP responder in that case.
+    """
+    import datetime
+
+    text_cert = text_cert or {}
+    der_facts = _parse_cert_der(der)
+    subject_cn = _cn_from_text_name(text_cert.get("subject"))
+    issuer_cn = _cn_from_text_name(text_cert.get("issuer"))
+    not_after_raw = text_cert.get("notAfter")
+    san = [entry[1] for entry in text_cert.get("subjectAltName", ())]
+    responder = (text_cert.get("OCSP") or [None])[0]
+    if der_facts:
+        subject_cn = subject_cn or der_facts["subject"]
+        issuer_cn = issuer_cn or der_facts["issuer"]
+        not_after_raw = not_after_raw or der_facts["not_after"]
+        san = san or der_facts["san"]
+        responder = responder or der_facts["ocsp_responder"]
+    not_before_raw = text_cert.get("notBefore") or (der_facts or {}).get("not_before")
+    days_left = None
+    expired = False
+    if not_after_raw:
+        end = None
+        for fmt in ("%b %d %H:%M:%S %Y GMT", "%y%m%d%H%M%SZ"):
+            try:
+                end = datetime.datetime.strptime(not_after_raw, fmt)
+                break
+            except ValueError:
+                continue
+        if end is not None:
+            now = datetime.datetime.utcnow()
+            days_left = (end - now).days
+            expired = end <= now
+    return {
+        "subject": subject_cn,
+        "issuer": issuer_cn,
+        "san": san,
+        "not_before": not_before_raw,
+        "not_after": not_after_raw,
+        "days_left": days_left,
+        "expired": expired,
+        "self_signed": bool(subject_cn) and subject_cn == issuer_cn,
+        "ocsp_responder": responder,
+    }
+
+
 def _probe_certificate(host: str, port: int) -> dict | None:
     """Certificate facts from a verification-free handshake."""
-    import datetime
 
     def blocking() -> dict:
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
@@ -850,31 +1054,11 @@ def _probe_certificate(host: str, port: int) -> dict | None:
         conn = ctx.wrap_socket(sock, server_hostname=host)
         conn.connect((host, port))
         try:
-            cert = conn.getpeercert()
+            text_cert = conn.getpeercert() or {}
+            der = conn.getpeercert(binary_form=True)
         finally:
             conn.close()
-        subject = dict(x[0] for x in cert.get("subject", ()))
-        issuer = dict(x[0] for x in cert.get("issuer", ()))
-        days_left = None
-        expired = False
-        try:
-            end = datetime.datetime.strptime(cert["notAfter"], "%b %d %H:%M:%S %Y GMT")
-            now = datetime.datetime.utcnow()
-            days_left = (end - now).days
-            expired = end <= now
-        except (KeyError, ValueError):
-            pass
-        return {
-            "subject": subject.get("commonName", ""),
-            "issuer": issuer.get("commonName", ""),
-            "san": [entry[1] for entry in cert.get("subjectAltName", ())],
-            "not_before": cert.get("notBefore"),
-            "not_after": cert.get("notAfter"),
-            "days_left": days_left,
-            "expired": expired,
-            "self_signed": bool(subject) and subject == issuer,
-            "ocsp_responder": (cert.get("OCSP") or [None])[0],
-        }
+        return _cert_facts(text_cert, der)
 
     try:
         return blocking()
@@ -928,8 +1112,13 @@ def _build_ssl_checks(versions: dict, weak: list[str], hsts: dict,
                   else "No RC4/DES/3DES/NULL negotiated",
     })
 
-    negotiated_cipher = (versions.get("negotiated") or {}).get("cipher") or ""
-    has_pfs = ("ECDHE" in negotiated_cipher) or ("DHE" in negotiated_cipher)
+    negotiated = versions.get("negotiated") or {}
+    negotiated_version = negotiated.get("version") or ""
+    negotiated_cipher = negotiated.get("cipher") or ""
+    # TLS 1.3 provides forward secrecy by design even though its cipher
+    # names carry no ECDHE/DHE marker.
+    has_pfs = (negotiated_version.startswith("TLSv1.3")
+               or "ECDHE" in negotiated_cipher or "DHE" in negotiated_cipher)
     checks.append({
         "id": "no_forward_secrecy",
         "status": "fail" if not has_pfs else "pass",
