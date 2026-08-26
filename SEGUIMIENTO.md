@@ -13,7 +13,7 @@
 - **Repo local**: `C:\Users\Sammi\sec-dashboard`
 - **Repo remoto**: `https://github.com/PoisonXploIT/sec-dashboard.git` (origin, rama `master`)
 - **Deploy productivo**: Railway, dominio `sec.sammideblas.com` (Cloudflare Access + API key).
-- **Último commit**: `9551c44` — "feat: F1-CVE — Tech CVE Correlation (stack vs NVD + CISA KEV) with findings adapter"
+- **Último commit**: `4870087` — "docs: SEGUIMIENTO — F1-TAKEOVER done, next micro-step F1-SECRETS" (`4454b14` feat: F1-TAKEOVER debajo)
 - **Fecha del commit**: 2026-08 (sesión de Fase 0.4).
 - **Estado del plan**: Fase 0 COMPLETA (0.1, 0.2, 0.3 y 0.4). Siguiente: Fase 1 — tools de profundidad.
 
@@ -78,7 +78,7 @@ Estado por tarea (actualizar esta tabla al cerrar CADA sesión; la más avanzada
 |---|---|---|---|
 | F1-CVE | Tech CVE Correlation | HECHO (`9551c44`) | Handler `cve_correlation` en tools/web.py: reutiliza `tech_detector`, extrae versiones del header Server, busca NVD por producto (top 8 techs) y marca CISA KEV. Adapter en findings.py: KEV = CRITICAL con campo `cve`, CVE critical/high = HIGH (medium/low descartados a propósito para no inflar el score). |
 | F1-TAKEOVER | Subdomain Takeover | HECHO (`4454b14`) | Handler `subdomain_takeover` en tools/network.py: candidatos desde `ct_logs` (crt.sh, cap 50), resuelve CNAME con dnspython y sondea HTTP. Dangling = sin A record, inalcanzable o 404/503 contra `.github.io`/`.herokuapp.com`/S3 (`amazonaws.com`). Adapter: dangling = CRITICAL dedup por sub. |
-| F1-SECRETS | Secret Leak Scanner | PENDIENTE | `.git/` expuesto, API keys, tokens en JS/robots.txt (regexs tipo TruffleHog). |
+| F1-SECRETS | Secret Leak Scanner | PENDIENTE (diseño fijado) | `.git/` expuesto, API keys, tokens en JS/robots.txt (regexs tipo TruffleHog). **Decisión**: scan de JS contra rutas conocidas en MVP (no crawl limitado). Ver detalle en registro de ejecuciones. |
 | F1-SSL | SSL Deep Analyzer | PENDIENTE | Grade A+ a F: cipher suites, TLS 1.0/1.1, HSTS, OCSP stapling. |
 | F1-DNS | DNS Zone Hygiene | PENDIENTE | SPF permisivo (+all), DKIM selector brute, DMARC p=none, DNSKEY débil. |
 | F1-FAVICON | Favicon/Stack Fingerprinting | PENDIENTE | Hashes de favicons + paths estáticos para versiones exactas. |
@@ -229,7 +229,17 @@ Convención: cada sesión añade una entrada al FINAL de la lista (la más recie
 ### 2026-08-26 — F1-TAKEOVER completa (Subdomain Takeover)
 - Commit `4454b14`: tool `subdomain_takeover` (tools/network.py) + registro en config/scanner + adapter findings + 11 tests nuevos (75 en total, sin red: stubs de `ct_logs`, `_takeover_dns`, `_takeover_probe`).
 - Decisiones: candidatos = subdominios de CT logs (crt.sh, cap 50, root excluido); plataforma por sufijo/regex del CNAME (github.io/githubpages.dev, herokuapp/onheroku, s3 + website amazonaws con regions); dangling si no hay A record, el probe falla o responde 404/503; fallo de crt.sh degrada a `ct_error` sin romper el scan.
-- Siguiente micro-paso: F1-SECRETS (Secret Leak Scanner).
+- Commit `4870087`: docs de SEGUIMIENTO post-F1-TAKEOVER.
+- Siguiente micro-paso: F1-SECRETS (Secret Leak Scanner). Diseño fijado: known-path scanning para JS; crawl limitado queda fuera del MVP (ver nueva entrada en registro).
+
+### 2026-08-26 — F1-SECRETS: decision de diseno fijada en SEGUIMIENTO
+- No se toco codigo. Se resolvio la duda de diseno pendiente para el scanner de secrets.
+- Decision: en el MVP el scan de JS se hace contra **rutas conocidas** (known-path), NO con crawl limitado.
+- Razon: menor complejidad, predictibilidad, tests sin red mas simples y cubre la mayoria de casos reales. El crawl limitado se deja como mejora futura (Fase 2/3) si la evidencia lo justifica.
+- Alcance inicial de rutas JS: `/main.js`, `/app.js`, `/bundle.js`, `/vendor.js`, `/common.js`, `/site.js`, `/scripts/*.js`, `/js/*.js`, `/static/js/*.js`, `/assets/js/*.js`, `/wp-content/plugins/**/*.js`, `/wp-content/themes/**/*.js`.
+- Fuentes adicionales obligatorias: `/.git/HEAD` (y opcionalmente `config`, `refs/heads/master`, `index`, `logs/HEAD`), `/robots.txt`.
+- Severidad propuesta: `.git/` expuesto = CRITICAL; API keys/tokens de plataformas de alto impacto (AWS, GitHub, Slack, Stripe, etc.) = HIGH; tokens genericos o keys en JS/robots.txt = MEDIUM; matches debiles = LOW. Dedup por `finding_id` combinando tipo + target + evidencia normalizada.
+- Nota: los regexs seran estilo TruffleHog/TruffleHog3 sin dependencias externas; solo patterns con alta confianza en el MVP.
 
 ## 7. Reglas y restricciones del proyecto (NO VIOLAR)
 
@@ -260,4 +270,4 @@ M5 Stick + CC1101 + nRF24 (Bruce), WiFi Marauder ESP32 v6, LilyGo T-Embed + Bus 
 
 ---
 
-*Última actualización: 2026-08-26, post-F1-TAKEOVER (commit 4454b14). Próxima sesión: leer este archivo entero y arrancar F1-SECRETS (Secret Leak Scanner) según la tabla de Fase 1 y sus reglas por tool.*
+*Última actualización: 2026-08-26, post-F1-TAKEOVER (commits 4454b14 + 4870087), decision de diseno F1-SECRETS fijada. Proxima sesion: leer este archivo entero y arrancar F1-SECRETS (Secret Leak Scanner) con known-path scanning segun lo documentado.*
