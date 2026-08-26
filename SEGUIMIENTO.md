@@ -13,9 +13,9 @@
 - **Repo local**: `C:\Users\Sammi\sec-dashboard`
 - **Repo remoto**: `https://github.com/PoisonXploIT/sec-dashboard.git` (origin, rama `master`)
 - **Deploy productivo**: Railway, dominio `sec.sammideblas.com` (Cloudflare Access + API key).
-- **Último commit de código**: `85f51f3` (3E sub-micro-paso 3: búsqueda en History) + docs de cierre.
+- **Último commit de código**: `6f230b0` (3E sub-micro-paso 2: modo light dedicado) + docs de cierre.
 - **Fecha del commit**: 2026-08-26.
-- **Estado del plan**: Fase 1 completa salvo F1-FAVICON (backlog opcional, decisión Opción A). **Fase 2 COMPLETA**: Full Depth pipeline (`a0cf16a`), reporte ejecutivo PDF (`10ed28f`), comparativa histórica en History (`165af5d`). **Fase 3 / 3E**: sub-micro-paso 1 (CLI headless, `3da329e`) y sub-micro-paso 3 (búsqueda en History, `85f51f3`) hechos; sub-micro-paso 2 (dark mode) **aplazado a backlog** — la app es dark por defecto, el toggle real requiere paleta light completa (ver registro).
+- **Estado del plan**: Fase 1 completa salvo F1-FAVICON (backlog opcional, decisión Opción A). **Fase 2 COMPLETA**: Full Depth pipeline (`a0cf16a`), reporte ejecutivo PDF (`10ed28f`), comparativa histórica en History (`165af5d`). **Fase 3 / 3E CERRADA**: sub-micro-pasos 1 (CLI headless, `3da329e`), 2 (modo light dedicado, `6f230b0`) y 3 (búsqueda en History, `85f51f3`) completos. Pendiente: definir el siguiente micro-paso de Fase 3 (hardware M5/CC1101 o del plan).
 
 ### Comandos de referencia (siempre desde el repo)
 
@@ -358,6 +358,14 @@ Convención: cada sesión añade una entrada al FINAL de la lista (la más recie
   - Tests: 3 nuevos en `tests/test_pipelines_history.py` (sin filtros = todo en DESC + join target presente; mode/status exactos y combinados sin match = vacío; q sobre host/mode/nombre con case-insensitive). DB temporal con monkeypatch `models.DB_PATH`, sin red.
 - Suite **159** en verde (156 + 3), ruff limpio, compileall OK. master == origin/master.
 
+### 2026-08-26 — 3E sub-micro-paso 2 completa (modo light dedicado) — CIERRE DE 3E
+- Commit `6f230b0` (solo `frontend/index.html`, +41 líneas). El usuario eligió la dirección A: UI pulida antes que hardware.
+- **Paso 0 de auditoría** (decisión previa): el diseño ya estaba 100% variable-driven — 179 usos de `var(--...)`, todos los gradientes (shimmer/progress/skeleton) con variables, 0 inline styles con colores literales, solo 4 hex fuera de `:root` (`.btn-primary`/`.btn-danger`, válidos en light). Sin refactor necesario.
+- **Implementación**: bloque `[data-theme="light"]` con paleta estilo GitHub-light (`--bg-primary #f6f8fa`, `--bg-secondary/card #ffffff`, `--border #d0d7de`, `--text-primary #1f2328`, `--accent #0969da`, semánticas oscurecidas, sombras suaves). Toggle «Tema:» en sidebar-header → `toggleTheme()` definido en script inline de `<head>` (apply antes del paint = sin FOUC) + persistencia `localStorage['sd-theme']`; label dinámico.
+- **Registrado**: 36 tints `rgba(canales fijos, alpha bajo)` — funcionan en ambos temas por ser translúcidos; el JS de charts lee las CSS vars en runtime (se repintan al re-render). Backlog opcional: variables duales para los rgba si algún tint queda pálido en light.
+- Verificación: suite **159** en verde, ruff limpio, compileall OK. master == origin/master @ `6f230b0`. **3E CERRADA** (pasos 1, 2 y 3).
+- Siguiente micro-paso: definir con el usuario — candidates: B WiFi Marauder v6 / CYD Marauder (reutiliza `wifi.py`, viewers ya exponen JSON, 1-2 h), C Bruce RF/BLE (nuevo `backend/tools/bruce.py`, requiere capturas reales de serial/formato), D HackRF / Bus Pirate (parsers `.c16` + I2C/SPI/UART, requiere capturas reales obligatorias).
+
 ## 7. Reglas y restricciones del proyecto (NO VIOLAR)
 
 1. **NO emojis, flechas de texto ni símbolos de color** en ninguna salida, nota, script o commit (regla global del usuario). Escribir las palabras.
@@ -387,11 +395,11 @@ M5 Stick + CC1101 + nRF24 (Bruce), WiFi Marauder ESP32 v6, LilyGo T-Embed + Bus 
 
 ---
 
-*Última actualización: 2026-08-26, Phase 2 CERRADA de verdad — Full Depth (`a0cf16a`) + executive PDF (`10ed28f`) + comparativa histórica con delta new/fixed/persistent (`165af5d` + `1376001`); **3E**: sub-micro-paso 1 CLI headless (`3da329e`, sin persistencia por decisión de alcance) y sub-micro-paso 3 búsqueda en History (`85f51f3`) hechos; sub-micro-paso 2 (dark mode) APLAZADO a backlog — la app es dark por defecto, el toggle requiere paleta light completa + variables duales `[data-theme]` en sesión dedicada; suite 159 tests en verde; ruff limpio. master == origin/master.*
+*Última actualización: 2026-08-26, Phase 2 CERRADA de verdad — Full Depth (`a0cf16a`) + executive PDF (`10ed28f`) + comparativa histórica con delta new/fixed/persistent (`165af5d` + `1376001`); **3E CERRADA**: sub-micro-pasos 1 CLI headless (`3da329e`), 2 modo light dedicado (`6f230b0`) y 3 búsqueda en History (`85f51f3`) completos; suite 159 tests en verde; ruff limpio. master == origin/master.*
 
 **PROMPT PARA LA PRÓXIMA SESIÓN** (arrancar con contexto nuevo):
 Eres el agente de sec-dashboard. Primero lee este archivo entero (la sección 7 son reglas NO VIOLAR). Estado: Fase 1 completa salvo F1-FAVICON (backlog opcional); **Fase 2 COMPLETA**: Full Depth pipeline (`a0cf16a`), executive PDF (`10ed28f`), comparativa histórica con delta new/fixed/persistent por `finding_id` determinista (`165af5d` + `1376001`, endpoint `GET /api/pipelines/compare?target_id=N` con runs que llevan `new`/`fixed`/`persistent` como listas de `{finding_id, severity, title}`; frontend: columna "Delta vs anterior" + panel desplegable en `showTargetEvolution`). **3E**: sub-micro-paso 1 hecho — CLI headless `python -m backend.cli --target ... [--pipeline ...] [--json]` (sin persistencia, decisión registrada); sub-micro-paso 3 hecho — `GET /api/pipelines/history?mode=&status=&q=` + selects en la pestaña Pipelines de History. Suite 159 tests en verde, ruff limpio; master == origin/master.
-Tarea: **definir el siguiente micro-paso de Fase 3** con el usuario (el plan original está en la sección correspondiente; candidates típicos: hardware M5/CC1101, tema light/dark como refactor CSS dedicado, u otros del plan). Si se elige el tema light/dark: es un refactor de CSS con variables duales (`[data-theme="light"]`) — paleta light para `--bg-primary/secondary/card`, `--border`, `--text-*`, `--accent` + revisar sombras/gradientes/badges inline (rgba fijos) que rompen en light; toggle en la UI + localStorage; verificar con node (sintaxis) + revisión manual del diff, sin suite JS.
-Backlog pendiente: **3E sub-micro-paso 2 — dark mode persistente** (ver registro 2026-08-26: aplazado porque la app es dark por defecto; el toggle real = implementar modo claro alternativo).
+Tarea: **definir con el usuario el siguiente micro-paso de Fase 3**. Candidates del plan (ver sección 3): B WiFi Marauder v6 / CYD Marauder — reutiliza el patrón de `backend/tools/wifi.py` (`wifi_marauder_scan` ya existe; variante o renombrado), simple porque los viewers ya exponen JSON, estimación 1-2 h; C Bruce RF/BLE (SubGHz/nRF24/BLE) — nuevo `backend/tools/bruce.py`, REQUIERE capturas reales del serial/formato para validar parsers, media sesión a sesión completa; D HackRF / Bus Pirate — parsers de `.c16` e I2C/SPI/UART, requiere capturas reales obligatoriamente, sesión completa o más. Si se elige hardware C/D: pedir al usuario las capturas ANTES de escribir parsers.
+Backlog pendiente (pequeño): F1-FAVICON (opción A) y variables duales para los 36 rgba fijos si algún tint queda pálido en light.
 Reglas: MVP sin dependencias nuevas, tests sin red, commits `feat:`/`fix:`, push solo con suite verde, sin emojis.
 Al cerrar sesión: actualizar las tablas/sección 6 de este archivo y el footer con el siguiente micro-paso.
