@@ -13,9 +13,9 @@
 - **Repo local**: `C:\Users\Sammi\sec-dashboard`
 - **Repo remoto**: `https://github.com/PoisonXploIT/sec-dashboard.git` (origin, rama `master`)
 - **Deploy productivo**: Railway, dominio `sec.sammideblas.com` (Cloudflare Access + API key).
-- **Último commit de código**: `165af5d` (feat comparativa histórica) + docs de cierre.
+- **Último commit de código**: `85f51f3` (3E sub-micro-paso 3: búsqueda en History) + docs de cierre.
 - **Fecha del commit**: 2026-08-26.
-- **Estado del plan**: Fase 1 completa salvo F1-FAVICON (backlog opcional, decisión Opción A). **Fase 2 COMPLETA**: Full Depth pipeline (`a0cf16a`), reporte ejecutivo PDF (`10ed28f`), comparativa histórica en History (`165af5d`). Siguiente: Fase 3.
+- **Estado del plan**: Fase 1 completa salvo F1-FAVICON (backlog opcional, decisión Opción A). **Fase 2 COMPLETA**: Full Depth pipeline (`a0cf16a`), reporte ejecutivo PDF (`10ed28f`), comparativa histórica en History (`165af5d`). **Fase 3 / 3E**: sub-micro-paso 1 (CLI headless, `3da329e`) y sub-micro-paso 3 (búsqueda en History, `85f51f3`) hechos; sub-micro-paso 2 (dark mode) **aplazado a backlog** — la app es dark por defecto, el toggle real requiere paleta light completa (ver registro).
 
 ### Comandos de referencia (siempre desde el repo)
 
@@ -349,6 +349,15 @@ Convención: cada sesión añade una entrada al FINAL de la lista (la más recie
 - Tests: 7 nuevos en `test_cli.py` (JSON parseable e idéntico al resultado, resumen texto con fases, modo/target pasados al runner, `--pipeline` inválido → SystemExit 2, target ausente → SystemExit 2, target vacío → exit 1 stderr "invalid target", pipeline fallido → exit 1). Stub de `PipelineRunner.run`, sin red. Suite **156** en verde (149 + 7), ruff limpio, compileall OK.
 - Siguiente micro-paso: **3E sub-micro-paso 2 — dark mode persistente** (y luego 3: búsqueda en History).
 
+### 2026-08-26 — 3E sub-micro-paso 3 completa (búsqueda en History) + decisión sobre el 2
+- Commit `85f51f3`. Reordenación aprobada por el usuario: se salta el sub-micro-paso 2 y se hace primero el 3.
+- **Decisión de alcance del 2 (dark mode)**: la app es dark POR DEFECTO — todo el CSS está construido sobre `--bg-primary: #0d1117` y textos claros. Por tanto "dark mode persistente" no es cablear un toggle: es implementar un MODO CLARO alternativo conmutable. Eso requiere definir paleta light (`--bg-primary/secondary/card`, `--border`, `--text-*`, `--accent`) y revisitar sombras, gradientes y badges inline (rgba fijos) que rompen en light. Queda como **backlog**: refactor de CSS con variables duales (`[data-theme="light"]`) + toggle + localStorage, en una sesión dedicada.
+- **Implementación del 3** (nota: ya existía búsqueda de TEXTO client-side por mode/target/host/status; el incremento real son los filtros exactos server-side):
+  - `main.py GET /api/pipelines/history`: query params opcionales `mode` (exacto), `status` (exacto) y `q` (LIKE case-insensitive sobre mode + target name + host). Sin params = comportamiento anterior. WHERE construido con placeholders parametrizados; ORDER BY started_at DESC LIMIT 20 intacto.
+  - `index.html renderHistoryPage`: en la pestaña Pipelines, dos selects (modo: fast/deep/full_depth/nuclear; status: completed/running/failed/cancelled) que pasan los query params vía URLSearchParams; state `historyPMode`/`historyPStatus`. El filtro de texto client-side se conserva como fallback.
+  - Tests: 3 nuevos en `tests/test_pipelines_history.py` (sin filtros = todo en DESC + join target presente; mode/status exactos y combinados sin match = vacío; q sobre host/mode/nombre con case-insensitive). DB temporal con monkeypatch `models.DB_PATH`, sin red.
+- Suite **159** en verde (156 + 3), ruff limpio, compileall OK. master == origin/master.
+
 ## 7. Reglas y restricciones del proyecto (NO VIOLAR)
 
 1. **NO emojis, flechas de texto ni símbolos de color** en ninguna salida, nota, script o commit (regla global del usuario). Escribir las palabras.
@@ -378,11 +387,11 @@ M5 Stick + CC1101 + nRF24 (Bruce), WiFi Marauder ESP32 v6, LilyGo T-Embed + Bus 
 
 ---
 
-*Última actualización: 2026-08-26, Phase 2 CERRADA de verdad — Full Depth (`a0cf16a`) + executive PDF (`10ed28f`) + comparativa histórica (`165af5d`) + **delta new/fixed/persistent (3b, `1376001`)**; **3E sub-micro-paso 1: CLI headless** (`python -m backend.cli`, sin persistencia por decisión de alcance); suite 156 tests en verde; ruff limpio. master == origin/master.*
+*Última actualización: 2026-08-26, Phase 2 CERRADA de verdad — Full Depth (`a0cf16a`) + executive PDF (`10ed28f`) + comparativa histórica con delta new/fixed/persistent (`165af5d` + `1376001`); **3E**: sub-micro-paso 1 CLI headless (`3da329e`, sin persistencia por decisión de alcance) y sub-micro-paso 3 búsqueda en History (`85f51f3`) hechos; sub-micro-paso 2 (dark mode) APLAZADO a backlog — la app es dark por defecto, el toggle requiere paleta light completa + variables duales `[data-theme]` en sesión dedicada; suite 159 tests en verde; ruff limpio. master == origin/master.*
 
 **PROMPT PARA LA PRÓXIMA SESIÓN** (arrancar con contexto nuevo):
-Eres el agente de sec-dashboard. Primero lee este archivo entero (la sección 7 son reglas NO VIOLAR). Estado: Fase 1 completa salvo F1-FAVICON (backlog opcional); **Fase 2 COMPLETA**: Full Depth pipeline (`a0cf16a`), executive PDF (`10ed28f`), comparativa histórica con delta new/fixed/persistent por `finding_id` determinista (`165af5d` + `1376001`, endpoint `GET /api/pipelines/compare?target_id=N` con runs que llevan `new`/`fixed`/`persistent` como listas de `{finding_id, severity, title}`; frontend: columna "Delta vs anterior" + panel desplegable en `showTargetEvolution`). **3E sub-micro-paso 1 hecho**: CLI headless `python -m backend.cli --target ... [--pipeline ...] [--json]` (sin persistencia, decisión registrada). Suite 156 tests en verde, ruff limpio; master == origin/master.
-Tarea: **3E sub-micro-paso 2 — dark mode persistente** en el frontend (`index.html`): detectar preferencia del usuario, persistirla (localStorage), respetar `prefers-color-scheme` como default inicial. El CSS ya tiene variables de tema; hay que ver qué tan lejos está hoy de un modo oscuro real y decidir si falta definir la paleta oscura completa o solo cablear el toggle + persistencia. Tests: no hay suite JS; verificar con node (sintaxis) + revisión manual del diff. Commit `feat:`.
-Después: 3E sub-micro-paso 3 — búsqueda en History, commit propio `feat:`.
+Eres el agente de sec-dashboard. Primero lee este archivo entero (la sección 7 son reglas NO VIOLAR). Estado: Fase 1 completa salvo F1-FAVICON (backlog opcional); **Fase 2 COMPLETA**: Full Depth pipeline (`a0cf16a`), executive PDF (`10ed28f`), comparativa histórica con delta new/fixed/persistent por `finding_id` determinista (`165af5d` + `1376001`, endpoint `GET /api/pipelines/compare?target_id=N` con runs que llevan `new`/`fixed`/`persistent` como listas de `{finding_id, severity, title}`; frontend: columna "Delta vs anterior" + panel desplegable en `showTargetEvolution`). **3E**: sub-micro-paso 1 hecho — CLI headless `python -m backend.cli --target ... [--pipeline ...] [--json]` (sin persistencia, decisión registrada); sub-micro-paso 3 hecho — `GET /api/pipelines/history?mode=&status=&q=` + selects en la pestaña Pipelines de History. Suite 159 tests en verde, ruff limpio; master == origin/master.
+Tarea: **definir el siguiente micro-paso de Fase 3** con el usuario (el plan original está en la sección correspondiente; candidates típicos: hardware M5/CC1101, tema light/dark como refactor CSS dedicado, u otros del plan). Si se elige el tema light/dark: es un refactor de CSS con variables duales (`[data-theme="light"]`) — paleta light para `--bg-primary/secondary/card`, `--border`, `--text-*`, `--accent` + revisar sombras/gradientes/badges inline (rgba fijos) que rompen en light; toggle en la UI + localStorage; verificar con node (sintaxis) + revisión manual del diff, sin suite JS.
+Backlog pendiente: **3E sub-micro-paso 2 — dark mode persistente** (ver registro 2026-08-26: aplazado porque la app es dark por defecto; el toggle real = implementar modo claro alternativo).
 Reglas: MVP sin dependencias nuevas, tests sin red, commits `feat:`/`fix:`, push solo con suite verde, sin emojis.
 Al cerrar sesión: actualizar las tablas/sección 6 de este archivo y el footer con el siguiente micro-paso.
