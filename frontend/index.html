@@ -335,7 +335,7 @@
                 <span class="icon"></span> Dashboard
             </a>
             <a class="nav-item" data-page="tools" onclick="navigate('tools')">
-                <span class="icon"></span> Tools <span class="badge" id="tools-count">35</span>
+                <span class="icon"></span> Tools <span class="badge" id="tools-count">40</span>
             </a>
             <a class="nav-item" data-page="pipeline" onclick="navigate('pipeline')">
                 <span class="icon"></span> Pipeline
@@ -2404,6 +2404,8 @@ search index=sec_dashboard | timechart count</pre></div>
             const data = await api.get('/tools');
             const el = document.getElementById('sidebar-toolcount');
             if (el) el.textContent = `${data.tools.length} tools • ${data.categories.length} categories`;
+            const badge = document.getElementById('tools-count');
+            if (badge) badge.textContent = data.tools.length;
         } catch {}
     }
 
