@@ -280,6 +280,13 @@ Convención: cada sesión añade una entrada al FINAL de la lista (la más recie
 - Sin dependencias nuevas; `cryptography` sigue sin estar registrada (MVP stdlib-only intacto).
 - Siguiente micro-paso: F1-DNS (DNS Zone Hygiene).
 
+### 2026-08-26 — F1-DNS completa (DNS Zone Hygiene)
+- Commit `145e9a3`: tool `dns_zone_hygiene` (tools/emailsec.py) + registro en config/scanner + adapter findings + 16 tests nuevos (136 en total, sin red: stubs de `_hygiene_txt`/`_hygiene_dnskey`).
+- Implementado (dnspython ya estaba en requirements desde F1-TAKEOVER; sin dependencias nuevas): SPF (TXT apex) — `+all` = HIGH, múltiples v=spf1 = MEDIUM, sin `-all` terminal = LOW, ausente = MEDIUM; DMARC (`_dmarc.`) — ausente = MEDIUM, `p=none` = MEDIUM, `sp=` más débil que `p=` = LOW, `pct<100` con quarantine/reject = LOW; DKIM — brute de 13 selectores comunes en paralelo (gather), sin key = MEDIUM, key vacía = LOW, RSA <1024 bits = HIGH, 1024–2047 = LOW; DNSKEY (apex) — RSA <1024 = HIGH, 1024–2047 = LOW, ECDSAP256 (alg 5) = 256 bits.
+- Fuerza de clave: SPKI DER propio (`_spki_key_bits`: OID rsaEncryption → longitud exacta del MPI; ecdsa-with-SHA256 → P-256 por RFC 6945) para el `p=` de DKIM; `_dnskey_bits` sobre el campo Public Key del RDATA (MPI base-128 para alg 1/3). Unknown → nunca se marca débil.
+- Best-effort: cada query devuelve status (`ok`/`nxdomain`/`noanswer`/`error`); las conclusiones de "missing" solo salen con respuesta definitiva, NUNCA por timeout; apex NXDOMAIN → error limpio (patrón caa_checker); IP → error.
+- Siguiente micro-paso: Phase 2 (Full Depth pipeline) — ver PLAN.md.
+
 ## 7. Reglas y restricciones del proyecto (NO VIOLAR)
 
 1. **NO emojis, flechas de texto ni símbolos de color** en ninguna salida, nota, script o commit (regla global del usuario). Escribir las palabras.
@@ -309,4 +316,4 @@ M5 Stick + CC1101 + nRF24 (Bruce), WiFi Marauder ESP32 v6, LilyGo T-Embed + Bus 
 
 ---
 
-*Última actualización: 2026-08-26, post-refactor F1-SECRETS `93b0fe9` (suite 120 tests en verde; ruff limpio). Próxima sesión: leer este archivo entero y arrancar F1-DNS (DNS Zone Hygiene) — SPF permisivo (+all), DKIM selector brute, DMARC p=none, DNSKEY débil.*
+*Última actualización: 2026-08-26, post-F1-DNS `145e9a3` (suite 136 tests en verde; ruff limpio). Próxima sesión: Phase 2 Full Depth pipeline — ver PLAN.md.*
