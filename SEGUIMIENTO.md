@@ -232,14 +232,14 @@ Convención: cada sesión añade una entrada al FINAL de la lista (la más recie
 - Commit `4870087`: docs de SEGUIMIENTO post-F1-TAKEOVER.
 - Siguiente micro-paso: F1-SECRETS (Secret Leak Scanner). Diseño fijado: known-path scanning para JS; crawl limitado queda fuera del MVP (ver nueva entrada en registro).
 
-### 2026-08-26 — F1-SECRETS: decision de diseno fijada en SEGUIMIENTO
-- No se toco codigo. Se resolvio la duda de diseno pendiente para el scanner de secrets.
-- Decision: en el MVP el scan de JS se hace contra **rutas conocidas** (known-path), NO con crawl limitado.
-- Razon: menor complejidad, predictibilidad, tests sin red mas simples y cubre la mayoria de casos reales. El crawl limitado se deja como mejora futura (Fase 2/3) si la evidencia lo justifica.
+### 2026-08-26 — F1-SECRETS: decisión de diseño fijada en SEGUIMIENTO
+- No se tocó código. Se resolvió la duda de diseño pendiente para el scanner de secrets.
+- Decisión: en el MVP el scan de JS se hace contra **rutas conocidas** (known-path), NO con crawl limitado.
+- Razón: menor complejidad, predictibilidad, tests sin red más simples y cubre la mayoría de casos reales. El crawl limitado se deja como mejora futura (Fase 2/3) si la evidencia lo justifica.
 - Alcance inicial de rutas JS: `/main.js`, `/app.js`, `/bundle.js`, `/vendor.js`, `/common.js`, `/site.js`, `/scripts/*.js`, `/js/*.js`, `/static/js/*.js`, `/assets/js/*.js`, `/wp-content/plugins/**/*.js`, `/wp-content/themes/**/*.js`.
 - Fuentes adicionales obligatorias: `/.git/HEAD` (y opcionalmente `config`, `refs/heads/master`, `index`, `logs/HEAD`), `/robots.txt`.
-- Severidad propuesta: `.git/` expuesto = CRITICAL; API keys/tokens de plataformas de alto impacto (AWS, GitHub, Slack, Stripe, etc.) = HIGH; tokens genericos o keys en JS/robots.txt = MEDIUM; matches debiles = LOW. Dedup por `finding_id` combinando tipo + target + evidencia normalizada.
-- Nota: los regexs seran estilo TruffleHog/TruffleHog3 sin dependencias externas; solo patterns con alta confianza en el MVP.
+- Severidad propuesta: `.git/` expuesto = CRITICAL; API keys/tokens de plataformas de alto impacto (AWS, GitHub, Slack, Stripe, etc.) = HIGH; tokens genéricos o keys en JS/robots.txt = MEDIUM; matches débiles = LOW. Dedup por `finding_id` combinando tipo + target + evidencia normalizada.
+- Nota: los regexs serán estilo TruffleHog/TruffleHog3 sin dependencias externas; solo patterns con alta confianza en el MVP.
 
 ## 7. Reglas y restricciones del proyecto (NO VIOLAR)
 
@@ -270,4 +270,4 @@ M5 Stick + CC1101 + nRF24 (Bruce), WiFi Marauder ESP32 v6, LilyGo T-Embed + Bus 
 
 ---
 
-*Última actualización: 2026-08-26, post-F1-TAKEOVER (commits 4454b14 + 4870087), decision de diseno F1-SECRETS fijada. Proxima sesion: leer este archivo entero y arrancar F1-SECRETS (Secret Leak Scanner) con known-path scanning segun lo documentado.*
+*Última actualización: 2026-08-26, post-F1-TAKEOVER (commits 4454b14 + 4870087), decisión de diseño F1-SECRETS fijada. Próxima sesión: leer este archivo entero y arrancar F1-SECRETS (Secret Leak Scanner) con known-path scanning según lo documentado.*
