@@ -135,6 +135,56 @@ def _adapt_ssl_analyzer(result: dict, target: str) -> list[Finding]:
     return out
 
 
+@register("ssl_deep_analyzer")
+def _adapt_ssl_deep_analyzer(result: dict, target: str) -> list[Finding]:
+    checks = result.get("checks") or []
+    if not checks:
+        return []
+    # (check id, status) -> severity. Only the listed pairs are reported:
+    # protocol/cipher problems on fail, hygiene items on their own status.
+    severity_by_id = {
+        ("tls_legacy", "fail"): Severity.HIGH,
+        ("weak_cipher", "fail"): Severity.HIGH,
+        ("cert_expired", "fail"): Severity.HIGH,
+        ("self_signed", "fail"): Severity.MEDIUM,
+        ("no_forward_secrecy", "fail"): Severity.MEDIUM,
+        ("hsts_missing", "fail"): Severity.MEDIUM,
+        ("hsts_short", "fail"): Severity.LOW,
+        ("cert_expiring", "warn"): Severity.LOW,
+        ("ocsp_unavailable", "warn"): Severity.LOW,
+    }
+    remediation = {
+        "tls_legacy": "Disable TLS 1.0/1.1; require TLS 1.2+ on the server.",
+        "weak_cipher": "Restrict the server to strong AEAD ciphers (AES-GCM / ChaCha20).",
+        "cert_expired": "Renew the certificate and fix the automation that keeps it valid.",
+        "self_signed": "Replace the self-signed certificate with a CA-issued one.",
+        "no_forward_secrecy": "Enable ECDHE/DHE cipher suites for forward secrecy.",
+        "hsts_missing": "Add a Strict-Transport-Security header (max-age >= 180 days).",
+        "hsts_short": "Raise HSTS max-age to at least 180 days (consider preload).",
+        "cert_expiring": "Renew the certificate before it expires.",
+        "ocsp_unavailable": "Enable OCSP stapling or publish a reachable OCSP responder.",
+    }
+    out: list[Finding] = []
+    grade = result.get("grade")
+    for chk in checks:
+        cid, status = chk.get("id"), chk.get("status")
+        sev = severity_by_id.get((cid, status))
+        if sev is None:
+            continue
+        out.append(Finding(
+            tool="ssl_deep_analyzer", category="Network Recon",
+            severity=sev,
+            title=f"{chk.get('detail') or cid} (grade {grade})" if grade else cid,
+            evidence={"check": cid, "status": status,
+                      "detail": chk.get("detail"), "grade": grade},
+            remediation=remediation.get(cid, ""),
+            target=target, confidence=0.9,
+        ))
+        if len(out) >= 10:
+            break
+    return out
+
+
 @register("port_scanner")
 def _adapt_port_scanner(result: dict, target: str) -> list[Finding]:
     out: list[Finding] = []

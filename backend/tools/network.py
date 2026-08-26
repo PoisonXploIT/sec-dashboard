@@ -565,3 +565,483 @@ async def ssl_analyzer(host: str, port: int = 443, **kw) -> dict:
         return {"host": host, "port": port, "valid": False, "error": str(e)}
     except Exception as e:
         return {"host": host, "port": port, "error": str(e)}
+
+
+
+# ── 9. SSL Deep Analyzer (F1-SSL) ─────────────────────────────
+# stdlib-only (ssl/socket): TLS version probes, weak-cipher probes,
+# HSTS header probe over raw TLS, OCSP stapling via a hand-built
+# ClientHello with the status_request extension (RFC 6066), and a
+# letter grade A+ to F computed from discrete checks.
+
+_SSL_PROBE_TIMEOUT = 8.0
+_HSTS_SHORT_MAX_AGE = 15552000  # 180 days, in seconds
+
+_TLS_DISABLE_FLAG = {
+    "1.0": "OP_NO_TLSv1",
+    "1.1": "OP_NO_TLSv1_1",
+    "1.2": "OP_NO_TLSv1_2",
+    "1.3": "OP_NO_TLSv1_3",
+}
+
+_WEAK_CIPHER_STRINGS = ("RC4", "DES-CBC", "3DES", "NULL")
+
+_OCSP_PROBE_CIPHERS = (
+    0x1305, 0x1304, 0x1303, 0x1302, 0x1301,          # TLS 1.3 suites
+    0xC030, 0xC031, 0xC02B, 0xC02F,                  # ECDHE RSA/ECDSA GCM
+    0x009C, 0x009D, 0x009E,                         # AES-GCM (no PFS)
+)
+
+
+def _version_only_context(version: str) -> ssl.SSLContext:
+    """Client context restricted to a single TLS version.
+
+    Best effort: the restriction is expressed via OP_NO_* flags; if the
+    local OpenSSL build cannot actually negotiate that version, the
+    handshake fails and the probe reports "unsupported".
+    """
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    for v, flag in _TLS_DISABLE_FLAG.items():
+        if v != version and hasattr(ssl, flag):
+            ctx.options |= getattr(ssl, flag)
+    return ctx
+
+
+def _tls_handshake(host: str, port: int, ctx: ssl.SSLContext,
+                   timeout: float = _SSL_PROBE_TIMEOUT) -> tuple[str | None, str | None]:
+    """Blocking handshake. Returns (version, cipher_name). Raises on failure."""
+    sock = socket.socket()
+    sock.settimeout(timeout)
+    conn = ctx.wrap_socket(sock, server_hostname=host)
+    conn.connect((host, port))
+    try:
+        return conn.version(), (conn.cipher() or (None, None))[0]
+    finally:
+        conn.close()
+
+
+def _probe_tls_versions(host: str, port: int) -> dict:
+    """Probe TLS 1.0/1.1/1.2/1.3 support and the default negotiation."""
+    supported = {}
+    for v in ("1.0", "1.1", "1.2", "1.3"):
+        try:
+            _tls_handshake(host, port, _version_only_context(v))
+            supported[v] = True
+        except Exception:
+            supported[v] = False
+    negotiated = None
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    try:
+        version, cipher = _tls_handshake(host, port, ctx)
+        negotiated = {"version": version, "cipher": cipher}
+    except Exception:
+        pass
+    return {"supported": supported, "negotiated": negotiated}
+
+
+def _probe_weak_ciphers(host: str, port: int) -> list[str]:
+    """Try to negotiate each weak family; only real successes are reported.
+
+    If the local OpenSSL build refuses a cipher string (set_ciphers raises),
+    that family is untestable and silently skipped: we never report a weak
+    cipher we did not actually negotiate.
+    """
+    found = []
+    for cs in _WEAK_CIPHER_STRINGS:
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        try:
+            ctx.set_ciphers(cs)
+        except (ssl.SSLError, ValueError):
+            continue
+        try:
+            _version, cipher = _tls_handshake(host, port, ctx)
+        except Exception:
+            continue
+        found.append(cipher or cs)
+    return found
+
+
+def _parse_hsts(value: str) -> dict:
+    """Parse a Strict-Transport-Security header value."""
+    out = {"max_age": None, "include_subdomains": False, "preload": False}
+    for part in value.split(";"):
+        part = part.strip()
+        low = part.lower()
+        if low.startswith("max-age="):
+            try:
+                out["max_age"] = int(part.split("=", 1)[1].strip().strip('"'))
+            except (ValueError, IndexError):
+                pass
+        elif "includesubdomains" in low:
+            out["include_subdomains"] = True
+        elif "preload" in low:
+            out["preload"] = True
+    return out
+
+
+def _probe_hsts(host: str, port: int) -> dict:
+    """Send a minimal HTTP/1.0 GET over TLS and read the HSTS header."""
+    def blocking() -> str | None:
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        sock = socket.socket()
+        sock.settimeout(_SSL_PROBE_TIMEOUT)
+        conn = ctx.wrap_socket(sock, server_hostname=host)
+        conn.connect((host, port))
+        try:
+            req = (b"GET / HTTP/1.0\r\nHost: " + host.encode()
+                   + b"\r\nConnection: close\r\nUser-Agent: sec-dashboard\r\n\r\n")
+            conn.sendall(req)
+            chunks: list[bytes] = []
+            while True:
+                try:
+                    data = conn.recv(65536)
+                except (socket.timeout, ssl.SSLException):
+                    break
+                if not data:
+                    break
+                chunks.append(data)
+                if sum(map(len, chunks)) > 262144:
+                    break
+            raw = b"".join(chunks).decode("utf-8", "replace")
+        finally:
+            conn.close()
+        head = raw.split("\r\n\r\n", 1)[0]
+        for line in head.splitlines()[1:]:
+            if ":" in line:
+                k, v = line.split(":", 1)
+                if k.strip().lower() == "strict-transport-security":
+                    return v.strip()
+        return None
+
+    try:
+        hsts_value = blocking()
+    except Exception:
+        hsts_value = None
+    if hsts_value is None:
+        return {"present": False, "max_age": None,
+                "include_subdomains": False, "preload": False}
+    parsed = _parse_hsts(hsts_value)
+    parsed["present"] = True
+    return parsed
+
+
+# ── OCSP stapling: raw ClientHello with status_request ext ─────
+
+def _build_ocsp_client_hello(host: str) -> bytes:
+    """Build a minimal TLS 1.2/1.3 ClientHello offering the
+    status_request (OCSP) extension plus SNI, ready to send on a socket."""
+    import random as _random
+
+    legacy_random = _random.randbytes(32)
+    suites = b"".join(struct.pack(">H", c) for c in _OCSP_PROBE_CIPHERS)
+
+    sni_inner = struct.pack(">H", len(host)) + b"\x00" \
+        + struct.pack(">H", len(host)) + host.encode()
+    ext_sni = struct.pack(">HH", 0, len(sni_inner)) + sni_inner
+    ext_status = struct.pack(">HH", 5, 0)  # status_request, empty data
+
+    extensions = ext_sni + ext_status
+    body = (struct.pack(">H", 0x0303) + legacy_random + b"\x00"
+            + struct.pack(">H", len(suites)) + suites
+            + b"\x00"
+            + struct.pack(">H", len(extensions)) + extensions)
+    hello = b"\x01" + struct.pack(">I", len(body))[1:] + body
+    return b"\x16" + struct.pack(">H", 0x0303) + struct.pack(">H", len(hello)) + hello
+
+
+def _parse_stapling_from_records(data: bytes) -> bool | None:
+    """Parse TLS records for a ServerHello; True if it carries the
+    status_response extension (OCSP stapled), False if not, None if no
+    conclusive ServerHello was found in `data` yet."""
+    pos = 0
+    while pos + 5 <= len(data):
+        rtype = data[pos]
+        rlen = struct.unpack(">H", data[pos + 5:pos + 7])[0]
+        payload = data[pos + 5:pos + 5 + rlen]
+        pos += 5 + rlen
+        if rtype != 0x16 or not payload:
+            continue
+        mtype = payload[0]
+        if mtype == 2:  # ServerHello
+            body = payload[4:]
+            if len(body) < 7:
+                return None
+            sid_len = body[34]
+            pos_ciphers = 35 + sid_len
+            if len(body) < pos_ciphers + 3:
+                return None
+            ciphers_len = struct.unpack(">H", body[pos_ciphers:pos_ciphers + 2])[0]
+            off = pos_ciphers + 2 + ciphers_len
+            comp_len = body[off]
+            off += 1 + comp_len
+            if len(body) < off + 2:
+                return None
+            exts_len = struct.unpack(">H", body[off:off + 2])[0]
+            off += 2
+            if off + exts_len > len(body):
+                return None  # extensions block incomplete
+            exts = body[off:off + exts_len]
+            epos = 0
+            while epos + 4 <= len(exts):
+                etype = struct.unpack(">H", exts[epos:epos + 2])[0]
+                elen = struct.unpack(">H", exts[epos + 2:epos + 4])[0]
+                epos += 4 + elen
+                if etype == 5:
+                    return True
+            return False
+        if mtype in (4, 11, 15, 20):  # NewSessionTicket/Certificate/CertVerify/Finished
+            continue
+        return None  # alert or other: no conclusive answer
+    return None
+
+
+def _probe_ocsp_stapling(host: str, port: int) -> str:
+    """Send the raw ClientHello and read the server's first flight.
+
+    Returns "yes" (status_response seen), "no" (clean ServerHello without
+    it) or "unknown" (timeout / alert / garbage)."""
+    def blocking() -> str:
+        sock = socket.socket()
+        sock.settimeout(_SSL_PROBE_TIMEOUT)
+        sock.connect((host, port))
+        try:
+            sock.sendall(_build_ocsp_client_hello(host))
+            buf = b""
+            while True:
+                result = _parse_stapling_from_records(buf)
+                if result is not None:
+                    return "yes" if result else "no"
+                try:
+                    chunk = sock.recv(65536)
+                except (socket.timeout, OSError):
+                    return "unknown"
+                if not chunk:
+                    return "unknown"
+                buf += chunk
+                if len(buf) > 1 << 20:
+                    return "unknown"
+        finally:
+            sock.close()
+
+    try:
+        return blocking()
+    except Exception:
+        return "unknown"
+
+
+def _probe_certificate(host: str, port: int) -> dict | None:
+    """Certificate facts from a verification-free handshake."""
+    import datetime
+
+    def blocking() -> dict:
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        sock = socket.socket()
+        sock.settimeout(_SSL_PROBE_TIMEOUT)
+        conn = ctx.wrap_socket(sock, server_hostname=host)
+        conn.connect((host, port))
+        try:
+            cert = conn.getpeercert()
+        finally:
+            conn.close()
+        subject = dict(x[0] for x in cert.get("subject", ()))
+        issuer = dict(x[0] for x in cert.get("issuer", ()))
+        days_left = None
+        expired = False
+        try:
+            end = datetime.datetime.strptime(cert["notAfter"], "%b %d %H:%M:%S %Y GMT")
+            now = datetime.datetime.utcnow()
+            days_left = (end - now).days
+            expired = end <= now
+        except (KeyError, ValueError):
+            pass
+        return {
+            "subject": subject.get("commonName", ""),
+            "issuer": issuer.get("commonName", ""),
+            "san": [entry[1] for entry in cert.get("subjectAltName", ())],
+            "not_before": cert.get("notBefore"),
+            "not_after": cert.get("notAfter"),
+            "days_left": days_left,
+            "expired": expired,
+            "self_signed": bool(subject) and subject == issuer,
+            "ocsp_responder": (cert.get("OCSP") or [None])[0],
+        }
+
+    try:
+        return blocking()
+    except Exception:
+        return None
+
+
+def _compute_grade(checks: list[dict]) -> str | None:
+    """Letter grade A+ to F from the discrete checks.
+
+    Start at A+; each failing/warning check caps the grade. Returns None
+    if there are no checks (nothing was probed).
+    """
+    if not checks:
+        return None
+    scale = ["A+", "A", "A-", "B+", "B", "C", "D", "E", "F"]
+    caps = {
+        ("tls_legacy", "fail"): "F",
+        ("weak_cipher", "fail"): "F",
+        ("cert_expired", "fail"): "D",
+        ("self_signed", "fail"): "C",
+        ("no_forward_secrecy", "fail"): "B+",
+        ("hsts_missing", "fail"): "A",
+        ("hsts_short", "fail"): "A-",
+    }
+    cap = None
+    for chk in checks:
+        grade = caps.get((chk.get("id"), chk.get("status")))
+        if grade is None:
+            continue
+        if cap is None or scale.index(grade) > scale.index(cap):
+            cap = grade
+    return cap if cap is not None else "A+"
+
+
+def _build_ssl_checks(versions: dict, weak: list[str], hsts: dict,
+                      ocsp: dict, cert: dict | None) -> list[dict]:
+    checks: list[dict] = []
+
+    legacy = [v for v in ("1.0", "1.1") if versions.get(v)]
+    checks.append({
+        "id": "tls_legacy",
+        "status": "fail" if legacy else "pass",
+        "detail": f"Legacy protocol accepted: {', '.join(legacy)}" if legacy
+                  else "No TLS 1.0/1.1",
+    })
+    checks.append({
+        "id": "weak_cipher",
+        "status": "fail" if weak else "pass",
+        "detail": f"Weak cipher negotiated: {', '.join(weak)}" if weak
+                  else "No RC4/DES/3DES/NULL negotiated",
+    })
+
+    negotiated_cipher = (versions.get("negotiated") or {}).get("cipher") or ""
+    has_pfs = ("ECDHE" in negotiated_cipher) or ("DHE" in negotiated_cipher)
+    checks.append({
+        "id": "no_forward_secrecy",
+        "status": "fail" if not has_pfs else "pass",
+        "detail": f"No PFS cipher negotiated ({negotiated_cipher})"
+                  if not has_pfs else f"PFS cipher: {negotiated_cipher}",
+    })
+
+    if cert is None:
+        checks.append({"id": "self_signed", "status": "warn",
+                       "detail": "No certificate could be read"})
+        checks.append({"id": "cert_expired", "status": "warn",
+                       "detail": "No certificate could be read"})
+    else:
+        checks.append({
+            "id": "self_signed",
+            "status": "fail" if cert.get("self_signed") else "pass",
+            "detail": f"Self-signed ({cert.get('subject')})"
+                      if cert.get("self_signed") else "CA-issued certificate",
+        })
+        checks.append({
+            "id": "cert_expired",
+            "status": "fail" if cert.get("expired") else "pass",
+            "detail": f"Certificate expired ({cert.get('not_after')})"
+                      if cert.get("expired") else
+                      f"{cert.get('days_left')} days left",
+        })
+        checks.append({
+            "id": "cert_expiring",
+            "status": "warn" if (cert.get("days_left") is not None
+                                 and 0 < cert["days_left"] < 30) else "pass",
+            "detail": f"Expires in {cert.get('days_left')} days"
+                      if (cert.get("days_left") is not None
+                          and 0 < cert["days_left"] < 30) else "Not expiring soon",
+        })
+
+    checks.append({
+        "id": "hsts_missing",
+        "status": "fail" if not hsts.get("present") else "pass",
+        "detail": "Strict-Transport-Security header absent"
+                  if not hsts.get("present") else "HSTS present",
+    })
+    if hsts.get("present"):
+        short = (hsts.get("max_age") is None) or (hsts["max_age"] < _HSTS_SHORT_MAX_AGE)
+        checks.append({
+            "id": "hsts_short",
+            "status": "fail" if short else "pass",
+            "detail": f"HSTS max-age {hsts.get('max_age')} (< 180 days)"
+                      if short else f"HSTS max-age {hsts['max_age']}",
+        })
+
+    ocsp_ok = (ocsp.get("stapling") == "yes") or bool(ocsp.get("responder"))
+    checks.append({
+        "id": "ocsp_unavailable",
+        "status": "warn" if not ocsp_ok else "pass",
+        "detail": f"OCSP stapling={ocsp.get('stapling')}, responder={'yes' if ocsp.get('responder') else 'no'}",
+    })
+    return checks
+
+
+def _ssl_deep_scan_blocking(host: str, port: int) -> dict:
+    """All probes in one blocking pass (called from a worker thread)."""
+    versions = _probe_tls_versions(host, port)
+    weak = _probe_weak_ciphers(host, port)
+    hsts = _probe_hsts(host, port)
+    ocsp = {"stapling": _probe_ocsp_stapling(host, port)}
+    cert = _probe_certificate(host, port)
+    if cert is not None:
+        ocsp["responder"] = cert.get("ocsp_responder")
+    else:
+        ocsp["responder"] = None
+
+    checks = _build_ssl_checks(versions, weak, hsts, ocsp, cert)
+    return {
+        "target": host,
+        "port": port,
+        "tls_versions": versions.get("supported"),
+        "negotiated": versions.get("negotiated"),
+        "weak_ciphers": weak,
+        "hsts": hsts,
+        "ocsp": ocsp,
+        "cert": cert,
+        "checks": checks,
+        "grade": _compute_grade(checks),
+    }
+
+
+async def ssl_deep_analyzer(target: str, **kw) -> dict:
+    """Deep SSL/TLS audit: grade A+ to F from protocol, cipher, HSTS and
+    OCSP evidence. stdlib-only (ssl/socket); no external binaries."""
+    import re as _re
+
+    t = target.strip()
+    if t.lower().startswith(("http://", "https://")):
+        t = _re.sub(r"^https?://", "", t)
+    if "/" in t:
+        t = t.split("/")[0]
+    host, _, port_s = t.partition(":")
+    host = host.strip().lower()
+    try:
+        port = int(port_s) if port_s else 443
+    except ValueError:
+        return {"target": target, "error": f"Invalid port in {target!r}"}
+    if not host:
+        return {"target": target, "error": "Empty target"}
+
+    try:
+        result = await asyncio.to_thread(_ssl_deep_scan_blocking, host, port)
+    except Exception as e:  # M1: never leak a traceback to the client
+        return {"target": host, "port": port, "error": str(e)}
+
+    if not any(result["tls_versions"].values()) and result["negotiated"] is None \
+            and result["cert"] is None:
+        return {"target": host, "port": port,
+                "error": "No TLS handshake succeeded (port closed or filtered)"}
+    return result

@@ -9,7 +9,7 @@ from backend.findings import extract_findings, score_findings
 from backend.tools.network import (
     port_scanner, dns_recon, subdomain_enum, http_probe,
     whois_lookup, ping_sweep, traceroute, ssl_analyzer,
-    subdomain_takeover,
+    subdomain_takeover, ssl_deep_analyzer,
 )
 from backend.tools.web import (
     header_analyzer, dir_fuzzer, sqli_scanner, xss_scanner,
@@ -34,6 +34,7 @@ HANDLERS: dict[str, Callable] = {
     "ping_sweep": ping_sweep,
     "traceroute": traceroute,
     "ssl_analyzer": ssl_analyzer,
+    "ssl_deep_analyzer": ssl_deep_analyzer,
     # Web Security
     "header_analyzer": header_analyzer,
     "dir_fuzzer": dir_fuzzer,

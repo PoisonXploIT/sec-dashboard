@@ -75,6 +75,13 @@ TOOLS = {
         "icon": "##",
         "timeout": 15,
     },
+    "ssl_deep_analyzer": {
+        "name": "SSL Deep Analyzer",
+        "category": "Network Recon",
+        "description": "TLS grade A+ to F: legacy protocols, weak ciphers, HSTS, OCSP stapling",
+        "icon": "SL",
+        "timeout": 90,
+    },
     # ─── Web Security ───
     "header_analyzer": {
         "name": "Header Analyzer",
