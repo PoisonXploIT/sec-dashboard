@@ -24,6 +24,7 @@ from backend.report import (
     generate_executive_pdf,
 )
 from backend.validators import validate_target, is_remote_mode
+from backend.ratelimit import RateLimiter
 from backend import webhooks
 from backend import splunk
 
@@ -62,6 +63,50 @@ async def require_api_key(request: Request, call_next):
     return await call_next(request)
 
 
+# ── Rate limiting (in-memory, no Redis) ───────────────────────
+# Strict bucket for the expensive mutation POSTs (30 req/min per IP) and a
+# much more permissive flood guard for GETs (the UI polls every ~2s while a
+# run is in progress). Keyed by direct peer only: X-Forwarded-For is NOT
+# trusted — a spoofable header would let an attacker mint fresh buckets by
+# rotating its value. Behind Cloudflare this degrades to per-origin
+# granularity, which still caps the total mutation rate of the deployment.
+MUTATION_RATE_LIMIT = 30   # req/min per IP on POST /api/scans|pipelines|targets
+READ_RATE_LIMIT = 600      # req/min per IP on GET /api/*
+
+_mutation_limiter = RateLimiter(MUTATION_RATE_LIMIT)
+_read_limiter = RateLimiter(READ_RATE_LIMIT)
+
+_MUTATION_PATHS = {"/api/scans", "/api/pipelines", "/api/targets"}
+
+
+def _rate_limit_bucket(method: str, path: str):
+    """Return the limiter bucket for a request, or None if unlimited."""
+    if method == "POST" and path in _MUTATION_PATHS:
+        return _mutation_limiter
+    if method == "GET" and path.startswith("/api/"):
+        return _read_limiter
+    return None
+
+
+def _rate_limit_key(request: Request) -> str:
+    return request.client.host if request.client else "?"
+
+
+@app.middleware("http")
+async def rate_limit(request: Request, call_next):
+    # Defined after require_api_key, so it is outermost and runs first:
+    # floods are capped before any auth work happens.
+    bucket = _rate_limit_bucket(request.method, request.url.path)
+    if bucket is None:
+        return await call_next(request)
+    allowed, retry_after = bucket.check(_rate_limit_key(request))
+    if not allowed:
+        return JSONResponse(
+            {"detail": "Rate limit exceeded"},
+            status_code=429,
+            headers={"Retry-After": str(retry_after)},
+        )
+    return await call_next(request)
 
 
 # -- Proxy / Anonymity -----------------------------------------
