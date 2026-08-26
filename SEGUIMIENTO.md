@@ -333,6 +333,15 @@ Convención: cada sesión añade una entrada al FINAL de la lista (la más recie
 - Commit `feat:`, suite verde antes de push. Al cerrar sesión: actualizar registro + footer con el siguiente micro-paso.
 - Siguiente micro-paso: implementar 3b según este diseño. Al cerrarlo, arrancar 3E sub-micro-paso 1 (CLI headless).
 
+### 2026-08-26 — Micro-paso 3b completa (delta new/fixed/persistent en la comparativa)
+- Commit `1376001`: implementación del diseño aprobado, sin desviaciones.
+  - `findings.py`: **`finding_id` ahora es determinista** — sha1 de `tool|category|severity|title` (12 hex) calculado en `__post_init__`, en vez de `uuid4().hex[:12]` aleatorio (que rompía la identidad entre runs; era la advertencia clave del diseño). Los adapters pueden seguir pasando un `finding_id` explícito si conocen mejor key. Verificado: ningún otro módulo dependía del id anterior.
+  - `main.py compare_pipelines`: cada run lleva `new`/`fixed`/`persistent` (listas de `{finding_id, severity, title}`, sin evidence) comparando **N vs N-1 cronológico**; primera run = listas vacías; findings NULL/corrupto legacy = conjunto vacío. Siempre incluidas, sin flag.
+  - `index.html showTargetEvolution`: columna "Delta vs anterior" con badge de conteos (`+N new / M fixed / K persistent`, primera run = "baseline") y panel desplegable por run listando new/fixed/persistent con severity (tag red/yellow existente) y title. Sin librerías nuevas. Guía in-app actualizada.
+  - Tests: 2 nuevos en `test_compare_endpoint.py` (delta correcto entre 3 runs consecutivas con primera vacía; NULL/corrupto = conjunto vacío sin romper) + 1 en `test_findings.py` (id estable entre instancias, cambia con title/severity, explícito respetado). Suite **149** en verde, ruff limpio, compileall OK, sintaxis JS validada con node.
+- Nota de transición: los pipelines persistidos antes de este commit tienen ids aleatorios; la primera comparación real tras desplegar mostrará todo como `new` una única vez (los ids nuevos son deterministas desde ya).
+- Siguiente micro-paso: **3E sub-micro-paso 1 — CLI headless**.
+
 ## 7. Reglas y restricciones del proyecto (NO VIOLAR)
 
 1. **NO emojis, flechas de texto ni símbolos de color** en ninguna salida, nota, script o commit (regla global del usuario). Escribir las palabras.
@@ -362,12 +371,11 @@ M5 Stick + CC1101 + nRF24 (Bruce), WiFi Marauder ESP32 v6, LilyGo T-Embed + Bus 
 
 ---
 
-*Última actualización: 2026-08-26, Phase 2 COMPLETA — Full Depth (`a0cf16a`) + executive PDF (`10ed28f`) + comparativa histórica (`165af5d`); suite 146 tests en verde; ruff limpio. master == origin/master.*
+*Última actualización: 2026-08-26, Phase 2 CERRADA de verdad — Full Depth (`a0cf16a`) + executive PDF (`10ed28f`) + comparativa histórica (`165af5d`) + **delta new/fixed/persistent (3b, `1376001`)**; suite 149 tests en verde; ruff limpio. master == origin/master.*
 
 **PROMPT PARA LA PRÓXIMA SESIÓN** (arrancar con contexto nuevo):
-Eres el agente de sec-dashboard. Primero lee este archivo entero (la sección 7 son reglas NO VIOLAR). Estado: Fase 1 completa salvo F1-FAVICON (backlog opcional, decisión Opción A registrada arriba); **Fase 2 COMPLETA**: Full Depth pipeline (`a0cf16a`), reporte ejecutivo PDF (`10ed28f`, `generate_executive_pdf` + endpoint `/api/pipelines/{id}/executive-pdf`), comparativa histórica (`165af5d`, `GET /api/pipelines/compare?target_id=N` + vista de evolución con sparkline canvas en History); suite 146 tests en verde, ruff limpio; master == origin/master. El bug cosmético del sidebar (35 tools hardcodeadas) quedó CERRADO en `165af5d`: el contador ahora es dinámico desde `/api/tools`.
-Tarea: **micro-paso 3b — delta new/fixed/persistent por `finding_id` en la comparativa** (decisión de ruta registrada arriba: 3b primero para cerrar Phase 2, luego 3E). DISEÑO APROBADO completo en la entrada "Phase 3: decisión de ruta" de la sección 6: backend en `compare_pipelines` (N vs N-1 cronológico; runs llevan `new`/`fixed`/`persistent` como listas de `{finding_id, severity, title}`, siempre incluidas sin flag; NULL/corrupto = conjunto vacío), frontend badges de conteos + panel desplegable por run en `showTargetEvolution`, 2-3 tests con DB temporal.
-Después de cerrar 3b: **3E** en sub-micro-pasos — (1) CLI headless (`python -m backend.cli --target ... --pipeline nuclear --json`), (2) dark mode persistente, (3) búsqueda en History. Para el CLI estudiar cómo invocar `PipelineRunner` fuera del HTTP (clase autónoma; ver `create_pipeline` en main.py por el patrón de uso).
-Antes de tocar nada: leer `finding_id` en `backend/findings.py` (identidad estable entre runs), `compare_pipelines` en main.py y la vista de evolución en index.html.
+Eres el agente de sec-dashboard. Primero lee este archivo entero (la sección 7 son reglas NO VIOLAR). Estado: Fase 1 completa salvo F1-FAVICON (backlog opcional); **Fase 2 COMPLETA**: Full Depth pipeline (`a0cf16a`), executive PDF (`10ed28f`), comparativa histórica con delta new/fixed/persistent por `finding_id` determinista (`165af5d` + `1376001`, endpoint `GET /api/pipelines/compare?target_id=N` con runs que llevan `new`/`fixed`/`persistent` como listas de `{finding_id, severity, title}`; frontend: columna "Delta vs anterior" + panel desplegable en `showTargetEvolution`). Suite 149 tests en verde, ruff limpio; master == origin/master.
+Tarea: **3E sub-micro-paso 1 — CLI headless** (`python -m backend.cli --target ... --pipeline nuclear --json`). Estudiar primero cómo invocar `PipelineRunner` fuera del HTTP (clase autónoma en `backend/pipeline.py`; ver `create_pipeline` en main.py por el patrón de uso: target, modo, persistencia). Decidir alcance MVP: qué flags son imprescindibles (`--target`, `--pipeline`, `--json`, y si hace falta `--no-persist` para no ensuciar la DB) y cómo se mapea el resultado al mismo JSON que devuelve el endpoint. Tests sin red (patrón de la suite: `asyncio.run()` dentro de tests síncronos, stubs/monkeypatch, DB temporal con monkeypatch de `models.DB_PATH`).
+Después del CLI: 3E sub-micro-paso 2 (dark mode persistente) y 3 (búsqueda en History), cada uno commit propio `feat:`.
 Reglas: MVP sin dependencias nuevas, tests sin red, commits `feat:`/`fix:`, push solo con suite verde, sin emojis.
 Al cerrar sesión: actualizar las tablas/sección 6 de este archivo y el footer con el siguiente micro-paso.
