@@ -77,7 +77,7 @@ Estado por tarea (actualizar esta tabla al cerrar CADA sesión; la más avanzada
 | ID | Tool | Estado | Notas / fuentes |
 |---|---|---|---|
 | F1-CVE | Tech CVE Correlation | HECHO (`9551c44`) | Handler `cve_correlation` en tools/web.py: reutiliza `tech_detector`, extrae versiones del header Server, busca NVD por producto (top 8 techs) y marca CISA KEV. Adapter en findings.py: KEV = CRITICAL con campo `cve`, CVE critical/high = HIGH (medium/low descartados a propósito para no inflar el score). |
-| F1-TAKEOVER | Subdomain Takeover | PENDIENTE | Prioridad 2. Cruza CT logs + CNAMEs; detecta dangling NXDOMAIN hacia GitHub Pages, Heroku, S3. |
+| F1-TAKEOVER | Subdomain Takeover | HECHO (`4454b14`) | Handler `subdomain_takeover` en tools/network.py: candidatos desde `ct_logs` (crt.sh, cap 50), resuelve CNAME con dnspython y sondea HTTP. Dangling = sin A record, inalcanzable o 404/503 contra `.github.io`/`.herokuapp.com`/S3 (`amazonaws.com`). Adapter: dangling = CRITICAL dedup por sub. |
 | F1-SECRETS | Secret Leak Scanner | PENDIENTE | `.git/` expuesto, API keys, tokens en JS/robots.txt (regexs tipo TruffleHog). |
 | F1-SSL | SSL Deep Analyzer | PENDIENTE | Grade A+ a F: cipher suites, TLS 1.0/1.1, HSTS, OCSP stapling. |
 | F1-DNS | DNS Zone Hygiene | PENDIENTE | SPF permisivo (+all), DKIM selector brute, DMARC p=none, DNSKEY débil. |
@@ -226,6 +226,11 @@ Convención: cada sesión añade una entrada al FINAL de la lista (la más recie
 - Decisiones: top 8 techs buscadas en NVD con filtro client-side por palabra del producto; KEV feed vía raw.githubusercontent (fallos de fuente no rompen el scan, se devuelve lo que haya); sorting KEV primero y luego CVSS desc.
 - Siguiente micro-paso: F1-TAKEOVER (Subdomain Takeover).
 
+### 2026-08-26 — F1-TAKEOVER completa (Subdomain Takeover)
+- Commit `4454b14`: tool `subdomain_takeover` (tools/network.py) + registro en config/scanner + adapter findings + 11 tests nuevos (75 en total, sin red: stubs de `ct_logs`, `_takeover_dns`, `_takeover_probe`).
+- Decisiones: candidatos = subdominios de CT logs (crt.sh, cap 50, root excluido); plataforma por sufijo/regex del CNAME (github.io/githubpages.dev, herokuapp/onheroku, s3 + website amazonaws con regions); dangling si no hay A record, el probe falla o responde 404/503; fallo de crt.sh degrada a `ct_error` sin romper el scan.
+- Siguiente micro-paso: F1-SECRETS (Secret Leak Scanner).
+
 ## 7. Reglas y restricciones del proyecto (NO VIOLAR)
 
 1. **NO emojis, flechas de texto ni símbolos de color** en ninguna salida, nota, script o commit (regla global del usuario). Escribir las palabras.
@@ -255,4 +260,4 @@ M5 Stick + CC1101 + nRF24 (Bruce), WiFi Marauder ESP32 v6, LilyGo T-Embed + Bus 
 
 ---
 
-*Última actualización: 2026-08-26, post-F1-CVE (commit 9551c44). Próxima sesión: leer este archivo entero y arrancar F1-TAKEOVER según la tabla de Fase 1 y sus reglas por tool.*
+*Última actualización: 2026-08-26, post-F1-TAKEOVER (commit 4454b14). Próxima sesión: leer este archivo entero y arrancar F1-SECRETS (Secret Leak Scanner) según la tabla de Fase 1 y sus reglas por tool.*
