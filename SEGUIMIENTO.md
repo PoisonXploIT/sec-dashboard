@@ -322,6 +322,17 @@ Convención: cada sesión añade una entrada al FINAL de la lista (la más recie
 - Push a origin/master hecho (CI + Railway). Sin dependencias nuevas; MVP intacto.
 - Siguiente micro-paso: **Phase 3** — arrancar por 3E (CLI headless, dark mode persistente, búsqueda en History) o, si el usuario prefiere, el micro-paso opcional 3b (delta new/fixed/persistent por `finding_id` entre runs adyacentes, bonus del diseño de comparativa). Decisión al arrancar la sesión.
 
+### 2026-08-26 — Phase 3: decisión de ruta — micro-paso 3b PRIMERO, luego 3E
+- Decisión del usuario: se hace **3b primero** (delta new/fixed/persistent por `finding_id` en la comparativa) para cerrar la comparativa histórica de verdad; después se salta a **3E dividido en sub-micro-pasos**: (1) CLI headless, (2) dark mode persistente, (3) búsqueda en History. Razón: 3b es pequeño (estimación 1-2 h), cierra Phase 2 con un cierre redondo y usa datos que acaban de entrar en producción.
+- DISEÑO APROBADO de 3b (implementar directo, sin releer nada más):
+  - Backend en `compare_pipelines` (main.py): el parseo de findings ya existe server-side (alimenta `findings_count`); se extrae `finding_id` de cada finding y se comparan runs ADYACENTES en orden cronológico (N vs N-1): `new` = ids de N no en N-1, `fixed` = ids de N-1 no en N, `persistent` = comunes. Primera run: listas vacías. Findings NULL/corrupto legacy = conjunto vacío (coherente con `findings_count=0`).
+  - Respuesta: cada run lleva `new`, `fixed`, `persistent`, listas de `{finding_id, severity, title}` (id = identidad; severity+title para mostrar; sin evidence completa para no inflar). Siempre incluidas, SIN flag opcional.
+  - Frontend en `showTargetEvolution` (index.html): badges con conteos en la tabla de evolución (p. ej. "+2 new / 1 fixed") + panel desplegable por run listando new/fixed/persistent con title y severity. Sin librerías nuevas.
+  - Tests: 2-3 tests con runs sintéticas, DB temporal (monkeypatch `models.DB_PATH`, sin red): delta correcto entre dos runs consecutivas; primera run con delta vacío; findings NULL legacy = conjunto vacío sin romper.
+  - Leer ANTES de tocar nada: `finding_id` en `backend/findings.py` (identidad estable — verificar cómo se genera para asegurar que el mismo finding comparte id entre runs), `compare_pipelines` en main.py, y la tabla/función de evolución en index.html.
+- Commit `feat:`, suite verde antes de push. Al cerrar sesión: actualizar registro + footer con el siguiente micro-paso.
+- Siguiente micro-paso: implementar 3b según este diseño. Al cerrarlo, arrancar 3E sub-micro-paso 1 (CLI headless).
+
 ## 7. Reglas y restricciones del proyecto (NO VIOLAR)
 
 1. **NO emojis, flechas de texto ni símbolos de color** en ninguna salida, nota, script o commit (regla global del usuario). Escribir las palabras.
@@ -355,9 +366,8 @@ M5 Stick + CC1101 + nRF24 (Bruce), WiFi Marauder ESP32 v6, LilyGo T-Embed + Bus 
 
 **PROMPT PARA LA PRÓXIMA SESIÓN** (arrancar con contexto nuevo):
 Eres el agente de sec-dashboard. Primero lee este archivo entero (la sección 7 son reglas NO VIOLAR). Estado: Fase 1 completa salvo F1-FAVICON (backlog opcional, decisión Opción A registrada arriba); **Fase 2 COMPLETA**: Full Depth pipeline (`a0cf16a`), reporte ejecutivo PDF (`10ed28f`, `generate_executive_pdf` + endpoint `/api/pipelines/{id}/executive-pdf`), comparativa histórica (`165af5d`, `GET /api/pipelines/compare?target_id=N` + vista de evolución con sparkline canvas en History); suite 146 tests en verde, ruff limpio; master == origin/master. El bug cosmético del sidebar (35 tools hardcodeadas) quedó CERRADO en `165af5d`: el contador ahora es dinámico desde `/api/tools`.
-Tarea: **arrancar Phase 3**. Opciones registradas, decisión del usuario al arrancar:
-1. **3E** (la recomendada, primera de la Fase 3): CLI headless (`python -m backend.cli --target ... --pipeline nuclear --json`), dark mode persistente y búsqueda en History.
-2. **Micro-paso opcional 3b** (bonus del diseño de comparativa, ver entrada "Comparativa histórica: diseño aprobado"): delta new/fixed/persistent por `finding_id` entre runs adyacentes en la vista de evolución (el endpoint base ya existe y los tests lo cubren; el blob crudo de findings NO viaja al cliente hoy — el delta se haría server-side en `compare` o con un parámetro opcional).
-Antes de tocar nada: leer `backend/main.py` (endpoints + `_persist_pipeline_result`), `backend/pipeline.py` y la vista History del frontend (`renderHistoryPage`/`showTargetEvolution` en index.html). Para el CLI headless, estudiar cómo invocar `PipelineRunner` fuera del HTTP (ya existe como clase autónoma; ver `create_pipeline` en main.py por el patrón de uso).
+Tarea: **micro-paso 3b — delta new/fixed/persistent por `finding_id` en la comparativa** (decisión de ruta registrada arriba: 3b primero para cerrar Phase 2, luego 3E). DISEÑO APROBADO completo en la entrada "Phase 3: decisión de ruta" de la sección 6: backend en `compare_pipelines` (N vs N-1 cronológico; runs llevan `new`/`fixed`/`persistent` como listas de `{finding_id, severity, title}`, siempre incluidas sin flag; NULL/corrupto = conjunto vacío), frontend badges de conteos + panel desplegable por run en `showTargetEvolution`, 2-3 tests con DB temporal.
+Después de cerrar 3b: **3E** en sub-micro-pasos — (1) CLI headless (`python -m backend.cli --target ... --pipeline nuclear --json`), (2) dark mode persistente, (3) búsqueda en History. Para el CLI estudiar cómo invocar `PipelineRunner` fuera del HTTP (clase autónoma; ver `create_pipeline` en main.py por el patrón de uso).
+Antes de tocar nada: leer `finding_id` en `backend/findings.py` (identidad estable entre runs), `compare_pipelines` en main.py y la vista de evolución en index.html.
 Reglas: MVP sin dependencias nuevas, tests sin red, commits `feat:`/`fix:`, push solo con suite verde, sin emojis.
 Al cerrar sesión: actualizar las tablas/sección 6 de este archivo y el footer con el siguiente micro-paso.
