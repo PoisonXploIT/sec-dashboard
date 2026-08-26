@@ -13,9 +13,9 @@
 - **Repo local**: `C:\Users\Sammi\sec-dashboard`
 - **Repo remoto**: `https://github.com/PoisonXploIT/sec-dashboard.git` (origin, rama `master`)
 - **Deploy productivo**: Railway, dominio `sec.sammideblas.com` (Cloudflare Access + API key).
-- **Último commit**: `57057bf` — "fix(ssl-deep): DER cert fallback + prod smoke fixes"
-- **Fecha del commit**: 2026-08 (sesión de Fase 0.4).
-- **Estado del plan**: Fase 0 COMPLETA (0.1, 0.2, 0.3 y 0.4). Siguiente: Fase 1 — tools de profundidad.
+- **Último commit**: `3fdbcfe` — "fix: F1-DNS SPKI parser walks RSAPublicKey modulus (real-world DKIM keys)"
+- **Fecha del commit**: 2026-08-26 (F1-DNS + revisión).
+- **Estado del plan**: Fase 1 completa salvo F1-FAVICON (backlog opcional Fase 2/3, decisión Opción A). Siguiente: Fase 2 — Full Depth pipeline.
 
 ### Comandos de referencia (siempre desde el repo)
 
@@ -80,8 +80,8 @@ Estado por tarea (actualizar esta tabla al cerrar CADA sesión; la más avanzada
 | F1-TAKEOVER | Subdomain Takeover | HECHO (`4454b14`) | Handler `subdomain_takeover` en tools/network.py: candidatos desde `ct_logs` (crt.sh, cap 50), resuelve CNAME con dnspython y sondea HTTP. Dangling = sin A record, inalcanzable o 404/503 contra `.github.io`/`.herokuapp.com`/S3 (`amazonaws.com`). Adapter: dangling = CRITICAL dedup por sub. |
 | F1-SECRETS | Secret Leak Scanner | HECHO (`56cbc67`) | Handler `secret_leak_scan` en tools/web.py: known-path scanning — 18 rutas JS fijas + `/.git/HEAD` (+config y logs/HEAD como evidencia extra) + `/robots.txt`. Patterns TruffleHog-style sin dependencias (AWS, GitHub, Slack, Stripe, Google, private keys, tokens genéricos MEDIUM, débiles LOW); evidencia redactada. Adapter: `.git/` = CRITICAL, platform keys = HIGH, dedup por source+type+evidence, cap 20. **Desviación registrada**: las rutas `/wp-content/plugins|themes/**/*.js` del diseño quedaron fuera porque no son enumerables sin crawl; ver registro. |
 | F1-SSL | SSL Deep Analyzer | HECHO (`ff6f79b` + fix `57057bf`) | Handler `ssl_deep_analyzer` en tools/network.py (stdlib-only ssl/socket): probes de TLS 1.0/1.1/1.2/1.3 con contextos restringidos por OP_NO_*, sondas de ciphers débiles (RC4/DES/3DES/NULL vía set_ciphers, solo reporta lo realmente negociado), HSTS por GET HTTP/1.0 crudo sobre TLS, OCSP stapling con ClientHello manual (ext status_request RFC 6066) y grade A+ a F por caps discretos. Reader ASN.1/DER puro como fallback cuando getpeercert() texto devuelve {} (CN subject/issuer, fechas, SAN, AIA OCSP). Smoke prod: A+ en sec.sammideblas.com. Adapter: legacy/weak-cipher/expired = HIGH, self-signed/no-PFS/HSTS ausente = MEDIUM, hsts_short/cert_expiring/ocsp = LOW. |
-| F1-DNS | DNS Zone Hygiene | PENDIENTE | SPF permisivo (+all), DKIM selector brute, DMARC p=none, DNSKEY débil. |
-| F1-FAVICON | Favicon/Stack Fingerprinting | PENDIENTE | Hashes de favicons + paths estáticos para versiones exactas. |
+| F1-DNS | DNS Zone Hygiene | HECHO (`145e9a3` + fix `3fdbcfe`) | Handler `dns_zone_hygiene` en tools/emailsec.py (dnspython, ya registrada): SPF (+all HIGH, múltiples v=spf1 MEDIUM, sin -all terminal LOW, ausente MEDIUM), DMARC (ausente/p=none MEDIUM, sp débil y pct<100 LOW), DKIM brute de 13 selectores con fuerza de clave SPKI propia (RSA <1024 HIGH, 1024–2047 LOW, P-256 por OID RFC 6945), DNSKEY (MPI del Public Key; ECDSAP256=256). Best-effort: "missing" solo con respuesta definitiva (ok/noanswer), nunca por timeout. Fix `3fdbcfe`: SPKI real de RFC 5280 (el parser ahora recorre RSAPublicKey hasta el INTEGER modulus; antes leía el blob entero, 1024→1134 bits). |
+| F1-FAVICON | Favicon/Stack Fingerprinting | BACKLOG (Fase 2/3) | Decisión Opción A del 2026-08-26: se salta para arrancar Phase 2; hashes de favicons + paths estáticos, reanudar si el pipeline lo justifica. |
 
 Reglas de ejecución por tool (repetir para cada ID):
 1. Handler en el módulo Python adecuado bajo `backend/tools/` (patrón existente, sin binarios externos).
@@ -285,7 +285,12 @@ Convención: cada sesión añade una entrada al FINAL de la lista (la más recie
 - Implementado (dnspython ya estaba en requirements desde F1-TAKEOVER; sin dependencias nuevas): SPF (TXT apex) — `+all` = HIGH, múltiples v=spf1 = MEDIUM, sin `-all` terminal = LOW, ausente = MEDIUM; DMARC (`_dmarc.`) — ausente = MEDIUM, `p=none` = MEDIUM, `sp=` más débil que `p=` = LOW, `pct<100` con quarantine/reject = LOW; DKIM — brute de 13 selectores comunes en paralelo (gather), sin key = MEDIUM, key vacía = LOW, RSA <1024 bits = HIGH, 1024–2047 = LOW; DNSKEY (apex) — RSA <1024 = HIGH, 1024–2047 = LOW, ECDSAP256 (alg 5) = 256 bits.
 - Fuerza de clave: SPKI DER propio (`_spki_key_bits`: OID rsaEncryption → longitud exacta del MPI; ecdsa-with-SHA256 → P-256 por RFC 6945) para el `p=` de DKIM; `_dnskey_bits` sobre el campo Public Key del RDATA (MPI base-128 para alg 1/3). Unknown → nunca se marca débil.
 - Best-effort: cada query devuelve status (`ok`/`nxdomain`/`noanswer`/`error`); las conclusiones de "missing" solo salen con respuesta definitiva, NUNCA por timeout; apex NXDOMAIN → error limpio (patrón caa_checker); IP → error.
-- Siguiente micro-paso: Phase 2 (Full Depth pipeline) — ver PLAN.md.
+- Siguiente micro-paso: Phase 2 (Full Depth pipeline) — ver sección Fase 2 de este archivo.
+
+### 2026-08-26 — Revisión F1-DNS: fix SPKI real-world + decisión de ruta (Opción A)
+- Fix `3fdbcfe` (revisión del usuario): `_spki_key_bits` leía el contenido del BIT STRING completo como número; en un SPKI real de RFC 5280 ese campo contiene RSAPublicKey SEQUENCE {modulus, exponent}. Un vector realista RSA-1024 devolvía 1134 bits → una key real de 1024 caía en legacy (LOW) en vez de weak (HIGH). Ahora recorre la SEQUENCE y lee el INTEGER modulus. Los tests ahora construyen SPKI estándar (antes usaban MPI crudo, que pasaba por casualidad); `_dnskey_bits` verificado OK contra dnspython (`r.publickey` ya es el campo Public Key crudo) y su docstring quedó aclarada (big-endian two's-complement = el base-128 MPI de RFC 4034).
+- Suite 136 en verde, ruff limpio.
+- Decisión de ruta (Opción A, la recomendada): F1-FAVICON pasa a backlog opcional de Fase 2/3 y se arranca Phase 2 Full Depth pipeline. Queda registrada para que la próxima sesión no tenga que releer el plan.
 
 ## 7. Reglas y restricciones del proyecto (NO VIOLAR)
 
@@ -316,4 +321,11 @@ M5 Stick + CC1101 + nRF24 (Bruce), WiFi Marauder ESP32 v6, LilyGo T-Embed + Bus 
 
 ---
 
-*Última actualización: 2026-08-26, post-F1-DNS `145e9a3` (suite 136 tests en verde; ruff limpio). Próxima sesión: Phase 2 Full Depth pipeline — ver PLAN.md.*
+*Última actualización: 2026-08-26, post-revisión F1-DNS `3fdbcfe` (suite 136 tests en verde; ruff limpio). master == origin/master.*
+
+**PROMPT PARA LA PRÓXIMA SESIÓN** (arrancar con contexto nuevo):
+Eres el agente de sec-dashboard. Primero lee este archivo entero (la sección 7 son reglas NO VIOLAR). Estado: Fase 1 completa salvo F1-FAVICON (backlog opcional Fase 2/3 por decisión Opción A registrada arriba); suite 136 tests en verde, ruff limpio; master == origin/master en `3fdbcfe`.
+Tarea: **Phase 2 — Full Depth pipeline** (ver "Fase 2" de la sección 3): orquestar el pipeline `subdomain_enum → subdomain_takeover → tech_detector → cve_correlation → secret_leak_scan` reutilizando los handlers existentes; el scoring por target 0–100 ya existe (`score_findings`) y 0.4 ya persiste findings/score en pipelines.
+Antes de tocar nada: leer `backend/pipeline.py`, `backend/scanner.py` y `PIPELINES` de `backend/config.py` para ver qué estructura ya hay (no reescribir lo que existe).
+Reglas: MVP sin dependencias nuevas, tests sin red, commits `feat:`/`fix:`, push solo con suite verde, sin emojis.
+Al cerrar sesión: actualizar las tablas/sección 6 de este archivo y el footer con el siguiente micro-paso.
