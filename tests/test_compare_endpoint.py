@@ -93,3 +93,72 @@ def test_compare_parses_legacy_rows_without_score_or_findings(tmp_path, monkeypa
     assert res["runs"][0]["findings_count"] == 0
     assert res["runs"][1]["score"] == 7
     assert res["runs"][1]["findings_count"] == 0
+
+
+def _finding(fid: str, severity: str = "medium", title: str = "") -> dict:
+    return {"finding_id": fid, "severity": severity, "title": title or f"t-{fid}"}
+
+
+def test_compare_delta_between_consecutive_runs(tmp_path, monkeypatch):
+    import backend.main as main
+
+    monkeypatch.setattr(models, "DB_PATH", tmp_path / "compare.db")
+    _run(models.init_db())
+
+    a = _finding("aaa111", "high", "HSTS missing")
+    b = _finding("bbb222", "low", "Weak DKIM key")
+    c = _finding("ccc333", "critical", "Exposed .git")
+    _run(_seed([
+        {"mode": "fast", "findings": json.dumps([a, b]), "score": 30,
+         "started_at": "2026-08-01T10:00:00"},
+        {"mode": "deep", "findings": json.dumps([a, c]), "score": 50,
+         "started_at": "2026-08-02T10:00:00"},
+        {"mode": "full_depth", "findings": json.dumps([c]), "score": 70,
+         "started_at": "2026-08-03T10:00:00"},
+    ]))
+
+    res = _run(main.compare_pipelines(target_id=1))
+    runs = res["runs"]
+
+    # First run: baseline, all delta lists empty.
+    assert runs[0]["new"] == [] and runs[0]["fixed"] == [] and runs[0]["persistent"] == []
+
+    # Run 2 vs run 1: a persists, b is fixed, c is new.
+    assert [it["finding_id"] for it in runs[1]["new"]] == ["ccc333"]
+    assert [it["finding_id"] for it in runs[1]["fixed"]] == ["bbb222"]
+    assert [it["finding_id"] for it in runs[1]["persistent"]] == ["aaa111"]
+    # Display fields travel with each entry (no full evidence).
+    assert runs[1]["new"][0] == {"finding_id": "ccc333", "severity": "critical",
+                                "title": "Exposed .git"}
+
+    # Run 3 vs run 2 (only adjacent runs are compared): a fixed, c persists.
+    assert [it["finding_id"] for it in runs[2]["new"]] == []
+    assert [it["finding_id"] for it in runs[2]["fixed"]] == ["aaa111"]
+    assert [it["finding_id"] for it in runs[2]["persistent"]] == ["ccc333"]
+
+
+def test_compare_delta_treats_null_and_corrupt_findings_as_empty_set(tmp_path, monkeypatch):
+    import backend.main as main
+
+    monkeypatch.setattr(models, "DB_PATH", tmp_path / "compare.db")
+    _run(models.init_db())
+
+    a = _finding("aaa111", "high")
+    # NULL legacy row -> empty set; corrupted JSON -> empty set; then a real run.
+    _run(_seed([
+        {"mode": "fast", "findings": None, "score": None,
+         "started_at": "2026-07-01T10:00:00"},
+        {"mode": "deep", "findings": "{corrupted", "score": 5,
+         "started_at": "2026-07-02T10:00:00"},
+        {"mode": "full_depth", "findings": json.dumps([a]), "score": 40,
+         "started_at": "2026-07-03T10:00:00"},
+    ]))
+
+    res = _run(main.compare_pipelines(target_id=1))
+    runs = res["runs"]
+    # NULL and corrupt rows stay empty sets without breaking the endpoint.
+    assert runs[0]["new"] == [] and runs[0]["fixed"] == [] and runs[0]["persistent"] == []
+    assert runs[1]["new"] == [] and runs[1]["fixed"] == [] and runs[1]["persistent"] == []
+    # The first run with real findings is all-new against the empty set.
+    assert [it["finding_id"] for it in runs[2]["new"]] == ["aaa111"]
+    assert runs[2]["fixed"] == [] and runs[2]["persistent"] == []

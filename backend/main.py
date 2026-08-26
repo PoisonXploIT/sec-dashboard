@@ -888,7 +888,10 @@ async def compare_pipelines(target_id: int):
 
     Returns each run with parsed findings_count and score so the frontend can
     render the evolution table + sparkline without storing raw JSON clientside.
-    MVP scope: no per-finding delta (new/fixed/persistent) -- see SEGUIMIENTO.md.
+    Each run also carries the per-finding delta vs the previous run (N-1):
+    new / fixed / persistent matched by finding_id (stable since the
+    deterministic id in findings.py). First run: empty lists. Legacy rows
+    with NULL or corrupted findings are treated as an empty set.
     """
     db = await get_db()
     try:
@@ -906,11 +909,37 @@ async def compare_pipelines(target_id: int):
         await db.close()
 
     runs = []
+    prev_items: list[dict] = []
+    first_run = True
     for row in rows:
         try:
-            findings_count = len(json.loads(row["findings"] or "[]"))
+            parsed = json.loads(row["findings"] or "[]")
+            if not isinstance(parsed, list):
+                parsed = []
         except (TypeError, json.JSONDecodeError):
-            findings_count = 0
+            parsed = []
+        findings_count = len(parsed)
+        # Identity per finding: id + display fields only (no full evidence).
+        items = [
+            {
+                "finding_id": str(f.get("finding_id", "")),
+                "severity": f.get("severity", ""),
+                "title": f.get("title", ""),
+            }
+            for f in parsed if isinstance(f, dict) and f.get("finding_id")
+        ]
+        # First run has no previous run to compare against: empty lists.
+        if first_run:
+            delta = {"new": [], "fixed": [], "persistent": []}
+            first_run = False
+        else:
+            prev_ids = {it["finding_id"] for it in prev_items}
+            cur_ids = {it["finding_id"] for it in items}
+            delta = {
+                "new": [it for it in items if it["finding_id"] not in prev_ids],
+                "fixed": [it for it in prev_items if it["finding_id"] not in cur_ids],
+                "persistent": [it for it in items if it["finding_id"] in prev_ids],
+            }
         score = row["score"]
         if score is not None:
             try:
@@ -922,9 +951,13 @@ async def compare_pipelines(target_id: int):
             "mode": row["mode"],
             "score": score,
             "findings_count": findings_count,
+            "new": delta["new"],
+            "fixed": delta["fixed"],
+            "persistent": delta["persistent"],
             "started_at": row["started_at"],
             "finished_at": row["finished_at"],
         })
+        prev_items = items
     return {
         "target_id": target_id,
         "target_name": target_row["name"],

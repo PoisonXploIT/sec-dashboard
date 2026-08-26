@@ -119,3 +119,28 @@ def test_score_bounds_and_monotonicity():
     # Cap at 100.
     many = [Finding(tool="t", category="c", severity=Severity.CRITICAL, title="x") for _ in range(50)]
     assert score_findings(many) == 100
+
+
+def test_finding_id_is_stable_across_runs():
+    # Same tool+category+severity+title must hash to the same id, so the
+    # historical comparison (new/fixed/persistent) can match findings between
+    # scans. The old random uuid4 broke this and was replaced by a content hash.
+    f1 = Finding(tool="header_analyzer", category="Web Security",
+                 severity=Severity.MEDIUM, title="Missing security header: X")
+    f2 = Finding(tool="header_analyzer", category="Web Security",
+                 severity=Severity.MEDIUM, title="Missing security header: X")
+    assert f1.finding_id == f2.finding_id
+    assert len(f1.finding_id) == 12
+
+    # A different title (or severity) is a different finding.
+    other = Finding(tool="header_analyzer", category="Web Security",
+                    severity=Severity.MEDIUM, title="Missing security header: Y")
+    assert f1.finding_id != other.finding_id
+    sev_changed = Finding(tool="header_analyzer", category="Web Security",
+                          severity=Severity.LOW, title="Missing security header: X")
+    assert f1.finding_id != sev_changed.finding_id
+
+    # Adapters may still pin an explicit id when they know a better key.
+    pinned = Finding(tool="t", category="c", severity=Severity.HIGH,
+                     title="x", finding_id="explicit-id")
+    assert pinned.finding_id == "explicit-id"

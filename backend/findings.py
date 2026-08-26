@@ -12,8 +12,8 @@ remediation. This is the base for:
 """
 from __future__ import annotations
 
+import hashlib
 import time
-import uuid
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 
@@ -50,8 +50,17 @@ class Finding:
     confidence: float = 1.0          # 0.0 - 1.0
     remediation: str = ""
     target: str = ""
-    finding_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
+    finding_id: str = ""
     timestamp: float = field(default_factory=time.time)
+
+    def __post_init__(self):
+        # Stable identity across runs: the same tool+category+severity+title
+        # hashes to the same id, so historical comparison (new/fixed/persistent)
+        # can match findings between scans. Adapters may pass an explicit
+        # finding_id when they know a better natural key.
+        if not self.finding_id:
+            raw = "|".join((self.tool, self.category, self.severity.value, self.title))
+            self.finding_id = hashlib.sha1(raw.encode("utf-8")).hexdigest()[:12]
 
     def to_dict(self) -> dict:
         d = asdict(self)

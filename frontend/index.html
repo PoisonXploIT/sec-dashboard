@@ -1480,13 +1480,41 @@
                 <div class="card-header"><div class="card-title">Evolucion -- ${esc(data.target_name||'')} <span style="color:var(--text-muted);font-size:12px">${esc(data.target_host||'')}</span></div><span style="font-size:12px;color:var(--text-muted)">${runs.length} runs</span></div>
                 ${runs.length ? `
                     <canvas id="evolution-sparkline" style="width:100%;height:96px;display:block;margin-bottom:16px"></canvas>
-                    <table><thead><tr><th>#</th><th>Run</th><th>Mode</th><th>Started</th><th>Findings</th><th>Score</th></tr></thead><tbody>
-                        ${runs.map((r, i) => `<tr><td style="color:var(--text-muted);font-size:12px">${i+1}</td><td>${r.id}</td><td><strong>${esc(r.mode)}</strong></td><td style="font-size:12px;color:var(--text-muted)">${r.started_at ? new Date(r.started_at).toLocaleString() : ''}</td><td>${r.findings_count ?? 0}</td><td>${r.score === null || r.score === undefined ? '<span style="color:var(--text-muted)">n/a</span>' : `<strong>${r.score}</strong>`}</td></tr>`).join('')}
+                    <table><thead><tr><th>#</th><th>Run</th><th>Mode</th><th>Started</th><th>Findings</th><th>Score</th><th>Delta vs anterior</th></tr></thead><tbody>
+                        ${runs.map((r, i) => {
+                            const nw = (r.new||[]).length, fx = (r.fixed||[]).length, ps = (r.persistent||[]).length;
+                            const deltaCell = i > 0
+                                ? `<a href="#" style="cursor:pointer;text-decoration:underline;font-size:12px" title="Ver detalle de new/fixed/persistent" onclick="toggleEvolutionDelta(${r.id});return false">+${nw} new / ${fx} fixed / ${ps} persistent</a>`
+                                : `<span style="color:var(--text-muted);font-size:12px">baseline</span>`;
+                            const detail = i > 0 ? evoDeltaDetail(r) : '';
+                            return `<tr><td style="color:var(--text-muted);font-size:12px">${i+1}</td><td>${r.id}</td><td><strong>${esc(r.mode)}</strong></td><td style="font-size:12px;color:var(--text-muted)">${r.started_at ? new Date(r.started_at).toLocaleString() : ''}</td><td>${r.findings_count ?? 0}</td><td>${r.score === null || r.score === undefined ? '<span style="color:var(--text-muted)">n/a</span>' : `<strong>${r.score}</strong>`}</td><td>${deltaCell}</td></tr>${detail}`;
+                        }).join('')}
                     </tbody></table>
                 ` : `<div class="empty-state"><h3>Sin pipelines para este target</h3><p>Corre un pipeline y vuelve aqui para ver la evolucion entre scans.</p></div>`}
             </div>`;
 
         if (runs.length) drawScoreSparkline(document.getElementById('evolution-sparkline'), runs);
+    }
+
+    // Expandable new/fixed/persistent detail for one evolution row (3b delta).
+    function evoSevClass(sev) {
+        const s = String(sev || '').toLowerCase();
+        if (s === 'critical' || s === 'high') return 'tag-red';
+        if (s === 'medium' || s === 'low') return 'tag-yellow';
+        return 'tag';
+    }
+    function evoDeltaList(label, items) {
+        const body = items.length
+            ? items.map(it => `<div style="margin:2px 0"><span class="tag ${evoSevClass(it.severity)}">${esc(String(it.severity || '').toUpperCase())}</span> <span style="font-size:12px">${esc(it.title)}</span></div>`).join('')
+            : '<span style="color:var(--text-muted);font-size:12px">(none)</span>';
+        return `<div style="margin-bottom:8px"><strong>${label}</strong>${body}</div>`;
+    }
+    function evoDeltaDetail(r) {
+        return `<tr id="evo-delta-${r.id}" style="display:none"><td colspan="7" style="background:var(--bg-tertiary);padding:8px 12px">${evoDeltaList('New', r.new||[])}${evoDeltaList('Fixed', r.fixed||[])}${evoDeltaList('Persistent', r.persistent||[])}</td></tr>`;
+    }
+    function toggleEvolutionDelta(id) {
+        const el = document.getElementById('evo-delta-' + id);
+        if (el) el.style.display = el.style.display === 'none' ? '' : 'none';
     }
 
     // Simple line chart of the 0-100 score per run, drawn on a plain <canvas> (no library).
@@ -1923,7 +1951,7 @@ search index=sec_dashboard (sourcetype=wifi:marauder OR sourcetype=m5stick:netwo
                     <p><strong>Search</strong>: Use the search bar to filter by tool name, target name, target host, or status. Filtering happens in real-time as you type.</p>
                     <p><strong>Pagination</strong>: Scan history is paginated (50 per page). Use <strong>Prev</strong> and <strong>Next</strong> buttons to navigate through older scans.</p>
                     <p><strong>Formatted pipeline results</strong>: When you click <strong>View</strong> on a pipeline, you see each tool's output formatted individually -- port tables, header grades, CVE cards, etc. -- not a raw JSON dump.</p>
-                    <p><strong>Target evolution</strong>: In the Pipelines tab, click a target name or the <strong>Evol</strong> button to open the historical comparison: every run of that target in chronological order with its score and findings count, plus a line chart of the 0-100 score across runs.</p>
+                    <p><strong>Target evolution</strong>: In the Pipelines tab, click a target name or the <strong>Evol</strong> button to open the historical comparison: every run of that target in chronological order with its score and findings count, plus a line chart of the 0-100 score across runs. Each row also shows the delta vs the previous run: how many findings are new, fixed or persistent (matched by finding_id); click it to expand the list with severity and title.</p>
                 </div>
             </div>
 
