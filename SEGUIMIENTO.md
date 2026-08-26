@@ -272,6 +272,14 @@ Convención: cada sesión añade una entrada al FINAL de la lista (la más recie
 - Observaciones del usuario (NO bloqueantes, aparcadas): (1) perf — probes TLS 1.0/1.1/1.2/1.3 + ciphers en serie; (2) HRR edge case no cubierto por tests; (3) HSTS sin seguir redirects (el GET crudo no sigue 301/302); (4) backlog refactor F1-SECRETS pendiente.
 - Decisión de la sesión: ANTES de arrancar F1-DNS, hacer el pase rápido de refactor de F1-SECRETS (~30 min): session compartida en `_secret_fetch` (hoy ~22 requests/scan con una session por URL) y `search` → `finditer` + dedup por posición en `_scan_text`. Después, F1-DNS.
 
+### 2026-08-26 — Pase rápido de refactor F1-SECRETS (cierre del backlog de 56cbc67)
+- Commit `93b0fe9`: sin cambios de comportamiento operativo, solo los dos puntos del backlog.
+  1. Session compartida: `_secret_fetch(url, session)` ya no crea `ClientSession`; la abre una sola vez `secret_leak_scan` (hoistada fuera del `gather`) y la pasa a los ~22 fetchs. Timeout total=8.0 por request viaja en la session.
+  2. `_scan_text`: `search` → `finditer`; un archivo con varios secretos ahora los reporta todos. Dedup por posición: dos patterns cuyo span se solapan (p. ej. `password = "AKIA..."` cae en `aws_access_key_id` y en `weak_match`) se reportan una sola vez, gana el pattern que aparece primero en la tabla (tier alto antes que bajo).
+- Tests: 5 nuevos (120 en total, sin red) — un solo `_FakeSession` construido para todas las URLs (el `_secret_fetch` real corre contra él), fetch con excepción degradando a not-found sin romper el scan, archivo con dos secretos de plataformas distintas, dedup por posición, texto limpio.
+- Sin dependencias nuevas; `cryptography` sigue sin estar registrada (MVP stdlib-only intacto).
+- Siguiente micro-paso: F1-DNS (DNS Zone Hygiene).
+
 ## 7. Reglas y restricciones del proyecto (NO VIOLAR)
 
 1. **NO emojis, flechas de texto ni símbolos de color** en ninguna salida, nota, script o commit (regla global del usuario). Escribir las palabras.
@@ -301,4 +309,4 @@ M5 Stick + CC1101 + nRF24 (Bruce), WiFi Marauder ESP32 v6, LilyGo T-Embed + Bus 
 
 ---
 
-*Última actualización: 2026-08-26, post-F1-SSL fix `57057bf` (suite 115 tests en verde; smoke prod A+). Próxima sesión: leer este archivo entero y hacer el pase de refactor F1-SECRETS (`_secret_fetch` session compartida + `_scan_text` finditer/dedup), y después arrancar F1-DNS (DNS Zone Hygiene).*
+*Última actualización: 2026-08-26, post-refactor F1-SECRETS `93b0fe9` (suite 120 tests en verde; ruff limpio). Próxima sesión: leer este archivo entero y arrancar F1-DNS (DNS Zone Hygiene) — SPF permisivo (+all), DKIM selector brute, DMARC p=none, DNSKEY débil.*
