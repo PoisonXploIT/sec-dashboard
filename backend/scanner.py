@@ -14,7 +14,7 @@ from backend.tools.network import (
 from backend.tools.web import (
     header_analyzer, dir_fuzzer, sqli_scanner, xss_scanner,
     cors_checker, tech_detector, csp_analyzer, open_redirect,
-    cve_correlation,
+    cve_correlation, secret_leak_scan,
 )
 from backend.tools.vuln import cve_search, hash_checker, password_audit
 from backend.tools.system import network_connections, process_monitor, system_info
@@ -43,6 +43,7 @@ HANDLERS: dict[str, Callable] = {
     "tech_detector": tech_detector,
     "csp_analyzer": csp_analyzer,
     "open_redirect": open_redirect,
+    "secret_leak_scan": secret_leak_scan,
     # Vulnerability
     "cve_search": cve_search,
     "cve_correlation": cve_correlation,

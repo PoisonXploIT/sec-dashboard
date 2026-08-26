@@ -309,6 +309,52 @@ def _adapt_subdomain_takeover(result: dict, target: str) -> list[Finding]:
     return out[:20]
 
 
+@register("secret_leak_scan")
+def _adapt_secret_leak_scan(result: dict, target: str) -> list[Finding]:
+    """Severity by tier: exposed .git/ is CRITICAL, platform keys HIGH.
+
+    Dedup key = source + type + redacted evidence, so the same secret found
+    in two files stays separate but one file with two matches of a type
+    (first-match-wins in the handler) never duplicates.
+    """
+    out: list[Finding] = []
+    seen: set[str] = set()
+    for p in result.get("git_exposed_paths", []):
+        key = f"{p}|git|"
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(Finding(
+            tool="secret_leak_scan", category="Web Security",
+            severity=Severity.CRITICAL,
+            title=f"Exposed .git repository object: {p}",
+            description=(
+                "The target serves Git metadata, which can leak the full source "
+                "history including previously committed credentials."
+            ),
+            evidence={"path": p},
+            remediation="Remove public access to /.git/ (server rule) and rotate any secrets that were ever committed.",
+            target=target, confidence=0.95,
+        ))
+    for f in result.get("findings", []):
+        key = f"{f.get('source', '')}|{f.get('type', '')}|{f.get('evidence', '')}"
+        if key in seen:
+            continue
+        seen.add(key)
+        tier = f.get("tier", "")
+        sev = {"high": Severity.HIGH, "medium": Severity.MEDIUM, "low": Severity.LOW}.get(tier, Severity.MEDIUM)
+        out.append(Finding(
+            tool="secret_leak_scan", category="Web Security",
+            severity=sev,
+            title=f"Potential secret exposed ({f.get('type', '')}) in {f.get('source', '')}",
+            description=f"High-confidence pattern match ({tier} tier) in served content.",
+            evidence={"source": f.get("source"), "type": f.get("type"), "match": f.get("evidence")},
+            remediation="Revoke/rotate the exposed credential and remove it from the served file or repository.",
+            target=target, confidence=0.9,
+        ))
+    return out[:20]
+
+
 @register("tech_detector")
 def _adapt_tech_detector(result: dict, target: str) -> list[Finding]:
     """Informational only: detected stack feeds later CVE correlation."""

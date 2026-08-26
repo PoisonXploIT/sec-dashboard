@@ -132,6 +132,13 @@ TOOLS = {
         "icon": "->",
         "timeout": 30,
     },
+    "secret_leak_scan": {
+        "name": "Secret Leak Scan",
+        "category": "Web Security",
+        "description": "Exposed secrets: .git/ access, API keys/tokens in known JS paths and robots.txt",
+        "icon": "SK",
+        "timeout": 90,
+    },
     # ─── Vulnerability ───
     "cve_search": {
         "name": "CVE Search",

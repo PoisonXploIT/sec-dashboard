@@ -10,6 +10,8 @@ from typing import Any
 
 import aiohttp
 
+from backend.tools.osint import _is_ip
+
 
 # ── 9. Header Analyzer ─────────────────────────────────────────
 async def header_analyzer(url: str, **kw) -> dict:
@@ -895,4 +897,118 @@ async def open_redirect(url: str, **kw) -> dict:
         "findings": findings,
         "finding_count": len(findings),
         "parameters_tested": test_params,
+    }
+
+
+# ── 16. Secret Leak Scanner ────────────────────────────────────
+# Known-path scanning (MVP decision, see SEGUIMIENTO.md): fixed JS paths +
+# /.git/HEAD + /robots.txt. No crawling: wp-content plugin/theme assets are
+# not enumerable without a crawl and stay out of scope for now.
+_SECRET_JS_PATHS = [
+    "/main.js", "/app.js", "/bundle.js", "/vendor.js", "/common.js", "/site.js",
+    "/scripts/main.js", "/scripts/app.js", "/scripts/bundle.js",
+    "/js/main.js", "/js/app.js", "/js/bundle.js",
+    "/static/js/main.js", "/static/js/app.js", "/static/js/bundle.js",
+    "/assets/js/main.js", "/assets/js/app.js", "/assets/js/bundle.js",
+]
+_GIT_EVIDENCE_PATHS = ["/.git/HEAD", "/.git/config", "/.git/logs/HEAD"]
+
+# TruffleHog-style, high-confidence patterns only (no external deps).
+# Each entry: (finding_type, tier, compiled regex). Tiers:
+#   high   -> platform-specific keys (AWS/GitHub/Slack/Stripe/Google/private)
+#   medium -> generic token-like assignments in JS/robots.txt
+#   low    -> weak matches (password-ish assignments)
+_SECRET_PATTERNS = [
+    ("aws_access_key_id", "high", re.compile(r"(?i)\b(?:AKIA|ASIA|A3TQ)[A-Z0-9]{16}\b")),
+    ("github_token", "high", re.compile(r"\bgh[pousr]_[0-9A-Za-z]{14,255}|\bgithub_pat_[0-9A-Za-z]{14,255}\b")),
+    ("slack_token", "high", re.compile(r"\bxox[baprs]-\d{1,}-[A-Za-z0-9\-]{8,}\b")),
+    ("stripe_key", "high", re.compile(r"\bsk_live_[0-9A-Za-z]{16,}\b|\bwhsec_[0-9A-Za-z]{16,}\b")),
+    ("google_api_key", "high", re.compile(r"\bAIza[0-9A-Za-z\-_]{35}\b")),
+    ("private_key", "high", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY(?: BLOCK)?-----")),
+    ("generic_token", "medium", re.compile(
+        r"""(?i)\b(api[_-]?key|apikey|auth[_-]?token|access[_-]?token|client[_-]?secret|"""
+        r"""secret[_-]?key|private[_-]?key|session[_-]?token)\b\s*[:=]\s*["'][0-9A-Za-z_\-]{16,}["']""")),
+    ("weak_match", "low", re.compile(
+        r"""(?i)\b(password|passwd|pwd|db_pass)\b\s*[:=]\s*["'][^"']{8,}["']""")),
+]
+
+
+def _redact(value: str) -> str:
+    """Keep just enough of a match to identify it without storing the secret."""
+    v = value.strip()
+    if len(v) <= 6:
+        return "***"
+    return f"{v[:4]}***({len(v)})"
+
+
+def _scan_text(text: str, source: str, findings: list[dict]) -> None:
+    """Scan one fetched document against the pattern table (first match wins)."""
+    for ftype, tier, rx in _SECRET_PATTERNS:
+        m = rx.search(text)
+        if m:
+            findings.append({
+                "source": source,
+                "type": ftype,
+                "tier": tier,
+                "evidence": _redact(m.group(0)),
+            })
+            return
+
+
+async def _secret_fetch(url: str, timeout: float = 8.0) -> tuple[int | None, str]:
+    """GET one URL; (status, body). Unreachable hosts yield (None, "")."""
+    try:
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=timeout),
+            connector=aiohttp.TCPConnector(ssl=False)
+        ) as session:
+            async with session.get(url, allow_redirects=True) as resp:
+                return resp.status, (await resp.text(errors="ignore"))
+    except Exception:
+        return None, ""
+
+
+async def secret_leak_scan(target: str, **kw) -> dict:
+    """Scan a web target for exposed secrets (known-path MVP).
+
+    Fetches a fixed list of likely JS bundles, /.git/HEAD (plus config and
+    logs/HEAD as extra evidence when the repo is exposed) and /robots.txt,
+    then runs high-confidence TruffleHog-style patterns over the content.
+    Unreachable URLs degrade to "not found"; they never break the scan.
+    """
+    if not target.startswith(("http://", "https://")):
+        target = f"https://{target}"
+    parsed = urlparse(target)
+    host = (parsed.netloc or target).split("/")[0].split(":")[0].strip().lower()
+    if not host or _is_ip(host):
+        return {"target": host, "error": "Secret scan requires a domain, not an IP"}
+
+    js_urls = [f"{parsed.scheme}://{host}{p}" for p in _SECRET_JS_PATHS]
+    robots_url = f"{parsed.scheme}://{host}/robots.txt"
+    git_urls = [f"{parsed.scheme}://{host}{p}" for p in _GIT_EVIDENCE_PATHS]
+
+    fetched = await asyncio.gather(
+        *(_secret_fetch(u) for u in js_urls + [robots_url] + git_urls)
+    )
+    js_results = fetched[:len(js_urls)]
+    r_status, r_body = fetched[len(js_urls)]
+    git_results = fetched[len(js_urls) + 1:]
+
+    findings: list[dict] = []
+    for url, (status, body) in zip(js_urls, js_results):
+        if status == 200 and body:
+            _scan_text(body, url, findings)
+    if r_status == 200 and r_body:
+        _scan_text(r_body, robots_url, findings)
+
+    git_exposed = [p for p, (status, _body) in zip(_GIT_EVIDENCE_PATHS, git_results)
+                   if status == 200]
+
+    return {
+        "target": host,
+        "js_urls_checked": len(js_urls),
+        "robots_checked": r_status == 200,
+        "git_exposed_paths": git_exposed,
+        "findings": findings,
+        "count": len(findings) + len(git_exposed),
     }
