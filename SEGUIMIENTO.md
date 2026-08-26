@@ -13,9 +13,9 @@
 - **Repo local**: `C:\Users\Sammi\sec-dashboard`
 - **Repo remoto**: `https://github.com/PoisonXploIT/sec-dashboard.git` (origin, rama `master`)
 - **Deploy productivo**: Railway, dominio `sec.sammideblas.com` (Cloudflare Access + API key).
-- **Último commit de código**: `6f230b0` (3E sub-micro-paso 2: modo light dedicado) + docs de cierre.
+- **Último commit de código**: `8ef2853` (CLI enrichment: --tool individual, --list-tools, --list-pipelines) + docs de cierre.
 - **Fecha del commit**: 2026-08-26.
-- **Estado del plan**: Fase 1 completa salvo F1-FAVICON (backlog opcional, decisión Opción A). **Fase 2 COMPLETA**: Full Depth pipeline (`a0cf16a`), reporte ejecutivo PDF (`10ed28f`), comparativa histórica en History (`165af5d`). **Fase 3 / 3E CERRADA**: sub-micro-pasos 1 (CLI headless, `3da329e`), 2 (modo light dedicado, `6f230b0`) y 3 (búsqueda en History, `85f51f3`) completos. Pendiente: definir el siguiente micro-paso de Fase 3 (hardware M5/CC1101 o del plan).
+- **Estado del plan**: Fase 1 completa salvo F1-FAVICON (backlog opcional, decisión Opción A). **Fase 2 COMPLETA**: Full Depth pipeline (`a0cf16a`), reporte ejecutivo PDF (`10ed28f`), comparativa histórica en History (`165af5d`). **Fase 3 / 3E CERRADA**: sub-micro-pasos 1 (CLI headless, `3da329e`), 2 (modo light dedicado, `6f230b0`) y 3 (búsqueda en History, `85f51f3`) completos. **CLI enrichment completa** (`8ef2853`): `--tool TOOL_ID --target HOST` (run_tool directo), `--list-tools`, `--list-pipelines`, mutua exclusión `--tool`/`--pipeline`. Pendiente: definir el siguiente micro-paso de Fase 3 (hardware M5/CC1101 o del plan).
 
 ### Comandos de referencia (siempre desde el repo)
 
@@ -366,6 +366,16 @@ Convención: cada sesión añade una entrada al FINAL de la lista (la más recie
 - Verificación: suite **159** en verde, ruff limpio, compileall OK. master == origin/master @ `6f230b0`. **3E CERRADA** (pasos 1, 2 y 3).
 - Siguiente micro-paso: definir con el usuario — candidates: B WiFi Marauder v6 / CYD Marauder (reutiliza `wifi.py`, viewers ya exponen JSON, 1-2 h), C Bruce RF/BLE (nuevo `backend/tools/bruce.py`, requiere capturas reales de serial/formato), D HackRF / Bus Pirate (parsers `.c16` + I2C/SPI/UART, requiere capturas reales obligatorias).
 
+### 2026-08-26 — CLI enrichment completa (--tool individual + --list-tools + --list-pipelines)
+- Commit `8ef2853` (`backend/cli.py` + `tests/test_cli.py`, +249/-24). Decisión del usuario: enriquecer la CLI para dar libertad real a los servicios, sin abrir persistencia CLI (`--save`) ni hardware.
+- **`--tool TOOL_ID --target HOST`**: ejecuta `scanner.run_tool(tool_id, target)` directamente (no pipeline). Valida tool_id contra `scanner.HANDLERS` (desconocido → exit 2, "unknown tool"). Para tools especiales (hash_checker, password_audit, cve_search, system) el target es la entrada cruda, igual que en web; solo los pipelines validan host (`validate_target`). Salida: resumen texto (tool/target/status/elapsed/findings/score) o JSON con `--json`; fallo → exit 1 + error en stderr (JSON si `--json`).
+- **`--list-tools`**: tabla ID | NAME | CATEGORY | DESCRIPTION desde `config.TOOLS`, ordenada por categoría (orden del registro `CATEGORIES`) y luego nombre.
+- **`--list-pipelines`**: una fila por fase: MODE | PHASE | TOOLS.
+- **Mutua exclusión**: `--tool` + `--pipeline` → `parser.error` exit 2. Las acciones list son informativas, toman precedencia sobre el resto y no piden `--target`. Contratos previos intactos: target ausente en pipeline → exit 2; target solo espacios → `validate_target` exit 1.
+- **Backlog (sin tocar)**: `--save`/persistencia CLI (decisión de diseño propia: identidad del run en History), TUI (rich/curses), hardware B/C/D (C/D requieren capturas reales).
+- Tests: 11 nuevos con stubs de `scanner.run_tool` (incluido stub que lanza AssertionError si se ejecuta en acciones list); suite **170** en verde, ruff limpio, compileall OK.
+- Siguiente micro-paso: definir con el usuario — hardware B (WiFi Marauder v6 / CYD Marauder, reutiliza `wifi.py`, 1-2 h) u otra cosa del plan; la CLI de libertad queda cerrada.
+
 ## 7. Reglas y restricciones del proyecto (NO VIOLAR)
 
 1. **NO emojis, flechas de texto ni símbolos de color** en ninguna salida, nota, script o commit (regla global del usuario). Escribir las palabras.
@@ -395,10 +405,11 @@ M5 Stick + CC1101 + nRF24 (Bruce), WiFi Marauder ESP32 v6, LilyGo T-Embed + Bus 
 
 ---
 
-*Última actualización: 2026-08-26, Phase 2 CERRADA de verdad — Full Depth (`a0cf16a`) + executive PDF (`10ed28f`) + comparativa histórica con delta new/fixed/persistent (`165af5d` + `1376001`); **3E CERRADA**: sub-micro-pasos 1 CLI headless (`3da329e`), 2 modo light dedicado (`6f230b0`) y 3 búsqueda en History (`85f51f3`) completos; suite 159 tests en verde; ruff limpio. master == origin/master.*
+*Última actualización: 2026-08-26, Phase 2 CERRADA de verdad — Full Depth (`a0cf16a`) + executive PDF (`10ed28f`) + comparativa histórica con delta new/fixed/persistent (`165af5d` + `1376001`); **3E CERRADA**: sub-micro-pasos 1 CLI headless (`3da329e`), 2 modo light dedicado (`6f230b0`) y 3 búsqueda en History (`85f51f3`) completos; **CLI enrichment completa** (`8ef2853`): `--tool` individual + `--list-tools` + `--list-pipelines`; suite 170 tests en verde; ruff limpio. master == origin/master.*
 
 **PROMPT PARA LA PRÓXIMA SESIÓN** (arrancar con contexto nuevo):
-Eres el agente de sec-dashboard. Primero lee este archivo entero (la sección 7 son reglas NO VIOLAR). Estado: Fase 1 completa salvo F1-FAVICON (backlog opcional); **Fase 2 COMPLETA**: Full Depth pipeline (`a0cf16a`), executive PDF (`10ed28f`), comparativa histórica con delta new/fixed/persistent por `finding_id` determinista (`165af5d` + `1376001`, endpoint `GET /api/pipelines/compare?target_id=N` con runs que llevan `new`/`fixed`/`persistent` como listas de `{finding_id, severity, title}`; frontend: columna "Delta vs anterior" + panel desplegable en `showTargetEvolution`). **3E**: sub-micro-paso 1 hecho — CLI headless `python -m backend.cli --target ... [--pipeline ...] [--json]` (sin persistencia, decisión registrada); sub-micro-paso 3 hecho — `GET /api/pipelines/history?mode=&status=&q=` + selects en la pestaña Pipelines de History. Suite 159 tests en verde, ruff limpio; master == origin/master.
+Eres el agente de sec-dashboard. Primero lee este archivo entero (la sección 7 son reglas NO VIOLAR). Estado: Fase 1 completa salvo F1-FAVICON (backlog opcional); **Fase 2 COMPLETA**: Full Depth pipeline (`a0cf16a`), executive PDF (`10ed28f`), comparativa histórica con delta new/fixed/persistent por `finding_id` determinista (`165af5d` + `1376001`, endpoint `GET /api/pipelines/compare?target_id=N` con runs que llevan `new`/`fixed`/`persistent` como listas de `{finding_id, severity, title}`; frontend: columna "Delta vs anterior" + panel desplegable en `showTargetEvolution`). **3E**: sub-micro-paso 1 hecho — CLI headless `python -m backend.cli --target ... [--pipeline ...] [--json]` (sin persistencia, decisión registrada); sub-micro-paso 3 hecho — `GET /api/pipelines/history?mode=&status=&q=` + selects en la pestaña Pipelines de History. Suite 170 tests en verde, ruff limpio; master == origin/master.
+**CLI enrichment hecha** (`8ef2853`): `python -m backend.cli --tool dns_recon --target example.com [--json]` (run_tool directo; tools especiales toman target como entrada cruda), `--list-tools` (tabla por categoría+nombre) y `--list-pipelines` (fila por fase). Mutua exclusión `--tool`/`--pipeline` (exit 2); acciones list sin target y con precedencia. Pendientes en backlog: `--save`/persistencia CLI, TUI, hardware B/C/D.
 Tarea: **definir con el usuario el siguiente micro-paso de Fase 3**. Candidates del plan (ver sección 3): B WiFi Marauder v6 / CYD Marauder — reutiliza el patrón de `backend/tools/wifi.py` (`wifi_marauder_scan` ya existe; variante o renombrado), simple porque los viewers ya exponen JSON, estimación 1-2 h; C Bruce RF/BLE (SubGHz/nRF24/BLE) — nuevo `backend/tools/bruce.py`, REQUIERE capturas reales del serial/formato para validar parsers, media sesión a sesión completa; D HackRF / Bus Pirate — parsers de `.c16` e I2C/SPI/UART, requiere capturas reales obligatoriamente, sesión completa o más. Si se elige hardware C/D: pedir al usuario las capturas ANTES de escribir parsers.
 Backlog pendiente (pequeño): F1-FAVICON (opción A) y variables duales para los 36 rgba fijos si algún tint queda pálido en light.
 Reglas: MVP sin dependencias nuevas, tests sin red, commits `feat:`/`fix:`, push solo con suite verde, sin emojis.
