@@ -71,13 +71,24 @@ Dashboard de seguridad tipo "recon suite" con:
 | 0.4 | Refactor salidas: tools devuelven findings[] además del JSON legible, sin romper UI | HECHO |
 
 ### Fase 1 — Tools de profundidad (diferenciador)
-Prioridad: **Tech CVE Correlation** y **Subdomain Takeover** primero.
-- Subdomain Takeover: cruza CT logs + CNAMEs, detecta dangling NXDOMAIN hacia GitHub Pages, Heroku, S3.
-- Tech CVE Correlation: toma output de `tech_detector`, identifica versión, cruza contra NVD/CISA KEV.
-- Secret Leak Scanner: `.git/` expuesto, API keys, tokens en JS/robots.txt (regexs tipo TruffleHog).
-- SSL Deep Analyzer: grade A+–F (cipher suites, TLS 1.0/1.1, HSTS, OCSP stapling).
-- DNS Zone Hygiene: SPF permisivo (+all), DKIM selector brute, DMARC p=none, DNSKEY débil.
-- Favicon/Stack Fingerprinting: hashes de favicons + paths estáticos para versiones exactas.
+
+Estado por tarea (actualizar esta tabla al cerrar CADA sesión; la más avanzada marca el siguiente micro-paso):
+
+| ID | Tool | Estado | Notas / fuentes |
+|---|---|---|---|
+| F1-CVE | Tech CVE Correlation | PENDIENTE | Prioridad 1. Consume output de `tech_detector`, identifica versión, cruza contra NVD API + CISA KEV (fuentes externas permitidas). Adapter en findings.py con severity NVD y campo `cve`. |
+| F1-TAKEOVER | Subdomain Takeover | PENDIENTE | Prioridad 2. Cruza CT logs + CNAMEs; detecta dangling NXDOMAIN hacia GitHub Pages, Heroku, S3. |
+| F1-SECRETS | Secret Leak Scanner | PENDIENTE | `.git/` expuesto, API keys, tokens en JS/robots.txt (regexs tipo TruffleHog). |
+| F1-SSL | SSL Deep Analyzer | PENDIENTE | Grade A+ a F: cipher suites, TLS 1.0/1.1, HSTS, OCSP stapling. |
+| F1-DNS | DNS Zone Hygiene | PENDIENTE | SPF permisivo (+all), DKIM selector brute, DMARC p=none, DNSKEY débil. |
+| F1-FAVICON | Favicon/Stack Fingerprinting | PENDIENTE | Hashes de favicons + paths estáticos para versiones exactas. |
+
+Reglas de ejecución por tool (repetir para cada ID):
+1. Handler en el módulo Python adecuado bajo `backend/tools/` (patrón existente, sin binarios externos).
+2. Registro en `config.py` (`TOOLS`, `HANDLERS` en scanner) — los tests de config lo validan solos.
+3. Adapter `@register("tool_id")` en `findings.py` desde el día uno (findings/score ya viajan solos por pipeline/DB gracias a 0.4).
+4. Tests sin red (stubs/monkeypatch, convención de la suite) — suite sigue verde antes de commit.
+5. Commit con mensaje `feat: F1-<ID> ...`, push solo cuando la suite esté en verde; actualizar esta tabla y el registro de la sección 6.
 
 ### Fase 2 — Motor de severidad y scoring
 - Scoring por target 0–100 (agregación de findings). Base ya lista: `score_findings()` en findings.py.
@@ -192,7 +203,25 @@ Prioridad del plan: **Tech CVE Correlation** y **Subdomain Takeover** primero; l
 
 ---
 
-## 6. Reglas y restricciones del proyecto (NO VIOLAR)
+## 6. Registro de ejecuciones (append-only)
+
+Convención: cada sesión añade una entrada al FINAL de la lista (la más reciente abajo), con fecha, commits, qué se hizo y el siguiente micro-paso. No reescribir entradas antiguas; si algo cambia, añadir nota nueva.
+
+### 2026-08-17 — Auditoría + fixes base
+- Commits `724c205` hasta `1563544`: SSRF (C1), auth API key/Cloudflare Access (C2), M1 sin tracebacks, M2 MalwareBazaar, M3 race, M4 redacción, L1-L4 UX.
+- Documentado en `BUGS-AUDIT-2026-08-17.md`.
+
+### 2026-08-26 — Fase 0 (tests + modelo Finding + CI)
+- Commit `788bde5`: suite pytest (49 tests), `backend/findings.py` (9 adapters), CI ruff+pytest.
+- Siguiente micro-paso: tarea 0.4.
+
+### 2026-08-26 — Fase 0.4 completa (sesión interrumpida por apagón, recuperada sin pérdidas)
+- Apagón en mitad de 0.4: el código quedó íntegro en working tree sin commit; se recuperó leyendo este archivo.
+- Commits `bd5521e` (feat 0.4: findings/score en scanner, pipeline agregado, migración DB, persistencia) y `ba2d333` (docs). Push a origin/master hecho; CI + Railway desplegados a sec.sammideblas.com.
+- Suite: 55 tests en verde, ruff limpio.
+- Siguiente micro-paso: arrancar Fase 1 por F1-CVE (Tech CVE Correlation).
+
+## 7. Reglas y restricciones del proyecto (NO VIOLAR)
 
 1. **NO emojis, flechas de texto ni símbolos de color** en ninguna salida, nota, script o commit (regla global del usuario). Escribir las palabras.
 2. **Local-first**: priorizar herramientas/skills locales; el modelo se queda local; solo APIs externas como fuentes de datos (NVD, CISA KEV, HIBP, MalwareBazaar, etc.).
@@ -205,7 +234,7 @@ Prioridad del plan: **Tech CVE Correlation** y **Subdomain Takeover** primero; l
 
 ---
 
-## 7. Referencias
+## 8. Referencias
 
 - Documentación en `C:\Users\Sammi\Documents\Destino\PROYECTOS\SEC-DASHBOARD\`:
   - `Plan de Mejora y Expansión.md` (el plan original completo, con tablas de hardware)
@@ -221,4 +250,4 @@ M5 Stick + CC1101 + nRF24 (Bruce), WiFi Marauder ESP32 v6, LilyGo T-Embed + Bus 
 
 ---
 
-*Última actualización: sesión Fase 0.4 (commit bd5521e). Próxima sesión: leer este archivo, verificar CI/deploy en GitHub (sec.sammideblas.com) y arrancar Fase 1.*
+*Última actualización: 2026-08-26, post-Fase 0.4 (commit ba2d333). Próxima sesión: leer este archivo entero, verificar CI/deploy en GitHub, y arrancar F1-CVE según la tabla de Fase 1 y sus reglas por tool.*
