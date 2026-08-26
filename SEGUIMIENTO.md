@@ -13,7 +13,7 @@
 - **Repo local**: `C:\Users\Sammi\sec-dashboard`
 - **Repo remoto**: `https://github.com/PoisonXploIT/sec-dashboard.git` (origin, rama `master`)
 - **Deploy productivo**: Railway, dominio `sec.sammideblas.com` (Cloudflare Access + API key).
-- **Último commit**: `bd5521e` — "feat: Fase 0.4 — findings[] + score in tool results, pipeline aggregation and DB persistence"
+- **Último commit**: `9551c44` — "feat: F1-CVE — Tech CVE Correlation (stack vs NVD + CISA KEV) with findings adapter"
 - **Fecha del commit**: 2026-08 (sesión de Fase 0.4).
 - **Estado del plan**: Fase 0 COMPLETA (0.1, 0.2, 0.3 y 0.4). Siguiente: Fase 1 — tools de profundidad.
 
@@ -76,7 +76,7 @@ Estado por tarea (actualizar esta tabla al cerrar CADA sesión; la más avanzada
 
 | ID | Tool | Estado | Notas / fuentes |
 |---|---|---|---|
-| F1-CVE | Tech CVE Correlation | PENDIENTE | Prioridad 1. Consume output de `tech_detector`, identifica versión, cruza contra NVD API + CISA KEV (fuentes externas permitidas). Adapter en findings.py con severity NVD y campo `cve`. |
+| F1-CVE | Tech CVE Correlation | HECHO (`9551c44`) | Handler `cve_correlation` en tools/web.py: reutiliza `tech_detector`, extrae versiones del header Server, busca NVD por producto (top 8 techs) y marca CISA KEV. Adapter en findings.py: KEV = CRITICAL con campo `cve`, CVE critical/high = HIGH (medium/low descartados a propósito para no inflar el score). |
 | F1-TAKEOVER | Subdomain Takeover | PENDIENTE | Prioridad 2. Cruza CT logs + CNAMEs; detecta dangling NXDOMAIN hacia GitHub Pages, Heroku, S3. |
 | F1-SECRETS | Secret Leak Scanner | PENDIENTE | `.git/` expuesto, API keys, tokens en JS/robots.txt (regexs tipo TruffleHog). |
 | F1-SSL | SSL Deep Analyzer | PENDIENTE | Grade A+ a F: cipher suites, TLS 1.0/1.1, HSTS, OCSP stapling. |
@@ -221,6 +221,11 @@ Convención: cada sesión añade una entrada al FINAL de la lista (la más recie
 - Suite: 55 tests en verde, ruff limpio.
 - Siguiente micro-paso: arrancar Fase 1 por F1-CVE (Tech CVE Correlation).
 
+### 2026-08-26 — F1-CVE completa (Tech CVE Correlation)
+- Commit `9551c44`: tool `cve_correlation` (tools/web.py) + registro en config/scanner + adapter findings + 9 tests nuevos (64 en total, sin red: stubs de `tech_detector`, `_nvd_product_search`, `_fetch_kev`).
+- Decisiones: top 8 techs buscadas en NVD con filtro client-side por palabra del producto; KEV feed vía raw.githubusercontent (fallos de fuente no rompen el scan, se devuelve lo que haya); sorting KEV primero y luego CVSS desc.
+- Siguiente micro-paso: F1-TAKEOVER (Subdomain Takeover).
+
 ## 7. Reglas y restricciones del proyecto (NO VIOLAR)
 
 1. **NO emojis, flechas de texto ni símbolos de color** en ninguna salida, nota, script o commit (regla global del usuario). Escribir las palabras.
@@ -250,4 +255,4 @@ M5 Stick + CC1101 + nRF24 (Bruce), WiFi Marauder ESP32 v6, LilyGo T-Embed + Bus 
 
 ---
 
-*Última actualización: 2026-08-26, post-Fase 0.4 (commit ba2d333). Próxima sesión: leer este archivo entero, verificar CI/deploy en GitHub, y arrancar F1-CVE según la tabla de Fase 1 y sus reglas por tool.*
+*Última actualización: 2026-08-26, post-F1-CVE (commit 9551c44). Próxima sesión: leer este archivo entero y arrancar F1-TAKEOVER según la tabla de Fase 1 y sus reglas por tool.*
