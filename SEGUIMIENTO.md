@@ -13,15 +13,15 @@
 - **Repo local**: `C:\Users\Sammi\sec-dashboard`
 - **Repo remoto**: `https://github.com/PoisonXploIT/sec-dashboard.git` (origin, rama `master`)
 - **Deploy productivo**: Railway, dominio `sec.sammideblas.com` (Cloudflare Access + API key).
-- **Último commit**: `788bde5` — "test: Fase 0 — pytest suite (49 tests), unified Finding model, CI (ruff+pytest)"
-- **Fecha del commit**: 2026-08 (sesión de Fase 0).
-- **Estado del plan**: Fase 0 en curso — hechas tareas 0.1 (tests), 0.3 (modelo Finding) y 0.2 (CI). Pendiente tarea 0.4 (refactor salidas: findings[] en el pipeline de ejecución).
+- **Último commit**: `bd5521e` — "feat: Fase 0.4 — findings[] + score in tool results, pipeline aggregation and DB persistence"
+- **Fecha del commit**: 2026-08 (sesión de Fase 0.4).
+- **Estado del plan**: Fase 0 COMPLETA (0.1, 0.2, 0.3 y 0.4). Siguiente: Fase 1 — tools de profundidad.
 
 ### Comandos de referencia (siempre desde el repo)
 
 ```powershell
 # Activar venv (ya tiene dependencias + pytest + ruff instalados)
-.venv\Scripts\python.exe -m pytest -q          # suite completa (49 tests, ~0.6s, sin red)
+.venv\Scripts\python.exe -m pytest -q          # suite completa (55 tests, ~0.7s, sin red)
 .venv\Scripts\python.exe -m ruff check backend tests   # lint baseline E9/F82
 .venv\Scripts\python.exe -m compileall -q backend      # compile check
 git push origin master                        # dispara CI en GitHub
@@ -68,7 +68,7 @@ Dashboard de seguridad tipo "recon suite" con:
 | 0.1 | Suite de tests pytest (validators, scanner, report, config + tools críticas) | HECHO |
 | 0.2 | CI con GitHub Actions (ruff + tests + compile) | HECHO |
 | 0.3 | Modelo de hallazgo unificado `Finding` (severity, category, evidence, cve, confidence, remediation) | HECHO |
-| 0.4 | Refactor salidas: tools devuelven findings[] además del JSON legible, sin romper UI | PENDIENTE |
+| 0.4 | Refactor salidas: tools devuelven findings[] además del JSON legible, sin romper UI | HECHO |
 
 ### Fase 1 — Tools de profundidad (diferenciador)
 Prioridad: **Tech CVE Correlation** y **Subdomain Takeover** primero.
@@ -175,44 +175,20 @@ Adapters ya implementados (9 tools):
 
 ---
 
-## 5. SIGUIENTE PASO — Fase 0.4 (refactor salidas con findings)
+## 5. LO HECHO EN LA SESIÓN DE FASE 0.4 + SIGUIENTE PASO
 
-### Objetivo
-Enganchar `extract_findings()` en el flujo de ejecución y persistir `findings[]` junto al resultado actual, SIN cambiar la UI (sigue renderizando el JSON normal; findings viaja por API/DB).
+### Commit `bd5521e` — Fase 0.4 completa (6 archivos, +344 líneas)
+- `scanner.run_tool`: `findings[]` + `score` en TODAS las salidas (OK, timeout, error, tool desconocida). UI sigue consumiendo `result` intacto.
+- `pipeline.py`: findings por tool preservados en cada fase + lista agregada y score total al final (`score_finding_dicts`).
+- `models.py` / `main.py`: columnas `findings TEXT` + `score INTEGER` en `scans` y `pipelines`, con migration automática en startup para DBs existentes (patrón RENAME TO *_old).
+- `main.py`: helpers `_persist_scan_result` / `_persist_pipeline_result`; redacción M4 extendida a los targets dentro de findings.
+- `findings.py`: `score_finding_dicts()` para dicts serializados.
+- `tests/test_fase04_findings.py`: 6 tests nuevos (55 en total). Sin red; persistencia probada contra una DB descartable en tmp_path vía monkeypatch de `models.DB_PATH`.
 
-### Cambios mínimos (ya localizados en el código)
+Decisiones pendientes resueltas según lo recomendado: score guardado en DB (`score INTEGER`, ordenable en History) y el pipeline guarda AMBOS — findings por tool en cada fase y la lista agregada + score total.
 
-1. **Schema DB** (`backend/models.py` `SCHEMA`):
-   - Añadir columna `findings TEXT` a `scans` y `pipelines` (default `[]`).
-   - Añadir migration automática en el `startup` de `backend/main.py` (patrón existente: líneas ~300-330, recrear tabla con `RENAME TO scans_old` si la columna no existe — el patrón de `target_id` nullable ya está hecho ahí).
-
-2. **scanner.run_tool** (`backend/scanner.py`):
-   - Después de obtener `result` del handler: `findings = extract_findings(tool_name, result, target)`.
-   - Añadir `findings` al dict de retorno (junto a `success`, `elapsed_seconds`, `result`).
-
-3. **Persistencia** (`backend/main.py`):
-   - `create_scan` / `_run_scan` (líneas 558-673): INSERT en 590, UPDATE en 621 — incluir findings serializados.
-   - `create_pipeline` / loop de fases (líneas 757-830): UPDATE en 790 — agregar findings del pipeline.
-   - `backend/pipeline.py` línea 106: `run_tool` interno — recoger findings de cada tool.
-   - OJO: los endpoints de export (`export_scan_json` en 144, etc.) y `report.py` pueden ignorar findings por ahora (compatibilidad).
-
-4. **Backward compatibility**: el fallback de `extract_findings` ya devuelve [] o INFO — no rompe nada. La UI no consume findings todavía.
-
-### Decisiones pendientes (recomendación del usuario)
-
-- **¿Score se guarda en DB o se calcula on-the-fly?** → RECOMENDADO: guardarlo (`score INTEGER` en scans/pipelines) para poder ordenar/buscar por score en History.
-- **¿Findings del pipeline agregados o por tool?** → RECOMENDADO: AMBOS — cada scan interno guarda sus findings, y el pipeline guarda un findings agregado + score total.
-
-### Tests nuevos para 0.4
-- Scan de tool con adapter → DB contiene findings no vacío.
-- Scan de tool sin adapter → findings == [].
-- Pipeline → findings agregados por fase (o por tool; decidir).
-- `score_findings()` computado y guardado en el scan.
-
-### Orden recomendado
-1. Push del commit actual (ya confirmado por el usuario) y ver CI en verde en GitHub.
-2. Implementar Fase 0.4 en commit nuevo.
-3. Con 0.4 verde, Fase 1 (tools de profundidad) puede usar el modelo de findings desde el día uno.
+### Siguiente paso — Fase 1 (tools de profundidad)
+Prioridad del plan: **Tech CVE Correlation** y **Subdomain Takeover** primero; luego Secret Leak Scanner, SSL Deep Analyzer, DNS Zone Hygiene y Favicon/Stack Fingerprinting. Regla desde el día uno: cada tool nueva registra su adapter en `findings.py` (patrón `@register("tool_id")`) para que findings/score funcionen sin tocar el pipeline.
 
 ---
 
@@ -245,4 +221,4 @@ M5 Stick + CC1101 + nRF24 (Bruce), WiFi Marauder ESP32 v6, LilyGo T-Embed + Bus 
 
 ---
 
-*Última actualización: sesión Fase 0 (commit 788bde5). Próxima sesión: leer este archivo, verificar estado de CI en GitHub, implementar Fase 0.4.*
+*Última actualización: sesión Fase 0.4 (commit bd5521e). Próxima sesión: leer este archivo, verificar CI/deploy en GitHub (sec.sammideblas.com) y arrancar Fase 1.*
