@@ -13,7 +13,7 @@
 - **Repo local**: `C:\Users\Sammi\sec-dashboard`
 - **Repo remoto**: `https://github.com/PoisonXploIT/sec-dashboard.git` (origin, rama `master`)
 - **Deploy productivo**: Railway, dominio `sec.sammideblas.com` (Cloudflare Access + API key).
-- **Último commit**: `56cbc67` — "feat: F1-SECRETS — Secret Leak Scanner (known-path JS, .git/HEAD, robots.txt) with findings adapter" (`d454405` docs tildes debajo)
+- **Último commit**: `ff6f79b` — "feat: F1-SSL — SSL Deep Analyzer (grade A+ to F, legacy TLS probes, weak ciphers, HSTS, OCSP stapling) with findings adapter"
 - **Fecha del commit**: 2026-08 (sesión de Fase 0.4).
 - **Estado del plan**: Fase 0 COMPLETA (0.1, 0.2, 0.3 y 0.4). Siguiente: Fase 1 — tools de profundidad.
 
@@ -79,7 +79,7 @@ Estado por tarea (actualizar esta tabla al cerrar CADA sesión; la más avanzada
 | F1-CVE | Tech CVE Correlation | HECHO (`9551c44`) | Handler `cve_correlation` en tools/web.py: reutiliza `tech_detector`, extrae versiones del header Server, busca NVD por producto (top 8 techs) y marca CISA KEV. Adapter en findings.py: KEV = CRITICAL con campo `cve`, CVE critical/high = HIGH (medium/low descartados a propósito para no inflar el score). |
 | F1-TAKEOVER | Subdomain Takeover | HECHO (`4454b14`) | Handler `subdomain_takeover` en tools/network.py: candidatos desde `ct_logs` (crt.sh, cap 50), resuelve CNAME con dnspython y sondea HTTP. Dangling = sin A record, inalcanzable o 404/503 contra `.github.io`/`.herokuapp.com`/S3 (`amazonaws.com`). Adapter: dangling = CRITICAL dedup por sub. |
 | F1-SECRETS | Secret Leak Scanner | HECHO (`56cbc67`) | Handler `secret_leak_scan` en tools/web.py: known-path scanning — 18 rutas JS fijas + `/.git/HEAD` (+config y logs/HEAD como evidencia extra) + `/robots.txt`. Patterns TruffleHog-style sin dependencias (AWS, GitHub, Slack, Stripe, Google, private keys, tokens genéricos MEDIUM, débiles LOW); evidencia redactada. Adapter: `.git/` = CRITICAL, platform keys = HIGH, dedup por source+type+evidence, cap 20. **Desviación registrada**: las rutas `/wp-content/plugins|themes/**/*.js` del diseño quedaron fuera porque no son enumerables sin crawl; ver registro. |
-| F1-SSL | SSL Deep Analyzer | PENDIENTE | Grade A+ a F: cipher suites, TLS 1.0/1.1, HSTS, OCSP stapling. |
+| F1-SSL | SSL Deep Analyzer | HECHO (`ff6f79b`) | Handler `ssl_deep_analyzer` en tools/network.py (stdlib-only ssl/socket): probes de TLS 1.0/1.1/1.2/1.3 con contextos restringidos por OP_NO_*, sondas de ciphers débiles (RC4/DES/3DES/NULL vía set_ciphers, solo reporta lo realmente negociado), HSTS por GET HTTP/1.0 crudo sobre TLS, OCSP stapling con ClientHello manual (ext status_request RFC 6066) y grade A+ a F por caps discretos. Adapter: legacy/weak-cipher/expired = HIGH, self-signed/no-PFS/HSTS ausente = MEDIUM, hsts_short/cert_expiring/ocsp = LOW. |
 | F1-DNS | DNS Zone Hygiene | PENDIENTE | SPF permisivo (+all), DKIM selector brute, DMARC p=none, DNSKEY débil. |
 | F1-FAVICON | Favicon/Stack Fingerprinting | PENDIENTE | Hashes de favicons + paths estáticos para versiones exactas. |
 
@@ -256,6 +256,13 @@ Convención: cada sesión añade una entrada al FINAL de la lista (la más recie
 - Nota para F1-SSL: `cryptography` NO está en requirements.txt ni requirements-dev.txt; el MVP va stdlib-only (`ssl`/`socket`). Si OCSP/HSTS o grades la requieren, añadir dependencia es una decisión a registrar antes de instalarla.
 - Siguiente micro-paso: F1-SSL (SSL Deep Analyzer) — grade A+ a F, cipher suites, TLS 1.0/1.1, HSTS, OCSP stapling.
 
+### 2026-08-26 — F1-SSL completa (SSL Deep Analyzer)
+- Commit `ff6f79b`: tool `ssl_deep_analyzer` (tools/network.py) + registro en config/scanner + adapter findings + 17 tests nuevos (103 en total, sin red: stub de `_ssl_deep_scan_blocking`, parser OCSP alimentado con registros sintéticos).
+- Implementado (stdlib-only, sin dependencias nuevas): sondas de versión TLS 1.0/1.1/1.2/1.3 con `SSLContext` restringido por flags `OP_NO_*`; ciphers débiles por familia (RC4, DES-CBC, 3DES, NULL) con `set_ciphers`, solo se reporta si el handshake realmente lo negoció; HSTS leyendo el header de una petición HTTP/1.0 cruda sobre TLS (max-age, includeSubDomains, preload); OCSP stapling enviando un ClientHello construido a mano con SNI + extensión `status_request` (RFC 6066) y parseando el ServerHello en bruto ("yes" si trae `status_response`, "no" si no, "unknown" si timeout/alerta); certificado sin verificación (self-signed, expirado, días restantes, SAN, OCSP responder).
+- Grade A+ a F por caps discretos: tls_legacy fail = F, weak_cipher fail = F, cert_expired fail = D, self_signed fail = C, no_forward_secrecy fail = B+, hsts_missing fail = A, hsts_short (<180d) fail = A-. El peor cap gana.
+- Decisiones: (1) best-effort declarado — si el OpenSSL local no puede negociar TLS 1.0/1.1 o rechazar un cipher string, la sonda se marca como no soportada/no testeable y NUNCA se reporta un cipher débil no negociado; (2) OCSP "unknown" es legítimo (no penaliza el grade): la check `ocsp_unavailable` solo avisa cuando ni stapling ni responder están disponibles; (3) si ninguna conexión TLS tiene éxito el handler devuelve error limpio (patrón ssl_analyzer) y el adapter no emite findings.
+- Siguiente micro-paso: F1-DNS (DNS Zone Hygiene).
+
 ## 7. Reglas y restricciones del proyecto (NO VIOLAR)
 
 1. **NO emojis, flechas de texto ni símbolos de color** en ninguna salida, nota, script o commit (regla global del usuario). Escribir las palabras.
@@ -285,4 +292,4 @@ M5 Stick + CC1101 + nRF24 (Bruce), WiFi Marauder ESP32 v6, LilyGo T-Embed + Bus 
 
 ---
 
-*Última actualización: 2026-08-26, cierre post-F1-SECRETS (feat 56cbc67 aprobado; refactor backlog y nota de dependencias registrados). Próxima sesión: leer este archivo entero y arrancar F1-SSL (SSL Deep Analyzer) stdlib-only.*
+*Última actualización: 2026-08-26, post-F1-SSL (feat ff6f79b; suite 103 tests en verde). Próxima sesión: leer este archivo entero y arrancar F1-DNS (DNS Zone Hygiene).*
