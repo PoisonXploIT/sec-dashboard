@@ -338,7 +338,7 @@
             </a>
             <div style="flex:1"></div>
             <div style="padding: 16px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-muted);">
-                <div>35 tools • 6 categories</div>
+                <div id="sidebar-toolcount">Loading...</div>
                 <div>Webhooks • Cancel • SSRF protection</div>
             </div>
         </nav>
@@ -1453,7 +1453,7 @@
         }
 
         content.innerHTML = `<button class="btn mb-16" onclick="renderPipelinePage()">Back</button>
-            <div class="card"><div class="card-header"><div class="card-title">Pipeline #${id} -- ${esc(data.mode||'')}</div><div class="flex gap-8"><span class="badge-status badge-${data.status}">${data.status}</span> <button class="btn btn-sm" onclick="downloadJSON('/api/pipelines/${id}/export/json', 'pipeline_${id}.json')">JSON</button> <button class="btn btn-sm" onclick="downloadPDF('/api/pipelines/${id}/export/pdf', 'pipeline_${id}.pdf')">PDF</button> <button class="btn btn-sm" onclick="downloadPDF('/api/pipelines/${id}/executive-pdf', 'pipeline_${id}_executive.pdf')">Exec</button> <button class="btn btn-sm btn-danger" onclick="deletePipeline(${id})">Delete</button></div></div>
+            <div class="card"><div class="card-header"><div class="card-title">Pipeline #${id} -- ${esc(data.mode||'')}</div><div class="flex gap-8"><span class="badge-status badge-${data.status}">${data.status}</span> <button class="btn btn-sm" onclick="downloadJSON('/api/pipelines/${id}/export/json', 'pipeline_${id}.json')">JSON</button> <button class="btn btn-sm" onclick="downloadPDF('/api/pipelines/${id}/export/pdf', 'pipeline_${id}.pdf')">PDF</button> <button class="btn btn-sm" onclick="downloadPDF('/api/pipelines/${id}/executive-pdf', 'pipeline_${id}_executive.pdf')">Exec</button> <button class="btn btn-sm" title="Evolucion del target entre scans" onclick="showTargetEvolution(${data.target_id})">Evol</button> <button class="btn btn-sm btn-danger" onclick="deletePipeline(${id})">Delete</button></div></div>
             <div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px">Target: ${esc(data.target_name||'')} | Elapsed: ${result.elapsed_seconds||'?'}s | Tools: ${result.total_tools||'?'}</div>
             </div>
             ${phasesHtml || '<div class="empty-state"><h3>No results data</h3><p>Pipeline may still be running or failed without results.</p></div>'}`;
@@ -1464,6 +1464,94 @@
         await api.del(`/pipelines/${id}`);
         toast('Pipeline deleted', 'success');
         renderPipelinePage();
+    }
+
+    // ── Target evolution (Phase 2: comparativa historica) ────────────────────────────────
+    async function showTargetEvolution(targetId) {
+        const content = document.getElementById('content');
+        let data;
+        try {
+            data = await api.get(`/pipelines/compare?target_id=${targetId}`);
+        } catch (e) { toast('Evolucion: ' + e.message, 'error'); return; }
+        const runs = data.runs || [];
+
+        content.innerHTML = `<button class="btn mb-16" onclick="renderHistoryPage()">Back</button>
+            <div class="card">
+                <div class="card-header"><div class="card-title">Evolucion -- ${esc(data.target_name||'')} <span style="color:var(--text-muted);font-size:12px">${esc(data.target_host||'')}</span></div><span style="font-size:12px;color:var(--text-muted)">${runs.length} runs</span></div>
+                ${runs.length ? `
+                    <canvas id="evolution-sparkline" style="width:100%;height:96px;display:block;margin-bottom:16px"></canvas>
+                    <table><thead><tr><th>#</th><th>Run</th><th>Mode</th><th>Started</th><th>Findings</th><th>Score</th></tr></thead><tbody>
+                        ${runs.map((r, i) => `<tr><td style="color:var(--text-muted);font-size:12px">${i+1}</td><td>${r.id}</td><td><strong>${esc(r.mode)}</strong></td><td style="font-size:12px;color:var(--text-muted)">${r.started_at ? new Date(r.started_at).toLocaleString() : ''}</td><td>${r.findings_count ?? 0}</td><td>${r.score === null || r.score === undefined ? '<span style="color:var(--text-muted)">n/a</span>' : `<strong>${r.score}</strong>`}</td></tr>`).join('')}
+                    </tbody></table>
+                ` : `<div class="empty-state"><h3>Sin pipelines para este target</h3><p>Corre un pipeline y vuelve aqui para ver la evolucion entre scans.</p></div>`}
+            </div>`;
+
+        if (runs.length) drawScoreSparkline(document.getElementById('evolution-sparkline'), runs);
+    }
+
+    // Simple line chart of the 0-100 score per run, drawn on a plain <canvas> (no library).
+    // Fixed 0-100 y scale so evolution is comparable across targets.
+    function drawScoreSparkline(canvas, runs) {
+        const css = getComputedStyle(document.documentElement);
+        const accent = css.getPropertyValue('--accent').trim() || '#58a6ff';
+        const border = css.getPropertyValue('--border').trim() || '#30363d';
+        const muted = css.getPropertyValue('--text-muted').trim() || '#6e7681';
+
+        const dpr = window.devicePixelRatio || 1;
+        const w = canvas.clientWidth || 640, h = canvas.clientHeight || 96;
+        canvas.width = w * dpr; canvas.height = h * dpr;
+        const ctx = canvas.getContext('2d');
+        ctx.scale(dpr, dpr);
+
+        const padL = 30, padR = 12, padT = 14, padB = 18;
+        const plotW = w - padL - padR, plotH = h - padT - padB;
+        const yFor = s => padT + plotH * (1 - s / 100);
+
+        // Horizontal grid at 0/25/50/75/100
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = border;
+        ctx.fillStyle = muted;
+        ctx.font = '10px monospace';
+        ctx.textAlign = 'right';
+        for (const g of [0, 25, 50, 75, 100]) {
+            const y = Math.round(yFor(g)) + 0.5;
+            ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(w - padR, y); ctx.stroke();
+            ctx.fillText(String(g), padL - 6, y + 3);
+        }
+
+        const pts = runs.map((r, i) => ({
+            x: padL + (runs.length > 1 ? plotW * i / (runs.length - 1) : plotW / 2),
+            y: r.score === null || r.score === undefined ? null : yFor(r.score),
+            score: r.score,
+        }));
+
+        // Line through the scored runs (legacy rows without score are skipped)
+        ctx.strokeStyle = accent;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        let started = false;
+        for (const p of pts) {
+            if (p.y === null) continue;
+            if (!started) { ctx.moveTo(p.x, p.y); started = true; } else { ctx.lineTo(p.x, p.y); }
+        }
+        if (started) ctx.stroke();
+
+        // Dots + score labels
+        for (const p of pts) {
+            if (p.y === null) continue;
+            ctx.fillStyle = accent;
+            ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = muted;
+            ctx.font = '10px monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(String(p.score), p.x, p.y - 6);
+        }
+
+        // Run numbers under the axis
+        ctx.fillStyle = muted;
+        ctx.font = '10px monospace';
+        ctx.textAlign = 'center';
+        pts.forEach((p, i) => ctx.fillText(String(i + 1), p.x, h - 4));
     }
 
     // ── Targets ────────────────────────────────
@@ -1586,7 +1674,7 @@
             ` : `
                 <div class="card">
                     ${filteredPipelines.length ? `<table><thead><tr><th>Mode</th><th>Target</th><th>Status</th><th>Started</th><th>Actions</th></tr></thead><tbody>
-                        ${filteredPipelines.map(p => `<tr><td><strong>${esc(p.mode)}</strong></td><td>${esc(p.target_name||'')} <span style="color:var(--text-muted);font-size:11px">${esc(p.target_host||'')}</span></td><td><span class="badge-status badge-${p.status}">${p.status}</span></td><td style="font-size:12px;color:var(--text-muted)">${timeAgo(p.started_at)}</td><td class="flex gap-8"><button class="btn btn-sm" onclick="viewPipelineResult(${p.id})">View</button> <button class="btn btn-sm" onclick="downloadJSON('/api/pipelines/${p.id}/export/json', 'pipeline_${p.id}.json')">JSON</button> <button class="btn btn-sm" onclick="downloadPDF('/api/pipelines/${p.id}/export/pdf', 'pipeline_${p.id}.pdf')">PDF</button> <button class="btn btn-sm" onclick="downloadPDF('/api/pipelines/${p.id}/executive-pdf', 'pipeline_${p.id}_executive.pdf')">Exec</button> ${p.status==='running'?`<button class="btn btn-sm btn-danger" onclick="cancelPipeline(${p.id})">Cancel</button>`:''} <button class="btn btn-sm btn-danger" onclick="deletePipeline(${p.id})">Del</button></td></tr>`).join('')}
+                        ${filteredPipelines.map(p => `<tr><td><strong>${esc(p.mode)}</strong></td><td><span style="cursor:pointer;text-decoration:underline" title="Ver evolucion del target" onclick="showTargetEvolution(${p.target_id})">${esc(p.target_name||'')}</span> <span style="color:var(--text-muted);font-size:11px">${esc(p.target_host||'')}</span></td><td><span class="badge-status badge-${p.status}">${p.status}</span></td><td style="font-size:12px;color:var(--text-muted)">${timeAgo(p.started_at)}</td><td class="flex gap-8"><button class="btn btn-sm" onclick="viewPipelineResult(${p.id})">View</button> <button class="btn btn-sm" title="Evolucion del target entre scans" onclick="showTargetEvolution(${p.target_id})">Evol</button> <button class="btn btn-sm" onclick="downloadJSON('/api/pipelines/${p.id}/export/json', 'pipeline_${p.id}.json')">JSON</button> <button class="btn btn-sm" onclick="downloadPDF('/api/pipelines/${p.id}/export/pdf', 'pipeline_${p.id}.pdf')">PDF</button> <button class="btn btn-sm" onclick="downloadPDF('/api/pipelines/${p.id}/executive-pdf', 'pipeline_${p.id}_executive.pdf')">Exec</button> ${p.status==='running'?`<button class="btn btn-sm btn-danger" onclick="cancelPipeline(${p.id})">Cancel</button>`:''} <button class="btn btn-sm btn-danger" onclick="deletePipeline(${p.id})">Del</button></td></tr>`).join('')}
                     </tbody></table>` : `<div class="empty-state"><h3>No pipelines yet</h3><p>Run a pipeline to see results here</p></div>`}
                 </div>
             `}
@@ -1835,6 +1923,7 @@ search index=sec_dashboard (sourcetype=wifi:marauder OR sourcetype=m5stick:netwo
                     <p><strong>Search</strong>: Use the search bar to filter by tool name, target name, target host, or status. Filtering happens in real-time as you type.</p>
                     <p><strong>Pagination</strong>: Scan history is paginated (50 per page). Use <strong>Prev</strong> and <strong>Next</strong> buttons to navigate through older scans.</p>
                     <p><strong>Formatted pipeline results</strong>: When you click <strong>View</strong> on a pipeline, you see each tool's output formatted individually -- port tables, header grades, CVE cards, etc. -- not a raw JSON dump.</p>
+                    <p><strong>Target evolution</strong>: In the Pipelines tab, click a target name or the <strong>Evol</strong> button to open the historical comparison: every run of that target in chronological order with its score and findings count, plus a line chart of the 0-100 score across runs.</p>
                 </div>
             </div>
 
@@ -1856,6 +1945,7 @@ search index=sec_dashboard (sourcetype=wifi:marauder OR sourcetype=m5stick:netwo
                         <tr><td>GET</td><td><code>/api/scans/{id}/export/pdf</code></td><td>Export scan as PDF</td></tr>
                         <tr><td>POST</td><td><code>/api/pipelines</code></td><td>Start pipeline (body: target_id, mode)</td></tr>
                         <tr><td>GET</td><td><code>/api/pipelines/history</code></td><td>Pipeline history</td></tr>
+                        <tr><td>GET</td><td><code>/api/pipelines/compare?target_id=N</code></td><td>Historical comparison: runs of one target, oldest first (score + findings_count)</td></tr>
                         <tr><td>POST</td><td><code>/api/pipelines/{id}/cancel</code></td><td>Cancel a running pipeline</td></tr>
                         <tr><td>GET</td><td><code>/api/pipelines/{id}/result</code></td><td>Pipeline result</td></tr>
                         <tr><td>GET</td><td><code>/api/pipelines/{id}/export/json</code></td><td>Export pipeline as JSON</td></tr>
@@ -2225,9 +2315,19 @@ search index=sec_dashboard | timechart count</pre></div>
         }
     }
 
+    // Sidebar: count tools/categories dynamically from /api/tools (no hardcoded numbers)
+    async function updateSidebarToolCount() {
+        try {
+            const data = await api.get('/tools');
+            const el = document.getElementById('sidebar-toolcount');
+            if (el) el.textContent = `${data.tools.length} tools • ${data.categories.length} categories`;
+        } catch {}
+    }
+
     // Init
     connectWS();
     navigate('dashboard');
+    updateSidebarToolCount();
     </script>
 </body>
 </html>

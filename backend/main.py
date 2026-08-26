@@ -882,6 +882,57 @@ async def pipeline_history():
         await db.close()
 
 
+@app.get("/api/pipelines/compare")
+async def compare_pipelines(target_id: int):
+    """Historical comparison (Phase 2): all runs of one target, oldest first.
+
+    Returns each run with parsed findings_count and score so the frontend can
+    render the evolution table + sparkline without storing raw JSON clientside.
+    MVP scope: no per-finding delta (new/fixed/persistent) -- see SEGUIMIENTO.md.
+    """
+    db = await get_db()
+    try:
+        cur = await db.execute("SELECT id, name, host FROM targets WHERE id = ?", (target_id,))
+        target_row = await cur.fetchone()
+        if not target_row:
+            raise HTTPException(404, "Target not found")
+        cursor = await db.execute(
+            "SELECT id, mode, score, findings, started_at, finished_at "
+            "FROM pipelines WHERE target_id = ? ORDER BY started_at ASC",
+            (target_id,)
+        )
+        rows = [dict(r) for r in await cursor.fetchall()]
+    finally:
+        await db.close()
+
+    runs = []
+    for row in rows:
+        try:
+            findings_count = len(json.loads(row["findings"] or "[]"))
+        except (TypeError, json.JSONDecodeError):
+            findings_count = 0
+        score = row["score"]
+        if score is not None:
+            try:
+                score = int(score)
+            except (TypeError, ValueError):
+                score = None
+        runs.append({
+            "id": row["id"],
+            "mode": row["mode"],
+            "score": score,
+            "findings_count": findings_count,
+            "started_at": row["started_at"],
+            "finished_at": row["finished_at"],
+        })
+    return {
+        "target_id": target_id,
+        "target_name": target_row["name"],
+        "target_host": target_row["host"],
+        "runs": runs,
+    }
+
+
 @app.post("/api/pipelines")
 async def create_pipeline(body: PipelineCreate):
     if body.mode not in PIPELINES:
