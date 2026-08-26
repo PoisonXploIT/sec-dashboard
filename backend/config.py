@@ -381,6 +381,18 @@ PIPELINES = {
             {"name": "OSINT", "tools": ["reverse_dns", "ct_logs", "ip_geolocation"]},
         ],
     },
+    "full_depth": {
+        "name": "Full Depth",
+        "description": "Depth chain: subs, takeover, tech, CVE correlation, secrets (~4 min)",
+        "icon": "FD",
+        "phases": [
+            {"name": "Subdomains", "tools": ["subdomain_enum"]},
+            {"name": "Takeover", "tools": ["subdomain_takeover"]},
+            {"name": "Stack", "tools": ["tech_detector"]},
+            {"name": "CVE", "tools": ["cve_correlation"]},
+            {"name": "Secrets", "tools": ["secret_leak_scan"]},
+        ],
+    },
     "nuclear": {
         "name": "Nuclear Scan",
         "description": "Comprehensive security audit (~7 min)",

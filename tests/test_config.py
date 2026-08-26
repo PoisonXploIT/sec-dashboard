@@ -38,4 +38,17 @@ def test_categories_covered_by_registry():
 
 
 def test_pipeline_modes_exist():
-    assert {"fast", "deep", "nuclear"} <= set(config.PIPELINES)
+    assert {"fast", "deep", "full_depth", "nuclear"} <= set(config.PIPELINES)
+
+
+def test_full_depth_pipeline_chain():
+    """Phase 2: full_depth runs the depth chain in plan order, one tool per phase."""
+    pipe = config.PIPELINES["full_depth"]
+    chain = [tool for phase in pipe["phases"] for tool in phase["tools"]]
+    assert chain == [
+        "subdomain_enum",
+        "subdomain_takeover",
+        "tech_detector",
+        "cve_correlation",
+        "secret_leak_scan",
+    ]
