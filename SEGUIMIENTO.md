@@ -13,7 +13,7 @@
 - **Repo local**: `C:\Users\Sammi\sec-dashboard`
 - **Repo remoto**: `https://github.com/PoisonXploIT/sec-dashboard.git` (origin, rama `master`)
 - **Deploy productivo**: Railway, dominio `sec.sammideblas.com` (Cloudflare Access + API key).
-- **Último commit**: `4870087` — "docs: SEGUIMIENTO — F1-TAKEOVER done, next micro-step F1-SECRETS" (`4454b14` feat: F1-TAKEOVER debajo)
+- **Último commit**: `56cbc67` — "feat: F1-SECRETS — Secret Leak Scanner (known-path JS, .git/HEAD, robots.txt) with findings adapter" (`d454405` docs tildes debajo)
 - **Fecha del commit**: 2026-08 (sesión de Fase 0.4).
 - **Estado del plan**: Fase 0 COMPLETA (0.1, 0.2, 0.3 y 0.4). Siguiente: Fase 1 — tools de profundidad.
 
@@ -21,7 +21,7 @@
 
 ```powershell
 # Activar venv (ya tiene dependencias + pytest + ruff instalados)
-.venv\Scripts\python.exe -m pytest -q          # suite completa (55 tests, ~0.7s, sin red)
+.venv\Scripts\python.exe -m pytest -q          # suite completa (86 tests, ~0.7s, sin red)
 .venv\Scripts\python.exe -m ruff check backend tests   # lint baseline E9/F82
 .venv\Scripts\python.exe -m compileall -q backend      # compile check
 git push origin master                        # dispara CI en GitHub
@@ -78,7 +78,7 @@ Estado por tarea (actualizar esta tabla al cerrar CADA sesión; la más avanzada
 |---|---|---|---|
 | F1-CVE | Tech CVE Correlation | HECHO (`9551c44`) | Handler `cve_correlation` en tools/web.py: reutiliza `tech_detector`, extrae versiones del header Server, busca NVD por producto (top 8 techs) y marca CISA KEV. Adapter en findings.py: KEV = CRITICAL con campo `cve`, CVE critical/high = HIGH (medium/low descartados a propósito para no inflar el score). |
 | F1-TAKEOVER | Subdomain Takeover | HECHO (`4454b14`) | Handler `subdomain_takeover` en tools/network.py: candidatos desde `ct_logs` (crt.sh, cap 50), resuelve CNAME con dnspython y sondea HTTP. Dangling = sin A record, inalcanzable o 404/503 contra `.github.io`/`.herokuapp.com`/S3 (`amazonaws.com`). Adapter: dangling = CRITICAL dedup por sub. |
-| F1-SECRETS | Secret Leak Scanner | PENDIENTE (diseño fijado) | `.git/` expuesto, API keys, tokens en JS/robots.txt (regexs tipo TruffleHog). **Decisión**: scan de JS contra rutas conocidas en MVP (no crawl limitado). Ver detalle en registro de ejecuciones. |
+| F1-SECRETS | Secret Leak Scanner | HECHO (`56cbc67`) | Handler `secret_leak_scan` en tools/web.py: known-path scanning — 18 rutas JS fijas + `/.git/HEAD` (+config y logs/HEAD como evidencia extra) + `/robots.txt`. Patterns TruffleHog-style sin dependencias (AWS, GitHub, Slack, Stripe, Google, private keys, tokens genéricos MEDIUM, débiles LOW); evidencia redactada. Adapter: `.git/` = CRITICAL, platform keys = HIGH, dedup por source+type+evidence, cap 20. **Desviación registrada**: las rutas `/wp-content/plugins|themes/**/*.js` del diseño quedaron fuera porque no son enumerables sin crawl; ver registro. |
 | F1-SSL | SSL Deep Analyzer | PENDIENTE | Grade A+ a F: cipher suites, TLS 1.0/1.1, HSTS, OCSP stapling. |
 | F1-DNS | DNS Zone Hygiene | PENDIENTE | SPF permisivo (+all), DKIM selector brute, DMARC p=none, DNSKEY débil. |
 | F1-FAVICON | Favicon/Stack Fingerprinting | PENDIENTE | Hashes de favicons + paths estáticos para versiones exactas. |
@@ -241,6 +241,13 @@ Convención: cada sesión añade una entrada al FINAL de la lista (la más recie
 - Severidad propuesta: `.git/` expuesto = CRITICAL; API keys/tokens de plataformas de alto impacto (AWS, GitHub, Slack, Stripe, etc.) = HIGH; tokens genéricos o keys en JS/robots.txt = MEDIUM; matches débiles = LOW. Dedup por `finding_id` combinando tipo + target + evidencia normalizada.
 - Nota: los regexs serán estilo TruffleHog/TruffleHog3 sin dependencias externas; solo patterns con alta confianza en el MVP.
 
+### 2026-08-26 — F1-SECRETS completa (Secret Leak Scanner)
+- Commit `56cbc67`: tool `secret_leak_scan` (tools/web.py) + registro en config/scanner + adapter findings + 11 tests nuevos (86 en total, sin red: stub de `_secret_fetch`).
+- Implementado: 18 URLs JS fijas (raíz + `/scripts/`, `/js/`, `/static/js/`, `/assets/js/` × main/app/bundle.js), `/.git/HEAD` con `config` y `logs/HEAD` como evidencia extra, `/robots.txt`. Patterns de alta confianza: AWS (`AKIA|ASIA|A3TQ`+16), GitHub (`gh[pousr]_`, `github_pat_`), Slack (`xox[baprs]-`), Stripe (`sk_live_`, `whsec_`), Google (`AIza`+35), private keys, tokens genéricos (MEDIUM) y matches débiles tipo password= (LOW). Evidencia redactada (`prefijo***(len)`) para no almacenar el secreto completo. Un solo match por fuente (first-match-wins por severidad de patrón).
+- Adapter: `.git/` expuesto = CRITICAL, platform keys = HIGH, genéricos MEDIUM, débiles LOW; dedup por source+type+evidence redactada; cap 20.
+- **Desviación del diseño fijado (requiere revisión)**: las rutas `/wp-content/plugins/**/*.js` y `/wp-content/themes/**/*.js` NO se implementaron porque no son enumerables sin crawl (los nombres de plugin/tema varían por sitio) y el crawl quedó fuera del MVP. Quedan como mejora futura junto al crawl limitado. Si se quiere cubrir en Fase 2, la vía natural es un GET de la home para extraer `script src` reales.
+- Siguiente micro-paso: F1-SSL (SSL Deep Analyzer).
+
 ## 7. Reglas y restricciones del proyecto (NO VIOLAR)
 
 1. **NO emojis, flechas de texto ni símbolos de color** en ninguna salida, nota, script o commit (regla global del usuario). Escribir las palabras.
@@ -270,4 +277,4 @@ M5 Stick + CC1101 + nRF24 (Bruce), WiFi Marauder ESP32 v6, LilyGo T-Embed + Bus 
 
 ---
 
-*Última actualización: 2026-08-26, post-F1-TAKEOVER (commits 4454b14 + 4870087), decisión de diseño F1-SECRETS fijada. Próxima sesión: leer este archivo entero y arrancar F1-SECRETS (Secret Leak Scanner) con known-path scanning según lo documentado.*
+*Última actualización: 2026-08-26, post-F1-SECRETS (commit 56cbc67). Próxima sesión: leer este archivo entero y arrancar F1-SSL (SSL Deep Analyzer); revisar la desviación de wp-content registrada en el log.*
