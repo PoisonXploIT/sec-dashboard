@@ -342,6 +342,13 @@ Convención: cada sesión añade una entrada al FINAL de la lista (la más recie
 - Nota de transición: los pipelines persistidos antes de este commit tienen ids aleatorios; la primera comparación real tras desplegar mostrará todo como `new` una única vez (los ids nuevos son deterministas desde ya).
 - Siguiente micro-paso: **3E sub-micro-paso 1 — CLI headless**.
 
+### 2026-08-26 — 3E sub-micro-paso 1 completa (CLI headless)
+- Commit `feat:` en `backend/cli.py` + `tests/test_cli.py`. Entry point: `python -m backend.cli --target HOST [--pipeline {deep,fast,full_depth,nuclear}] [--json]`.
+- **Decisión de alcance**: sin `--save`/persistencia — un run CLI no tiene identidad web (¿qué target_id? ¿aparece en History?); persistirlo es una decisión de diseño propia que se deja fuera. Sin `--timeout` (el runner no tiene hook; los timeouts son por-tool dentro de `run_tool`) y sin `--output` (la redirección de shell cubre el caso). CLI = headless puro: sin DB, sin web.
+- `PipelineRunner(pipeline_id=0, mode=..., target=..., on_progress=None)` + `await runner.run()`; validación previa con `validators.validate_target` (en modo local ya permite IPs privadas, no hace falta variante). Salida texto: resumen (mode/target/status/elapsed/tools/findings/score + fases con conteo ok). Salida `--json`: el dict completo del runner. Exit codes: 0 ok, 1 target inválido o pipeline fallido, 2 args inválidos (argparse), 130 Ctrl+C.
+- Tests: 7 nuevos en `test_cli.py` (JSON parseable e idéntico al resultado, resumen texto con fases, modo/target pasados al runner, `--pipeline` inválido → SystemExit 2, target ausente → SystemExit 2, target vacío → exit 1 stderr "invalid target", pipeline fallido → exit 1). Stub de `PipelineRunner.run`, sin red. Suite **156** en verde (149 + 7), ruff limpio, compileall OK.
+- Siguiente micro-paso: **3E sub-micro-paso 2 — dark mode persistente** (y luego 3: búsqueda en History).
+
 ## 7. Reglas y restricciones del proyecto (NO VIOLAR)
 
 1. **NO emojis, flechas de texto ni símbolos de color** en ninguna salida, nota, script o commit (regla global del usuario). Escribir las palabras.
@@ -371,11 +378,11 @@ M5 Stick + CC1101 + nRF24 (Bruce), WiFi Marauder ESP32 v6, LilyGo T-Embed + Bus 
 
 ---
 
-*Última actualización: 2026-08-26, Phase 2 CERRADA de verdad — Full Depth (`a0cf16a`) + executive PDF (`10ed28f`) + comparativa histórica (`165af5d`) + **delta new/fixed/persistent (3b, `1376001`)**; suite 149 tests en verde; ruff limpio. master == origin/master.*
+*Última actualización: 2026-08-26, Phase 2 CERRADA de verdad — Full Depth (`a0cf16a`) + executive PDF (`10ed28f`) + comparativa histórica (`165af5d`) + **delta new/fixed/persistent (3b, `1376001`)**; **3E sub-micro-paso 1: CLI headless** (`python -m backend.cli`, sin persistencia por decisión de alcance); suite 156 tests en verde; ruff limpio. master == origin/master.*
 
 **PROMPT PARA LA PRÓXIMA SESIÓN** (arrancar con contexto nuevo):
-Eres el agente de sec-dashboard. Primero lee este archivo entero (la sección 7 son reglas NO VIOLAR). Estado: Fase 1 completa salvo F1-FAVICON (backlog opcional); **Fase 2 COMPLETA**: Full Depth pipeline (`a0cf16a`), executive PDF (`10ed28f`), comparativa histórica con delta new/fixed/persistent por `finding_id` determinista (`165af5d` + `1376001`, endpoint `GET /api/pipelines/compare?target_id=N` con runs que llevan `new`/`fixed`/`persistent` como listas de `{finding_id, severity, title}`; frontend: columna "Delta vs anterior" + panel desplegable en `showTargetEvolution`). Suite 149 tests en verde, ruff limpio; master == origin/master.
-Tarea: **3E sub-micro-paso 1 — CLI headless** (`python -m backend.cli --target ... --pipeline nuclear --json`). Estudiar primero cómo invocar `PipelineRunner` fuera del HTTP (clase autónoma en `backend/pipeline.py`; ver `create_pipeline` en main.py por el patrón de uso: target, modo, persistencia). Decidir alcance MVP: qué flags son imprescindibles (`--target`, `--pipeline`, `--json`, y si hace falta `--no-persist` para no ensuciar la DB) y cómo se mapea el resultado al mismo JSON que devuelve el endpoint. Tests sin red (patrón de la suite: `asyncio.run()` dentro de tests síncronos, stubs/monkeypatch, DB temporal con monkeypatch de `models.DB_PATH`).
-Después del CLI: 3E sub-micro-paso 2 (dark mode persistente) y 3 (búsqueda en History), cada uno commit propio `feat:`.
+Eres el agente de sec-dashboard. Primero lee este archivo entero (la sección 7 son reglas NO VIOLAR). Estado: Fase 1 completa salvo F1-FAVICON (backlog opcional); **Fase 2 COMPLETA**: Full Depth pipeline (`a0cf16a`), executive PDF (`10ed28f`), comparativa histórica con delta new/fixed/persistent por `finding_id` determinista (`165af5d` + `1376001`, endpoint `GET /api/pipelines/compare?target_id=N` con runs que llevan `new`/`fixed`/`persistent` como listas de `{finding_id, severity, title}`; frontend: columna "Delta vs anterior" + panel desplegable en `showTargetEvolution`). **3E sub-micro-paso 1 hecho**: CLI headless `python -m backend.cli --target ... [--pipeline ...] [--json]` (sin persistencia, decisión registrada). Suite 156 tests en verde, ruff limpio; master == origin/master.
+Tarea: **3E sub-micro-paso 2 — dark mode persistente** en el frontend (`index.html`): detectar preferencia del usuario, persistirla (localStorage), respetar `prefers-color-scheme` como default inicial. El CSS ya tiene variables de tema; hay que ver qué tan lejos está hoy de un modo oscuro real y decidir si falta definir la paleta oscura completa o solo cablear el toggle + persistencia. Tests: no hay suite JS; verificar con node (sintaxis) + revisión manual del diff. Commit `feat:`.
+Después: 3E sub-micro-paso 3 — búsqueda en History, commit propio `feat:`.
 Reglas: MVP sin dependencias nuevas, tests sin red, commits `feat:`/`fix:`, push solo con suite verde, sin emojis.
 Al cerrar sesión: actualizar las tablas/sección 6 de este archivo y el footer con el siguiente micro-paso.
