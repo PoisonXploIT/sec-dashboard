@@ -13,7 +13,7 @@
 - **Repo local**: `C:\Users\Sammi\sec-dashboard`
 - **Repo remoto**: `https://github.com/PoisonXploIT/sec-dashboard.git` (origin, rama `master`)
 - **Deploy productivo**: Railway, dominio `sec.sammideblas.com` (Cloudflare Access + API key).
-- **Último commit**: `ff6f79b` — "feat: F1-SSL — SSL Deep Analyzer (grade A+ to F, legacy TLS probes, weak ciphers, HSTS, OCSP stapling) with findings adapter"
+- **Último commit**: `57057bf` — "fix(ssl-deep): DER cert fallback + prod smoke fixes"
 - **Fecha del commit**: 2026-08 (sesión de Fase 0.4).
 - **Estado del plan**: Fase 0 COMPLETA (0.1, 0.2, 0.3 y 0.4). Siguiente: Fase 1 — tools de profundidad.
 
@@ -79,7 +79,7 @@ Estado por tarea (actualizar esta tabla al cerrar CADA sesión; la más avanzada
 | F1-CVE | Tech CVE Correlation | HECHO (`9551c44`) | Handler `cve_correlation` en tools/web.py: reutiliza `tech_detector`, extrae versiones del header Server, busca NVD por producto (top 8 techs) y marca CISA KEV. Adapter en findings.py: KEV = CRITICAL con campo `cve`, CVE critical/high = HIGH (medium/low descartados a propósito para no inflar el score). |
 | F1-TAKEOVER | Subdomain Takeover | HECHO (`4454b14`) | Handler `subdomain_takeover` en tools/network.py: candidatos desde `ct_logs` (crt.sh, cap 50), resuelve CNAME con dnspython y sondea HTTP. Dangling = sin A record, inalcanzable o 404/503 contra `.github.io`/`.herokuapp.com`/S3 (`amazonaws.com`). Adapter: dangling = CRITICAL dedup por sub. |
 | F1-SECRETS | Secret Leak Scanner | HECHO (`56cbc67`) | Handler `secret_leak_scan` en tools/web.py: known-path scanning — 18 rutas JS fijas + `/.git/HEAD` (+config y logs/HEAD como evidencia extra) + `/robots.txt`. Patterns TruffleHog-style sin dependencias (AWS, GitHub, Slack, Stripe, Google, private keys, tokens genéricos MEDIUM, débiles LOW); evidencia redactada. Adapter: `.git/` = CRITICAL, platform keys = HIGH, dedup por source+type+evidence, cap 20. **Desviación registrada**: las rutas `/wp-content/plugins|themes/**/*.js` del diseño quedaron fuera porque no son enumerables sin crawl; ver registro. |
-| F1-SSL | SSL Deep Analyzer | HECHO (`ff6f79b`) | Handler `ssl_deep_analyzer` en tools/network.py (stdlib-only ssl/socket): probes de TLS 1.0/1.1/1.2/1.3 con contextos restringidos por OP_NO_*, sondas de ciphers débiles (RC4/DES/3DES/NULL vía set_ciphers, solo reporta lo realmente negociado), HSTS por GET HTTP/1.0 crudo sobre TLS, OCSP stapling con ClientHello manual (ext status_request RFC 6066) y grade A+ a F por caps discretos. Adapter: legacy/weak-cipher/expired = HIGH, self-signed/no-PFS/HSTS ausente = MEDIUM, hsts_short/cert_expiring/ocsp = LOW. |
+| F1-SSL | SSL Deep Analyzer | HECHO (`ff6f79b` + fix `57057bf`) | Handler `ssl_deep_analyzer` en tools/network.py (stdlib-only ssl/socket): probes de TLS 1.0/1.1/1.2/1.3 con contextos restringidos por OP_NO_*, sondas de ciphers débiles (RC4/DES/3DES/NULL vía set_ciphers, solo reporta lo realmente negociado), HSTS por GET HTTP/1.0 crudo sobre TLS, OCSP stapling con ClientHello manual (ext status_request RFC 6066) y grade A+ a F por caps discretos. Reader ASN.1/DER puro como fallback cuando getpeercert() texto devuelve {} (CN subject/issuer, fechas, SAN, AIA OCSP). Smoke prod: A+ en sec.sammideblas.com. Adapter: legacy/weak-cipher/expired = HIGH, self-signed/no-PFS/HSTS ausente = MEDIUM, hsts_short/cert_expiring/ocsp = LOW. |
 | F1-DNS | DNS Zone Hygiene | PENDIENTE | SPF permisivo (+all), DKIM selector brute, DMARC p=none, DNSKEY débil. |
 | F1-FAVICON | Favicon/Stack Fingerprinting | PENDIENTE | Hashes de favicons + paths estáticos para versiones exactas. |
 
@@ -263,6 +263,15 @@ Convención: cada sesión añade una entrada al FINAL de la lista (la más recie
 - Decisiones: (1) best-effort declarado — si el OpenSSL local no puede negociar TLS 1.0/1.1 o rechazar un cipher string, la sonda se marca como no soportada/no testeable y NUNCA se reporta un cipher débil no negociado; (2) OCSP "unknown" es legítimo (no penaliza el grade): la check `ocsp_unavailable` solo avisa cuando ni stapling ni responder están disponibles; (3) si ninguna conexión TLS tiene éxito el handler devuelve error limpio (patrón ssl_analyzer) y el adapter no emite findings.
 - Siguiente micro-paso: F1-DNS (DNS Zone Hygiene).
 
+### 2026-08-26 — F1-SSL: smoke prod, 2 bugs reales y reader DER (fix 57057bf)
+- Smoke en prod (`ssl_deep_analyzer('sec.sammideblas.com')`) reveló 2 bugs: (1) `weak_ciphers` reportaba TLS_AES_256_GCM_SHA384 — `set_ciphers` no restringe la oferta TLS 1.3, así que los contextos "RC4" ofrecían suites 1.3 por defecto; fix: pin de `OP_NO_TLSv1_3` en el contexto de sondas + `_classify_weak_cipher(name)` que mapea el nombre negociado a familia débil (NULL/RC4/3DES/DES, 3DES antes que DES por substring). (2) PFS falso positivo con TLS 1.3: `has_pfs` ahora acepta version startswith "TLSv1.3" (PFS nativo, sin Kx en el nombre).
+- `days_left: None`: en este build (Python 3.12.10 / OpenSSL 3.0.16 Windows) `getpeercert()` texto devuelve {} con contexto CERT_NONE (funciona sí con verificación). DER siempre disponible. Solución: reader ASN.1/DER puro (`_der_tlv`, `_parse_name_cn`, `_parse_cert_der`, `_cert_facts`) — subject/issuer CN, notBefore/notAfter, SAN, AIA OCSP responder; merge texto+DER en `_probe_certificate`.
+- Bugs del reader cazados por tests: offset del serial INTEGER tras versión explícita (v3/v2); OIDs reconocidos por byte-exact compare (SAN `55 1D 11`, AIA `2B 06 01 05 05 07 30 01`, CN `55 04 03`) — se eliminó el decoder base-128 roto; GeneralName: el contenido del `[2]/[6] EXPLICIT` YA es el TLV IA5String (un desempaquetado menos, no uno más); helper de tests `_t` escribía cabecera long-form con byte extra (`30 82 02 00 ...` → `30 82 00 xx`); `not_before` sin fallback DER en el merge.
+- Verificado contra certs reales (github.com: SAN thub.com/w.github.com, issuer Sectigo; prod CF: YE1, SAN sammideblas.com/mmideblas.com, days_left 60).
+- Suite: 115 tests en verde, ruff limpio. Smoke final prod: grade A+, weak_ciphers=[], único finding LOW `ocsp_unavailable` (esperado: CF sin stapling ni AIA).
+- Observaciones del usuario (NO bloqueantes, aparcadas): (1) perf — probes TLS 1.0/1.1/1.2/1.3 + ciphers en serie; (2) HRR edge case no cubierto por tests; (3) HSTS sin seguir redirects (el GET crudo no sigue 301/302); (4) backlog refactor F1-SECRETS pendiente.
+- Decisión de la sesión: ANTES de arrancar F1-DNS, hacer el pase rápido de refactor de F1-SECRETS (~30 min): session compartida en `_secret_fetch` (hoy ~22 requests/scan con una session por URL) y `search` → `finditer` + dedup por posición en `_scan_text`. Después, F1-DNS.
+
 ## 7. Reglas y restricciones del proyecto (NO VIOLAR)
 
 1. **NO emojis, flechas de texto ni símbolos de color** en ninguna salida, nota, script o commit (regla global del usuario). Escribir las palabras.
@@ -292,4 +301,4 @@ M5 Stick + CC1101 + nRF24 (Bruce), WiFi Marauder ESP32 v6, LilyGo T-Embed + Bus 
 
 ---
 
-*Última actualización: 2026-08-26, post-F1-SSL (feat ff6f79b; suite 103 tests en verde). Próxima sesión: leer este archivo entero y arrancar F1-DNS (DNS Zone Hygiene).*
+*Última actualización: 2026-08-26, post-F1-SSL fix `57057bf` (suite 115 tests en verde; smoke prod A+). Próxima sesión: leer este archivo entero y hacer el pase de refactor F1-SECRETS (`_secret_fetch` session compartida + `_scan_text` finditer/dedup), y después arrancar F1-DNS (DNS Zone Hygiene).*
