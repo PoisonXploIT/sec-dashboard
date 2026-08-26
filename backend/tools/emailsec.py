@@ -448,10 +448,12 @@ def _tlv(data: bytes, off: int) -> tuple[int, int, int]:
 
 
 def _spki_key_bits(p_b64: str) -> tuple[str, int | None]:
-    """Classify a DKIM public key (SPKI DER).
+    """Classify a DKIM public key (SPKI DER, RFC 5280/4055).
 
     Returns ('rsa', bits), ('ec', 256) for ecdsa-with-SHA256 (RFC 6945
     mandates P-256) or ('unknown', None) when it cannot be derived.
+    For rsaEncryption the BIT STRING holds RSAPublicKey SEQUENCE
+    {modulus, exponent}; the modulus INTEGER is walked out explicitly.
     """
     try:
         der = base64.b64decode(p_b64.encode("ascii"), validate=True)
@@ -470,9 +472,16 @@ def _spki_key_bits(p_b64: str) -> tuple[str, int | None]:
         if der[bit_off] != 0x03:
             return "unknown", None
         _, blen, boff = _tlv(der, bit_off)
-        mpi = der[boff:boff + blen][1:]     # skip the unused-bits byte
+        body = der[boff:boff + blen][1:]    # skip the unused-bits byte
         if oid == bytes.fromhex("2a864886f70d010100"):  # rsaEncryption
-            return "rsa", int.from_bytes(mpi, "big").bit_length()
+            stag, _, soff = _tlv(body, 0)          # RSAPublicKey SEQUENCE
+            if stag != 0x30:
+                return "unknown", None
+            itag, ilen, ioff = _tlv(body, soff)    # first INTEGER = modulus
+            if itag != 0x02:
+                return "unknown", None
+            modulus = body[ioff:ioff + ilen]
+            return "rsa", int.from_bytes(modulus, "big").bit_length()
         if oid == bytes.fromhex("2a8648ce3d030107"):    # ecdsa-with-SHA256
             return "ec", 256
         return "unknown", None
@@ -484,10 +493,11 @@ _DNSKEY_EC_BITS = {5: 256}  # algorithm 5 = ECDSAP256 (RFC 8624)
 
 
 def _dnskey_bits(algorithm: int, publickey_b64: str) -> int | None:
-    """Key bit length from a DKIM/DNSKEY RDATA; None when not derivable.
+    """Key bit length from a DNSKEY RDATA; None when not derivable.
 
-    RSA-family algorithms (1, 3) carry the modulus as a base-128 MPI in the
-    Public Key field, so its big-endian value gives the exact bit length.
+    RSA-family algorithms (1, 3) put the modulus in the Public Key field as
+    a big-endian two's-complement byte string (the base-128 MPI of RFC 4034),
+    so int.from_bytes(...).bit_length() is exact.
     """
     if algorithm in _DNSKEY_EC_BITS:
         return _DNSKEY_EC_BITS[algorithm]

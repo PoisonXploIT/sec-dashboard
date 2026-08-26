@@ -22,12 +22,19 @@ def _tlv(tag: int, content: bytes) -> bytes:
 
 
 def _spki(kind: str, key: bytes) -> str:
-    """Build a minimal SPKI (kind: 'rsa' | 'ec') and return it base64'd."""
+    """Build a minimal RFC 5280 SPKI (kind: 'rsa' | 'ec') and return it base64'd.
+
+    RSA: BIT STRING = RSAPublicKey SEQUENCE { INTEGER modulus, INTEGER exp }
+    (the real-world DKIM p= encoding; the parser must walk into the modulus).
+    EC: BIT STRING = raw point.
+    """
     if kind == "rsa":
         algid = _tlv(0x30, b"\x06\x09" + RSA_OID + b"\x05\x00")
+        rsapubkey = _tlv(0x30, _tlv(0x02, b"\x00" + key) + _tlv(0x02, b"\x01\x00\x01"))
+        bitstr = b"\x00" + rsapubkey
     else:
         algid = _tlv(0x30, b"\x06\x08" + ECDSA_OID)
-    bitstr = b"\x00" + key
+        bitstr = b"\x00" + key
     return base64.b64encode(_tlv(0x30, algid + _tlv(0x03, bitstr))).decode()
 
 
