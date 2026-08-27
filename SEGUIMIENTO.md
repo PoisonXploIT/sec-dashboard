@@ -15,7 +15,7 @@
 - **Deploy productivo**: Railway, dominio `sec.sammideblas.com` (Cloudflare Access + API key).
 - **Último commit de código**: `993ab45` (export CSV, cola paso 4) tras `912676b` (F1-FAVICON).
 - **Fecha del commit**: 2026-08-26.
-- **Estado del plan**: Fase 1 COMPLETA de verdad (F1-FAVICON `912676b`). **Fase 2 COMPLETA**: Full Depth pipeline (`a0cf16a`), reporte ejecutivo PDF (`10ed28f`), comparativa histórica en History (`165af5d`). **Fase 3 / 3E CERRADA**: sub-micro-pasos 1 (CLI headless, `3da329e`), 2 (modo light dedicado, `6f230b0`) y 3 (búsqueda en History, `85f51f3`) completos. **CLI enrichment completa** (`8ef2853`): `--tool TOOL_ID --target HOST` (run_tool directo), `--list-tools`, `--list-pipelines`, mutua exclusión `--tool`/`--pipeline`. **Cola de micro-pasos fijada por el usuario** (2026-08-26, antes de hardware/TUI): rate limiting → paginación server-side → F1-FAVICON → export CSV → logging estructurado; luego hardware/TUI con capturas reales. **Rate limiting COMPLETO** (`6df6c70`); **paginación server-side COMPLETA** (`e528101`); **F1-FAVICON COMPLETA** (`912676b`); **EXPORT CSV COMPLETO** (`993ab45`); **LOGGING ESTRUCTURADO COMPLETO** (`6e8e8c1`, cierra la cola de micro-pasos); **WAYBACK_URLS COMPLETA** (`a7762e3`); **EXPLOITDB_SEARCH COMPLETA** (`2a9dc52`); **SHODAN_LOOKUP EXTENDIDA** (`15c101c`, dsearch con key + fallback /host), siguiente del backlog OSINT: dnsdumpster_enum.
+- **Estado del plan**: Fase 1 COMPLETA de verdad (F1-FAVICON `912676b`). **Fase 2 COMPLETA**: Full Depth pipeline (`a0cf16a`), reporte ejecutivo PDF (`10ed28f`), comparativa histórica en History (`165af5d`). **Fase 3 / 3E CERRADA**: sub-micro-pasos 1 (CLI headless, `3da329e`), 2 (modo light dedicado, `6f230b0`) y 3 (búsqueda en History, `85f51f3`) completos. **CLI enrichment completa** (`8ef2853`): `--tool TOOL_ID --target HOST` (run_tool directo), `--list-tools`, `--list-pipelines`, mutua exclusión `--tool`/`--pipeline`. **Cola de micro-pasos fijada por el usuario** (2026-08-26, antes de hardware/TUI): rate limiting → paginación server-side → F1-FAVICON → export CSV → logging estructurado; luego hardware/TUI con capturas reales. **Rate limiting COMPLETO** (`6df6c70`); **paginación server-side COMPLETA** (`e528101`); **F1-FAVICON COMPLETA** (`912676b`); **EXPORT CSV COMPLETO** (`993ab45`); **LOGGING ESTRUCTURADO COMPLETO** (`6e8e8c1`, cierra la cola de micro-pasos); **WAYBACK_URLS COMPLETA** (`a7762e3`); **EXPLOITDB_SEARCH COMPLETA** (`2a9dc52`); **SHODAN_LOOKUP EXTENDIDA** (`15c101c`, dsearch con key + fallback /host), siguiente del backlog OSINT: publicwww_search.
 
 ### Comandos de referencia (siempre desde el repo)
 
@@ -395,7 +395,7 @@ Prioridad para ampliar recon pasivo y threat intel sin hardware ni parsers binar
 | 1 | `wayback_urls` | `web.py` | archive.org | No | 1-2 h | URLs historicas de un dominio. Alto impacto para recon; encuentra endpoints muertos. |
 | 2 | `exploitdb_search` | `vuln.py` | exploit-db.com | No | 1-2 h | COMPLETO (`2a9dc52`). Exploits publicos por producto/CVE. Complementa F1-CVE. |
 | 3 | `shodan_lookup` | `osint.py` | shodan.io | Si (opcional) | 2-3 h | **EXTENSIÓN COMPLETA** (`15c101c`): dsearch con `SHODAN_API_KEY` + fallback `/host`; internetdb sin key intacto; adapter desde el día uno. Ver entradas de la sección 6. |
-| 4 | `dnsdumpster_enum` | `network.py` | dnsdumpster.com | No | 1-2 h | Subdominios + DNS. Scraping sencillo. Complementa `subdomain_enum`. |
+| 4 | `dnsdumpster_enum` | `network.py` | dnsdumpster.com | Si (free, `DNSDUMPSTER_API_KEY`) | 1-2 h | **COMPLETO** (`fe2ca0e`): API nueva `api.dnsdumpster.com/domain/{domain}` (la anonima antigua esta muerta 404); parser a/cname/mx/ns, adapter MEDIUM/INFO cap 10. Ver footer. |
 | 5 | `publicwww_search` | `osint.py` | publicwww.com | Si (free tier) | 2 h | Codigo expuesto por dominio. Complementa F1-SECRETS. |
 
 Alternativas del mismo nivel si alguna de las anteriores no encaja:
@@ -421,7 +421,7 @@ Reglas para cada tool de este backlog:
 4. Adapter `@register("tool_id")` en `findings.py` desde el dia uno.
 5. Timeout y manejo de errores best-effort: si la API externa falla, el scan devuelve lo que tenga sin romper.
 
-- Siguiente del backlog OSINT: **`dnsdumpster_enum`** (`shodan_lookup` COMPLETO `15c101c`; `exploitdb_search` COMPLETO `2a9dc52`; `wayback_urls` COMPLETO `a7762e3`).
+- Siguiente del backlog OSINT: **`publicwww_search`** (`dnsdumpster_enum` COMPLETO `fe2ca0e`; `shodan_lookup` COMPLETO `15c101c`; `exploitdb_search` COMPLETO `2a9dc52`; `wayback_urls` COMPLETO `a7762e3`).
 
 ### 2026-08-26 — Rate limiting completo (cola de micro-pasos, paso 1)
 - Commits `6df6c70` (feat) + docs de cierre. `backend/ratelimit.py` NUEVO: `RateLimiter` sliding-window en memoria (deque por clave; los rechazos NO se registran y no alargan la prohibición; GC a 4096 claves para acotar memoria; reloj inyectable). Cableado en `main.py`: bucket estricto **30 req/min por IP** en POST /api/scans|pipelines|targets (rutas exactas), bucket de lectura **600 req/min por IP** en GET /api/* (la UI hace polling cada ~2s durante un run), respuesta **429 con `Retry-After`** (segundos hasta que expira el hit más viejo, mín. 1).
@@ -485,7 +485,7 @@ Reglas para cada tool de este backlog:
 - Tests: 10 nuevos en `tests/test_tools_shodan.py` sin red (parsing dsearch + filas malformadas + truncado banner, fallback vacío y fallo a /host, doble fallo → error, vulns no-string descartados, adapter por forma x3 + cap 10 + dedup + vacío). Suite **242** en verde (232 + 10), ruff limpio, compileall OK.
 - Smoke in-proceso (red real, sin key): `run_tool('shodan_lookup', '8.8.8.8')` → internetdb OK (puertos 53/443, hostnames dns.google/sandbox.samacare.com), 0 findings correctos (sin vulns ni puertos sensibles del mapa).
 - Pendiente opcional: smoke con key real del usuario para validar dsearch en producción (el diseño de params es el documentado por Shodan; si `fields` devuelve algo distinto, lo cubre best-effort + fallback /host).
-- Siguiente del backlog OSINT: **`dnsdumpster_enum`** (scraping dnsdumpster.com, sin key, 1-2 h).
+- Siguiente del backlog OSINT: **`publicwww_search`** (`dnsdumpster_enum` COMPLETO `fe2ca0e`: la API nueva de dnsdumpster.com SI requiere key free, el endpoint anonimo antiguo estaba muerto; ver footer).
 
 ## 7. Reglas y restricciones del proyecto (NO VIOLAR)
 
