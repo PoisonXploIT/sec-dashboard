@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+import re
 import socket
 from urllib.parse import urlparse
 
@@ -355,3 +356,80 @@ def _is_ip(s: str) -> bool:
         return True
     except socket.error:
         return False
+
+
+# ── PublicWWW Search (OSINT / publicwww.com) ───────────────────
+_PUBLICWWW_API_URL = "https://api.publicwww.com/domains/"
+_PUBLICWWW_MAX_ROWS = 1000
+
+
+async def _publicwww_query(domain: str) -> list[dict] | None:
+    """One GET to the publicwww API; returns raw rows.
+
+    None means the query itself failed (network/HTTP/JSON); the caller
+    must treat it as best-effort and degrade to an error dict.
+    """
+    try:
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=60)
+        ) as session:
+            async with session.get(
+                f"{_PUBLICWWW_API_URL}{domain}",
+                headers={"User-Agent": "sec-dashboard"},
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    rows = data.get("rows")
+    if not isinstance(rows, list):
+        return []
+    return [r for r in rows if isinstance(r, dict)][: _PUBLICWWW_MAX_ROWS]
+
+
+async def publicwww_search(target: str, **kw) -> dict:
+    """Exposed URLs/hosts of a domain via publicwww.com (passive).
+
+    PublicWWW indexes the public web and reports every URL it has seen
+    for the domain — attack-surface discovery (stale hosts, forgotten
+    panels, tech stack). Best-effort: any failure degrades to an error dict.
+    """
+    t = target.strip().lower()
+    if t.startswith(("http://", "https://")):
+        t = re.sub(r"^https?://", "", t)
+    host = t.split("/")[0].split(":")[0].strip()
+    if not host or _is_ip(host):
+        return {"target": host, "error": "publicwww_search requires a domain, not an IP"}
+
+    rows = await _publicwww_query(host)
+    if rows is None:
+        return {"target": host, "error": "PublicWWW API unavailable or returned an error"}
+
+    hosts: dict[str, None] = {}
+    techs: dict[str, None] = {}
+    urls: list[str] = []
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        h = r.get("hostname")
+        if isinstance(h, str) and h.strip():
+            hosts.setdefault(h.strip())
+        tech = r.get("tech")
+        if isinstance(tech, dict):
+            name = tech.get("name")
+            if isinstance(name, str) and name:
+                techs.setdefault(name)
+        u = r.get("url")
+        if isinstance(u, str) and u.strip():
+            urls.append(u.strip())
+
+    return {
+        "target": host,
+        "count": len(rows),
+        "hosts": sorted(hosts)[:_PUBLICWWW_MAX_ROWS],
+        "technologies": sorted(techs)[:100],
+        "urls": urls[:200],
+    }

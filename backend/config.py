@@ -268,6 +268,13 @@ TOOLS = {
         "icon": "DD",
         "timeout": 60,
     },
+    "publicwww_search": {
+        "name": "PublicWWW Search",
+        "category": "OSINT",
+        "description": "Exposed URLs/hosts of a domain via publicwww.com (passive, no key)",
+        "icon": "PW",
+        "timeout": 60,
+    },
     # ─── Email Security ───
     "dnssec_checker": {
         "name": "DNSSEC Checker",
