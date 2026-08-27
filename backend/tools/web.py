@@ -1020,3 +1020,98 @@ async def secret_leak_scan(target: str, **kw) -> dict:
         "findings": findings,
         "count": len(findings) + len(git_exposed),
     }
+
+
+# ── Wayback URLs (OSINT / archive.org CDX) ───────────────────────
+_WAYBACK_CDX_URL = "https://web.archive.org/cdx/search/cdx"
+_WAYBACK_MAX_LIMIT = 1000
+
+
+async def _cdx_query(host: str, limit: int) -> list[list] | None:
+    """One CDX query for a host; returns data rows ([] if no captures).
+
+    None means the query itself failed (network/HTTP/JSON); the caller must
+    treat it as best-effort and degrade to an error dict.
+    """
+    params = {
+        "matchType": "domain",   # host + all its subdomains
+        "output": "json",
+        "collapse": "urlkey",    # dedupe query-string variants
+        "limit": str(limit),
+    }
+    try:
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=30)
+        ) as session:
+            async with session.get(f"{_WAYBACK_CDX_URL}/{host}", params=params) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+    except Exception:
+        return None
+    if not isinstance(data, list) or not data:
+        return []
+    # First row is the column header: urlkey, timestamp, original,
+    # statuscode, digest, mimetype.
+    return data[1:]
+
+
+async def wayback_urls(target: str, limit: int = 500, **kw) -> dict:
+    """Historical URLs of a domain from the Internet Archive (archive.org CDX).
+
+    Passive recon: lists every archived URL for the domain and its
+    subdomains, collapses query-string variants and surfaces the unique
+    paths — dead-endpoint hunting (removed files, old panels, .git,
+    backups). Best-effort: any failure degrades to an error dict.
+    """
+    if not target.startswith(("http://", "https://")):
+        target = f"https://{target}"
+    parsed = urlparse(target)
+    host = (parsed.netloc or target).split("/")[0].split(":")[0].strip().lower()
+    if not host or _is_ip(host):
+        return {"target": host, "error": "Wayback lookup requires a domain, not an IP"}
+
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = 500
+    limit = max(1, min(limit, _WAYBACK_MAX_LIMIT))
+
+    rows = await _cdx_query(host, limit)
+    if rows is None:
+        return {"target": host, "error": "CDX API unavailable or returned an error"}
+
+    urls: list[dict] = []
+    path_hits: dict[str, int] = {}
+    for row in rows:
+        try:
+            original, status, ts = row[2], str(row[3]), str(row[1])
+        except (IndexError, TypeError):
+            continue
+        if not original or not original.startswith(("http://", "https://")):
+            continue
+        p = urlparse(original)
+        path = p.path or "/"
+        path_hits[path] = path_hits.get(path, 0) + 1
+        urls.append({
+            "url": original,
+            "path": path,
+            "status": status,
+            "timestamp": ts,
+        })
+
+    # CDX timestamps are zero-padded (YYYYMMDDHHMMSS): string order == time order.
+    urls.sort(key=lambda u: u["timestamp"])
+    paths = [
+        {"path": p, "hits": n}
+        for p, n in sorted(path_hits.items(), key=lambda kv: (-kv[1], kv[0]))
+    ][:200]
+
+    return {
+        "target": host,
+        "count": len(urls),
+        "urls": urls,
+        "paths": paths,
+        "first_seen": urls[0]["timestamp"] if urls else None,
+        "last_seen": urls[-1]["timestamp"] if urls else None,
+    }

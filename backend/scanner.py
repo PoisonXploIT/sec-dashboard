@@ -15,7 +15,7 @@ from backend.tools.network import (
 from backend.tools.web import (
     header_analyzer, dir_fuzzer, sqli_scanner, xss_scanner,
     cors_checker, tech_detector, csp_analyzer, open_redirect,
-    cve_correlation, secret_leak_scan,
+    cve_correlation, secret_leak_scan, wayback_urls,
 )
 from backend.tools.favicon import favicon_fingerprint
 from backend.tools.vuln import cve_search, hash_checker, password_audit
@@ -64,6 +64,7 @@ HANDLERS: dict[str, Callable] = {
     "process_monitor": process_monitor,
     "system_info": system_info,
     # OSINT
+    "wayback_urls": wayback_urls,
     "asn_lookup": asn_lookup,
     "reverse_dns": reverse_dns,
     "ct_logs": ct_logs,

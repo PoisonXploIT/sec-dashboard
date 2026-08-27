@@ -465,6 +465,29 @@ def _adapt_favicon_fingerprint(result: dict, target: str) -> list[Finding]:
     return out
 
 
+@register("wayback_urls")
+def _adapt_wayback_urls(result: dict, target: str) -> list[Finding]:
+    """INFO: historical URL inventory feeds dead-endpoint / takeover hunting."""
+    urls = result.get("urls", [])
+    if not urls:
+        return []
+    top_paths = [p["path"] for p in result.get("paths", [])[:10]]
+    return [Finding(
+        tool="wayback_urls", category="OSINT", severity=Severity.INFO,
+        title=f"Wayback Machine: {result.get('count', len(urls))} archived URLs",
+        description=(
+            f"Historical URL inventory from archive.org (first seen "
+            f"{result.get('first_seen') or 'unknown'}, last seen "
+            f"{result.get('last_seen') or 'unknown'}). Compare against live "
+            "endpoints to hunt dead paths, removed files and takeover candidates."
+        ),
+        evidence={"count": result.get("count", len(urls)), "top_paths": top_paths},
+        remediation=("Review archived-but-dead endpoints for sensitive leftovers "
+                     "(backups, .git, old admin panels) and dangling subdomains."),
+        target=target, confidence=0.9,
+    )]
+
+
 _DNS_HYGIENE_META = {
     # id: (severity, confidence, title, remediation)
     "spf_permissive_all": (

@@ -247,6 +247,13 @@ TOOLS = {
         "icon": "Gp",
         "timeout": 10,
     },
+    "wayback_urls": {
+        "name": "Wayback URLs",
+        "category": "OSINT",
+        "description": "Historical URLs of a domain from the Internet Archive (archive.org CDX)",
+        "icon": "WB",
+        "timeout": 60,
+    },
     # ─── Email Security ───
     "dnssec_checker": {
         "name": "DNSSEC Checker",
