@@ -387,6 +387,40 @@ Convención: cada sesión añade una entrada al FINAL de la lista (la más recie
   - Candidatos pendientes fuera del orden estricto: tests de integración end-to-end (httpx.AsyncClient(app=main.app) + DB temporal), variables de entorno para config (PORT, API_KEY, DB_PATH, REMOTE_MODE, SPLUNK_*).
   - Tras la cola: hardware/TUI cuando haya capturas reales.
 
+### Backlog de integraciones OSINT / threat intel (fuentes del PDF de kinomakino)
+Prioridad para ampliar recon pasivo y threat intel sin hardware ni parsers binarios. Todas siguen el patron existente: handler async → adapter en `findings.py` → registro en `TOOLS`/`HANDLERS` → tests sin red.
+
+| # | Tool | Modulo | Fuente | API key | Estimacion | Notas |
+|---|---|---|---|---|---|---|
+| 1 | `wayback_urls` | `web.py` | archive.org | No | 1-2 h | URLs historicas de un dominio. Alto impacto para recon; encuentra endpoints muertos. |
+| 2 | `exploitdb_search` | `vuln.py` | exploit-db.com | No | 1-2 h | Exploits publicos por producto/CVE. Complementa F1-CVE. |
+| 3 | `shodan_lookup` | `osint.py` | shodan.io | Si | 2-3 h | Puertos, banners, CVEs, tags. Requiere API key configurable via env/UI. |
+| 4 | `dnsdumpster_enum` | `network.py` | dnsdumpster.com | No | 1-2 h | Subdominios + DNS. Scraping sencillo. Complementa `subdomain_enum`. |
+| 5 | `publicwww_search` | `osint.py` | publicwww.com | Si (free tier) | 2 h | Codigo expuesto por dominio. Complementa F1-SECRETS. |
+
+Alternativas del mismo nivel si alguna de las anteriores no encaja:
+- `searchcode_search` (searchcode.com): codigo en repositorios publicos.
+- `grepapp_search` (grep.app): busqueda en Git.
+- `vulners_search` (vulners.com): vulnerabilidades + exploits, alternativa/complemento a ExploitDB.
+- `otx_lookup` (otx.alienvault.com): threat intel por IP/dominio/hash.
+- `greynoise_lookup` (greynoise.io): clasificacion de IPs escaneando internet (ruido vs amenaza real).
+- `urlscan_submit` / `urlscan_lookup` (urlscan.io): analisis de URL.
+- `securitytrails_enum` (securitytrails.com): DNS historico y subdominios.
+- `hunter_email_finder` (hunter.io): emails de un dominio.
+
+Fuera de alcance por ahora (pagadas o complejas):
+- Dehashed (pagada).
+- WiGLE (requiere contexto/hardware WiFi).
+- Polyswarm (malware, complejo).
+- Pastebin (API dificultosa, mucho ruido).
+
+Reglas para cada tool de este backlog:
+1. Sin dependencias nuevas si es posible (`httpx`/`aiohttp` ya estan; `bs4` solo si el scraping lo justifica).
+2. Las API keys deben ser configurables via environment o UI (Settings > API Keys), nunca hardcodeadas.
+3. Tests con stubs/monkeypatch, sin red.
+4. Adapter `@register("tool_id")` en `findings.py` desde el dia uno.
+5. Timeout y manejo de errores best-effort: si la API externa falla, el scan devuelve lo que tenga sin romper.
+
 - Siguiente micro-paso: **rate limiting**.
 
 ### 2026-08-26 — Rate limiting completo (cola de micro-pasos, paso 1)
@@ -448,7 +482,7 @@ Eres el agente de sec-dashboard. Primero lee este archivo entero (la sección 7 
 **Rate limiting HECHO** (`6df6c70`): `backend/ratelimit.py` (`RateLimiter` sliding-window, rechazos no se registran, GC a 4096 claves) + middleware en main.py — 30 req/min/IP en POST /api/scans|pipelines|targets (rutas exactas), 600 GET /api/*, 429 + Retry-After; clave = direct peer (XFF NO confiable: header spoofeable); corre antes que el auth.
 **Paginación server-side HECHA** (`e528101`): page/per_page (1-based) en `/api/scans` y `/api/pipelines/history` con `total`/`page`/`per_page` en la respuesta; per_page cap 200, default 50 (scans) / 20 (pipelines, el antiguo hard cap); offset/limit retirados (breaking registrado, únicos consumidores eran frontend+guía del repo); frontend a página con totals server-side y Prev/Next en ambos tabs; `viewScanResult` a `GET /api/scans/{id}`.
 **F1-FAVICON HECHO** (`912676b`, cierra Fase 1): tool `favicon_fingerprint` (modulo propio `backend/tools/favicon.py`) — GET pasivo de 4 paths de icono, MD5/SHA256, lookup contra `data/favicon_hashes.json` (6 favicons oficiales REALES: WordPress, Drupal, Joomla, Shopify, Ghost, Wix); findings INFO; no entra en pipelines (extension registrada); renderer PDF por fallback JSON; base extensible editando el JSON. Suite 194.
-Tarea: **seguir la cola fijada por el usuario (2026-08-26), arrancar por export CSV** (`912676b` local, push pendiente de confirmación). Orden restante: 1) export CSV (/api/pipelines/{id}/export/csv y/o /api/scans/{id}/export/csv, csv stdlib); 2) logging estructurado (niveles + archivo rotativo, sin print()). ATENCION: hay una seccion NO commiteada en SEGUIMIENTO.md (Backlog OSINT/threat intel del PDF de kinomakino: wayback_urls, exploitdb_search, shodan_lookup, dnsdumpster_enum, publicwww_search) — es nota del usuario/otra sesion, no la pisar ni commitear sin preguntar. Candidatos fuera del orden estricto: tests de integración end-to-end (httpx.AsyncClient(app=main.app) + DB temporal), config por variables de entorno (PORT, API_KEY, DB_PATH, REMOTE_MODE, SPLUNK_*). Tras la cola: hardware/TUI con capturas reales — B WiFi Marauder v6 / CYD (reutiliza `wifi.py`, 1-2 h); C Bruce RF/BLE (`bruce.py` nuevo, REQUIERE capturas reales del serial/formato); D HackRF / Bus Pirate (parsers `.c16` e I2C/SPI/UART, capturas obligatorias). Si se elige hardware C/D: pedir las capturas ANTES de escribir parsers.
+Tarea: **seguir la cola fijada por el usuario (2026-08-26), arrancar por export CSV** (`912676b` local, push pendiente de confirmación). Orden restante: 1) export CSV (/api/pipelines/{id}/export/csv y/o /api/scans/{id}/export/csv, csv stdlib); 2) logging estructurado (niveles + archivo rotativo, sin print). **En cola tras estos dos** (idea del usuario, seccion 'Backlog de integraciones OSINT / threat intel' de este mismo archivo): wayback_urls, exploitdb_search, shodan_lookup, dnsdumpster_enum, publicwww_search (+ alternativas y reglas fijadas: keys por env/UI, tests sin red, adapter desde el dia uno, best-effort). Candidatos fuera del orden estricto: tests de integración end-to-end (httpx.AsyncClient(app=main.app) + DB temporal), config por variables de entorno (PORT, API_KEY, DB_PATH, REMOTE_MODE, SPLUNK_*). Tras la cola: hardware/TUI con capturas reales — B WiFi Marauder v6 / CYD (reutiliza `wifi.py`, 1-2 h); C Bruce RF/BLE (`bruce.py` nuevo, REQUIERE capturas reales del serial/formato); D HackRF / Bus Pirate (parsers `.c16` e I2C/SPI/UART, capturas obligatorias). Si se elige hardware C/D: pedir las capturas ANTES de escribir parsers.
 Backlog pendiente: variables duales para los 36 rgba fijos si algún tint queda pálido en light; TUI (rich/curses) y `--save` CLI deliberadamente fuera hasta tener motivo. F1-FAVICON ya está dentro de la cola (paso 3). NUEVO backlog registrado: integraciones OSINT/threat intel desde el PDF de kinomakino — `wayback_urls`, `exploitdb_search`, `shodan_lookup`, `dnsdumpster_enum`, `publicwww_search` y alternativas (`searchcode`, `grep.app`, `vulners`, `otx`, `greynoise`, `urlscan`, `securitytrails`, `hunter.io`).
 Reglas: MVP sin dependencias nuevas, tests sin red, commits `feat:`/`fix:`, push solo con suite verde, sin emojis.
 Al cerrar sesión: actualizar las tablas/sección 6 de este archivo y el footer con el siguiente micro-paso.
