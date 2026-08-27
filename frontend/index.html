@@ -402,7 +402,7 @@
     const state = {
         page: 'dashboard', tools: [], targets: [], selectedTarget: null,
         pipelines: {}, ws: null, categoryFilter: null, toolSearch: '',
-        historyTab: 'scans', historySearch: '', historyPMode: '', historyPStatus: '', historyOffset: 0, historyLimit: 50,
+        historyTab: 'scans', historySearch: '', historyPMode: '', historyPStatus: '', historyPage: 1, historyPPage: 1,
         activePipelineId: null, activeScanId: null,
     };
 
@@ -1680,15 +1680,19 @@
         const content = document.getElementById('content');
         content.innerHTML = '<div class="skeleton" style="height:200px;margin-bottom:16px"></div>'.repeat(2);
 
-        const scansPromise = api.get(`/scans?offset=${state.historyOffset}&limit=${state.historyLimit}`);
+        const scansPromise = api.get(`/scans?page=${state.historyPage}&per_page=50`);
         const pParams = new URLSearchParams();
+        pParams.set('page', state.historyPPage);
+        pParams.set('per_page', 20);
         if (state.historyPMode) pParams.set('mode', state.historyPMode);
         if (state.historyPStatus) pParams.set('status', state.historyPStatus);
-        const pipelinesPromise = api.get('/pipelines/history' + (pParams.toString() ? `?${pParams}` : ''));
+        const pipelinesPromise = api.get('/pipelines/history?' + pParams.toString());
         const [scans, pipelines] = await Promise.all([scansPromise, pipelinesPromise]);
 
         const allScans = scans.scans || [];
         const allPipelines = pipelines.pipelines || [];
+        const scansTotal = scans.total ?? allScans.length;
+        const pipesTotal = pipelines.total ?? allPipelines.length;
 
         // Filter scans by search
         let filteredScans = allScans;
@@ -1719,8 +1723,8 @@
         content.innerHTML = `
             <div class="flex items-center justify-between mb-16">
                 <div class="tabs" style="margin-bottom:0;border-bottom:none">
-                    <div class="tab ${activeTab==='scans'?'active':''}" onclick="state.historyTab='scans';renderHistoryPage()">Scans (${allScans.length})</div>
-                    <div class="tab ${activeTab==='pipelines'?'active':''}" onclick="state.historyTab='pipelines';renderHistoryPage()">Pipelines (${allPipelines.length})</div>
+                    <div class="tab ${activeTab==='scans'?'active':''}" onclick="state.historyTab='scans';renderHistoryPage()">Scans (${scansTotal})</div>
+                    <div class="tab ${activeTab==='pipelines'?'active':''}" onclick="state.historyTab='pipelines';renderHistoryPage()">Pipelines (${pipesTotal})</div>
                 </div>
                 <div class="flex gap-8">
                     <button class="btn btn-sm" onclick="downloadJSON('/api/export/all/json', 'sec-dashboard-export.json')">Export All (JSON)</button>
@@ -1747,10 +1751,10 @@
                         ${filteredScans.map(s => `<tr><td>${esc(s.tool)}</td><td>${esc(s.target_name||'')} <span style="color:var(--text-muted);font-size:11px">${esc(s.target_host||'')}</span></td><td><span class="badge-status badge-${s.status}">${s.status}</span></td><td style="font-size:12px;color:var(--text-muted)">${timeAgo(s.started_at)}</td><td class="flex gap-8">${s.result?`<button class="btn btn-sm" onclick="viewScanResult(${s.id})">View</button>`:''} <button class="btn btn-sm" onclick="downloadJSON('/api/scans/${s.id}/export/json', 'scan_${s.id}.json')">JSON</button> <button class="btn btn-sm" onclick="downloadPDF('/api/scans/${s.id}/export/pdf', 'scan_${s.id}.pdf')">PDF</button> ${s.status==='running'?`<button class="btn btn-sm btn-danger" onclick="cancelScan(${s.id})">Cancel</button>`:''} <button class="btn btn-sm btn-danger" onclick="deleteScan(${s.id})">Del</button></td></tr>`).join('')}
                     </tbody></table>
                     <div class="flex items-center justify-between mt-16">
-                        <span style="font-size:12px;color:var(--text-muted)">Showing ${filteredScans.length} of ${allScans.length} scans</span>
+                        <span style="font-size:12px;color:var(--text-muted)">Showing ${filteredScans.length} of ${scansTotal} scans (page ${state.historyPage})</span>
                         <div class="flex gap-8">
-                            <button class="btn btn-sm" onclick="state.historyOffset=Math.max(0,state.historyOffset-state.historyLimit);renderHistoryPage()" ${state.historyOffset===0?'disabled':''}>Prev</button>
-                            <button class="btn btn-sm" onclick="state.historyOffset+=state.historyLimit;renderHistoryPage()" ${allScans.length<state.historyLimit?'disabled':''}>Next</button>
+                            <button class="btn btn-sm" onclick="state.historyPage=Math.max(1,state.historyPage-1);renderHistoryPage()" ${state.historyPage===1?'disabled':''}>Prev</button>
+                            <button class="btn btn-sm" onclick="state.historyPage++;renderHistoryPage()" ${allScans.length<50?'disabled':''}>Next</button>
                         </div>
                     </div>` : `<div class="empty-state"><h3>No scans yet</h3><p>Run a tool or pipeline to see results here</p></div>`}
                 </div>
@@ -1758,15 +1762,22 @@
                 <div class="card">
                     ${filteredPipelines.length ? `<table><thead><tr><th>Mode</th><th>Target</th><th>Status</th><th>Started</th><th>Actions</th></tr></thead><tbody>
                         ${filteredPipelines.map(p => `<tr><td><strong>${esc(p.mode)}</strong></td><td><span style="cursor:pointer;text-decoration:underline" title="Ver evolucion del target" onclick="showTargetEvolution(${p.target_id})">${esc(p.target_name||'')}</span> <span style="color:var(--text-muted);font-size:11px">${esc(p.target_host||'')}</span></td><td><span class="badge-status badge-${p.status}">${p.status}</span></td><td style="font-size:12px;color:var(--text-muted)">${timeAgo(p.started_at)}</td><td class="flex gap-8"><button class="btn btn-sm" onclick="viewPipelineResult(${p.id})">View</button> <button class="btn btn-sm" title="Evolucion del target entre scans" onclick="showTargetEvolution(${p.target_id})">Evol</button> <button class="btn btn-sm" onclick="downloadJSON('/api/pipelines/${p.id}/export/json', 'pipeline_${p.id}.json')">JSON</button> <button class="btn btn-sm" onclick="downloadPDF('/api/pipelines/${p.id}/export/pdf', 'pipeline_${p.id}.pdf')">PDF</button> <button class="btn btn-sm" onclick="downloadPDF('/api/pipelines/${p.id}/executive-pdf', 'pipeline_${p.id}_executive.pdf')">Exec</button> ${p.status==='running'?`<button class="btn btn-sm btn-danger" onclick="cancelPipeline(${p.id})">Cancel</button>`:''} <button class="btn btn-sm btn-danger" onclick="deletePipeline(${p.id})">Del</button></td></tr>`).join('')}
-                    </tbody></table>` : `<div class="empty-state"><h3>No pipelines yet</h3><p>Run a pipeline to see results here</p></div>`}
+                    </tbody></table>
+                    <div class="flex items-center justify-between mt-16">
+                        <span style="font-size:12px;color:var(--text-muted)">Showing ${filteredPipelines.length} of ${pipesTotal} pipelines (page ${state.historyPPage})</span>
+                        <div class="flex gap-8">
+                            <button class="btn btn-sm" onclick="state.historyPPage=Math.max(1,state.historyPPage-1);renderHistoryPage()" ${state.historyPPage===1?'disabled':''}>Prev</button>
+                            <button class="btn btn-sm" onclick="state.historyPPage++;renderHistoryPage()" ${allPipelines.length<20?'disabled':''}>Next</button>
+                        </div>
+                    </div>` : `<div class="empty-state"><h3>No pipelines yet</h3><p>Run a pipeline to see results here</p></div>`}
                 </div>
             `}
         `;
     }
 
     async function viewScanResult(id) {
-        const scans = await api.get(`/scans`);
-        const scan = scans.scans?.find(s => s.id === id);
+        let scan;
+        try { scan = await api.get(`/scans/${id}`); } catch { return; }
         if (!scan) return;
         const content = document.getElementById('content');
         const result = JSON.parse(scan.result||'{}');
@@ -2020,7 +2031,7 @@ search index=sec_dashboard (sourcetype=wifi:marauder OR sourcetype=m5stick:netwo
                         <tr><td>POST</td><td><code>/api/tools/{id}/run</code></td><td>Run a tool (body: target, params)</td></tr>
                         <tr><td>GET/POST</td><td><code>/api/targets</code></td><td>List/create targets (SSRF-validated in remote mode)</td></tr>
                         <tr><td>DELETE</td><td><code>/api/targets/{id}</code></td><td>Delete target</td></tr>
-                        <tr><td>GET</td><td><code>/api/scans?offset=0&limit=50</code></td><td>List scans (paginated)</td></tr>
+                        <tr><td>GET</td><td><code>/api/scans?page=1&per_page=50</code></td><td>List scans (paginated, page/per_page)</td></tr>
                         <tr><td>POST</td><td><code>/api/scans</code></td><td>Create and execute a scan</td></tr>
                         <tr><td>DELETE</td><td><code>/api/scans/{id}</code></td><td>Delete scan</td></tr>
                         <tr><td>POST</td><td><code>/api/scans/{id}/cancel</code></td><td>Cancel a running scan</td></tr>

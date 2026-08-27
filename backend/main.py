@@ -672,25 +672,34 @@ async def delete_target(target_id: int):
 
 # ── Scans ──────────────────────────────────────────────────────
 @app.get("/api/scans")
-async def list_scans(target_id: int = None, offset: int = 0, limit: int = 50):
+async def list_scans(target_id: int = None, page: int = 1, per_page: int = 50):
+    """List scans, server-side paginated (page/per_page, 1-based).
+
+    Response carries total/page/per_page so clients can render honest
+    counts and Prev/Next without refetching. per_page capped at 200.
+    """
     db = await get_db()
     try:
-        limit = min(limit, 200)  # cap at 200
-        offset = max(offset, 0)
+        page = max(1, page)
+        per_page = min(max(1, per_page), 200)
+        offset = (page - 1) * per_page
+        clauses: list[str] = []
+        params: list[int] = []
         if target_id:
-            cursor = await db.execute(
-                "SELECT * FROM scans WHERE target_id = ? ORDER BY started_at DESC LIMIT ? OFFSET ?",
-                (target_id, limit, offset)
-            )
-        else:
-            cursor = await db.execute(
-                "SELECT s.*, t.name as target_name, t.host as target_host "
-                "FROM scans s LEFT JOIN targets t ON s.target_id = t.id "
-                "ORDER BY s.started_at DESC LIMIT ? OFFSET ?",
-                (limit, offset)
-            )
+            clauses.append("s.target_id = ?")
+            params.append(target_id)
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        base = f"FROM scans s LEFT JOIN targets t ON s.target_id = t.id{where}"
+        cur_count = await db.execute(f"SELECT COUNT(*) {base}", params)
+        total = (await cur_count.fetchone())[0]
+        cursor = await db.execute(
+            "SELECT s.*, t.name as target_name, t.host as target_host "
+            + base
+            + " ORDER BY s.started_at DESC LIMIT ? OFFSET ?",
+            [*params, per_page, offset],
+        )
         rows = await cursor.fetchall()
-        return {"scans": [dict(r) for r in rows]}
+        return {"scans": [dict(r) for r in rows], "total": total, "page": page, "per_page": per_page}
     finally:
         await db.close()
 
@@ -913,16 +922,20 @@ async def list_pipelines():
 
 
 @app.get("/api/pipelines/history")
-async def pipeline_history(mode: str | None = None, status: str | None = None, q: str | None = None):
-    """Pipeline history with optional filters (3E sub-micro-paso 3).
+async def pipeline_history(mode: str | None = None, status: str | None = None,
+                           q: str | None = None, page: int = 1, per_page: int = 20):
+    """Pipeline history with optional filters (3E sub-micro-paso 3), paginated.
 
     mode/status are exact matches; q is a case-insensitive LIKE over mode +
-    target name + target host. No params = previous behavior.
+    target name + target host. No params = previous behavior. page/per_page
+    are 1-based; per_page capped at 200, default 20 (previous hard cap).
+    total/page/per_page in the response mirror the filters.
     """
     db = await get_db()
     try:
-        sql = ("SELECT p.*, t.name as target_name, t.host as target_host "
-               "FROM pipelines p LEFT JOIN targets t ON p.target_id = t.id")
+        page = max(1, page)
+        per_page = min(max(1, per_page), 200)
+        offset = (page - 1) * per_page
         clauses: list[str] = []
         params: list[str] = []
         if mode:
@@ -935,12 +948,18 @@ async def pipeline_history(mode: str | None = None, status: str | None = None, q
             like = f"%{q}%"
             clauses.append("(p.mode LIKE ? OR t.name LIKE ? OR t.host LIKE ?)")
             params.extend([like] * 3)
-        if clauses:
-            sql += " WHERE " + " AND ".join(clauses)
-        sql += " ORDER BY p.started_at DESC LIMIT 20"
-        cursor = await db.execute(sql, params)
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        base = ("FROM pipelines p LEFT JOIN targets t ON p.target_id = t.id" + where)
+        cur_count = await db.execute(f"SELECT COUNT(*) {base}", params)
+        total = (await cur_count.fetchone())[0]
+        cursor = await db.execute(
+            "SELECT p.*, t.name as target_name, t.host as target_host "
+            + base
+            + " ORDER BY p.started_at DESC LIMIT ? OFFSET ?",
+            [*params, per_page, offset],
+        )
         rows = await cursor.fetchall()
-        return {"pipelines": [dict(r) for r in rows]}
+        return {"pipelines": [dict(r) for r in rows], "total": total, "page": page, "per_page": per_page}
     finally:
         await db.close()
 

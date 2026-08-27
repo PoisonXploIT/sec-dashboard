@@ -78,3 +78,36 @@ def test_q_searches_mode_target_name_and_host(tmp_path, monkeypatch):
     # No match
     res = _run(main.pipeline_history(q="no-such-thing"))
     assert res["pipelines"] == []
+
+
+def test_pagination_envelope_and_slices(tmp_path, monkeypatch):
+    main = _setup(tmp_path, monkeypatch)
+    p1 = _run(main.pipeline_history(page=1, per_page=2))
+    assert (p1["page"], p1["per_page"], p1["total"]) == (1, 2, 3)
+    assert len(p1["pipelines"]) == 2
+    p2 = _run(main.pipeline_history(page=2, per_page=2))
+    assert len(p2["pipelines"]) == 1
+    # No overlap between pages
+    assert p1["pipelines"][0]["id"] != p2["pipelines"][0]["id"]
+    # Page beyond the end: empty, not an error
+    p4 = _run(main.pipeline_history(page=4, per_page=2))
+    assert p4["pipelines"] == [] and p4["total"] == 3
+
+
+def test_pagination_interacts_with_filters(tmp_path, monkeypatch):
+    main = _setup(tmp_path, monkeypatch)
+    # total reflects the filter, not the whole table
+    res = _run(main.pipeline_history(mode="deep", per_page=1))
+    assert res["total"] == 1 and len(res["pipelines"]) == 1
+    res = _run(main.pipeline_history(q="example", per_page=2))
+    assert res["total"] == 3 and len(res["pipelines"]) == 2
+
+
+def test_pagination_clamping(tmp_path, monkeypatch):
+    main = _setup(tmp_path, monkeypatch)
+    # page below 1 clamps to 1 (not a negative offset)
+    res = _run(main.pipeline_history(page=0))
+    assert res["page"] == 1 and len(res["pipelines"]) > 0
+    # per_page capped at 200, echoed in the envelope
+    res = _run(main.pipeline_history(per_page=9999))
+    assert res["per_page"] == 200
