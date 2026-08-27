@@ -342,6 +342,44 @@ def _adapt_cve_correlation(result: dict, target: str) -> list[Finding]:
     return out
 
 
+@register("exploitdb_search")
+def _adapt_exploitdb_search(result: dict, target: str) -> list[Finding]:
+    """A public exploit for the queried product is HIGH.
+
+    The tool does not confirm the product is deployed (it searches a
+    database), so severity stays HIGH and confidence carries the nuance:
+    verified entries 0.95, unverified 0.75.
+    """
+    out: list[Finding] = []
+    for e in result.get("exploits", [])[:10]:
+        cves = e.get("cves") or []
+        out.append(Finding(
+            tool="exploitdb_search", category="Vulnerability",
+            severity=Severity.HIGH,
+            title=f"Public exploit: {e.get('title', '')}",
+            description=(
+                f"Public exploit-db.com entry for '{target}' "
+                f"({e.get('type', '')}, {e.get('platform', '')}, "
+                f"{e.get('date_published') or 'unknown date'}, "
+                f"{'verified' if e.get('verified') else 'unverified'})."
+            ),
+            evidence={
+                "id": e.get("id"), "url": e.get("url"),
+                "type": e.get("type"), "platform": e.get("platform"),
+                "date_published": e.get("date_published"),
+                "verified": e.get("verified"),
+            },
+            cve=cves[0] if cves else None,
+            remediation=(
+                "Verify the deployed version is affected and patch; treat as "
+                "exploitable until proven otherwise."
+            ),
+            target=target,
+            confidence=0.95 if e.get("verified") else 0.75,
+        ))
+    return out
+
+
 @register("subdomain_takeover")
 def _adapt_subdomain_takeover(result: dict, target: str) -> list[Finding]:
     """Every dangling CNAME is CRITICAL: the resource is claimable now."""

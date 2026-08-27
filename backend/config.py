@@ -189,6 +189,13 @@ TOOLS = {
         "icon": "**",
         "timeout": 15,
     },
+    "exploitdb_search": {
+        "name": "ExploitDB Search",
+        "category": "Vulnerability",
+        "description": "Public exploits for a product/version or CVE (exploit-db.com)",
+        "icon": "Ex",
+        "timeout": 30,
+    },
     # ─── System ───
     "network_connections": {
         "name": "Net Connections",
@@ -339,6 +346,11 @@ SPECIAL_TOOLS = {
     "cve_search": {
         "input_label": "Keyword or CVE ID",
         "input_placeholder": "e.g. Apache 2.4 or CVE-2024-12345",
+        "input_type": "text",
+    },
+    "exploitdb_search": {
+        "input_label": "Product / version or CVE ID",
+        "input_placeholder": "e.g. Apache HTTPd 2.4 or CVE-2014-0160",
         "input_type": "text",
     },
     "network_connections": {

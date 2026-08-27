@@ -1,6 +1,7 @@
 """Vulnerability tools — pure Python, no external binaries required."""
 import asyncio
 import hashlib
+import html as html_lib
 import json
 import re
 import time
@@ -263,6 +264,133 @@ async def password_audit(target: str = "", password: str = "", **kw) -> dict:
         "breached_count": pwned,
         "breached": pwned > 0 if pwned is not None else None,
         "recommendations": _password_recommendations(analysis, pwned),
+    }
+
+
+# ── ExploitDB Search ───────────────────────────────────────────
+_EXPLOITDB_SEARCH_URL = "https://www.exploit-db.com/search"
+_EXPLOITDB_MAX_RESULTS = 200
+# (data key, searchable) — the exact column set the site's DataTables
+# server-side endpoint expects; a partial set returns "Server Error".
+_EXPLOITDB_COLUMNS = [
+    ("date_published", "true"),
+    ("download", "false"),
+    ("application_md5", "true"),
+    ("verified", "false"),
+    ("description", "true"),
+    ("type_id", "true"),
+    ("platform_id", "true"),
+    ("author_id", "false"),
+]
+
+
+async def _exploitdb_query(term: str, cve: bool, limit: int) -> list[dict] | None:
+    """One search against exploit-db.com; returns the raw data rows.
+
+    The site renders results via a DataTables server-side JSON endpoint
+    (the static HTML table is empty), so we speak that protocol directly.
+    None means the query itself failed (network/HTTP/JSON); the caller must
+    treat it as best-effort and degrade to an error dict.
+    """
+    params: dict[str, str] = {
+        ("cve" if cve else "q"): term,
+        "draw": "1",
+        "start": "0",
+        "length": str(limit),
+        "search[value]": "",
+        "search[regex]": "false",
+        "order[0][column]": "0",
+        "order[0][dir]": "desc",
+    }
+    for i, (name, searchable) in enumerate(_EXPLOITDB_COLUMNS):
+        params[f"columns[{i}][data]"] = name
+        params[f"columns[{i}][name]"], params[f"columns[{i}][searchable]"] = name, searchable
+    try:
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=30)
+        ) as session:
+            async with session.get(
+                _EXPLOITDB_SEARCH_URL,
+                params=params,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                    "X-Requested-With": "XMLHttpRequest",
+                },
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+    except Exception:
+        return None
+    rows = data.get("data") if isinstance(data, dict) else None
+    if not isinstance(rows, list):
+        return []
+    return rows
+
+
+async def exploitdb_search(query: str, max_results: int = 50, **kw) -> dict:
+    """Public exploits for a product/version or CVE (exploit-db.com).
+
+    Complements cve_search/cve_correlation: given the same input shape as
+    cve_search (a product keyword like 'Apache HTTPd 2.4' or a bare CVE id),
+    it lists the public exploit entries for it — title, type, platform,
+    author, date, verified flag and direct URL, plus the CVE codes each
+    entry references. Best-effort: any failure degrades to an error dict.
+    """
+    query = (query or "").strip()
+    if not query:
+        return {"query": "", "error": "No query provided"}
+
+    try:
+        max_results = int(max_results)
+    except (TypeError, ValueError):
+        max_results = 50
+    max_results = max(1, min(max_results, _EXPLOITDB_MAX_RESULTS))
+
+    cve_match = re.match(r"(?i)^CVE-\d{4}-\d+$", query)
+    term = cve_match.group(0).upper() if cve_match else query
+
+    rows = await _exploitdb_query(term, bool(cve_match), max_results)
+    if rows is None:
+        return {"query": query, "error": "Exploit-DB search unavailable or returned an error"}
+
+    exploits: list[dict] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        desc = row.get("description")
+        eid = str(row.get("id", "") or "")
+        raw_title = str(desc[1]) if isinstance(desc, (list, tuple)) and len(desc) > 1 else ""
+        title = html_lib.unescape(raw_title)
+        if not eid or not title:
+            continue
+        cves = [
+            f"CVE-{c.get('code', '')}"
+            for c in (row.get("code") or [])
+            if isinstance(c, dict) and c.get("code_type") == "cve"
+        ]
+        type_info = row.get("type") or {}
+        platform_info = row.get("platform") or {}
+        author_info = row.get("author") or {}
+        exploits.append({
+            "id": eid,
+            "title": title,
+            "type": str(type_info.get("display") or row.get("type_id") or ""),
+            "platform": str(platform_info.get("platform") or row.get("platform_id") or ""),
+            "author": html_lib.unescape(str(author_info.get("name") or "")),
+            "date_published": row.get("date_published"),
+            "verified": bool(row.get("verified")),
+            "url": f"https://www.exploit-db.com/exploits/{eid}",
+            "cves": cves,
+        })
+
+    # ISO dates: string order == time order, newest first.
+    exploits.sort(key=lambda e: e["date_published"] or "", reverse=True)
+
+    return {
+        "query": query,
+        "count": len(exploits),
+        "exploits": exploits,
     }
 
 

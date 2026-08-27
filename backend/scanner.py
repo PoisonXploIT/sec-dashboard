@@ -18,7 +18,7 @@ from backend.tools.web import (
     cve_correlation, secret_leak_scan, wayback_urls,
 )
 from backend.tools.favicon import favicon_fingerprint
-from backend.tools.vuln import cve_search, hash_checker, password_audit
+from backend.tools.vuln import cve_search, exploitdb_search, hash_checker, password_audit
 from backend.tools.system import network_connections, process_monitor, system_info
 from backend.tools.audit import ps_security_audit
 from backend.tools.wifi import wifi_marauder_scan, m5stick_networks
@@ -57,6 +57,7 @@ HANDLERS: dict[str, Callable] = {
     "cve_search": cve_search,
     "cve_correlation": cve_correlation,
     "subdomain_takeover": subdomain_takeover,
+    "exploitdb_search": exploitdb_search,
     "hash_checker": hash_checker,
     "password_audit": password_audit,
     # System
