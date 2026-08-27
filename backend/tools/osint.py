@@ -511,3 +511,160 @@ async def urlscan_lookup(target: str, **kw) -> dict:
         "count": len(rows),
         "hosts": sorted(hosts)[:_URLSCAN_MAX_ROWS],
     }
+
+
+# ── GreyNoise Community (OSINT / api.greynoise.io) ─────────────
+_GREYNOISE_API_URL = "https://api.greynoise.io/v3/community/"
+
+
+async def _greynoise_query(ip: str, key: str) -> dict | None:
+    """One community lookup for an IP; returns the parsed JSON body.
+
+    The Community API is public (works without a key, ~25 req/min);
+    passing GREYNOISE_API_KEY via the `key` header raises the limit.
+    404 (no data) is a valid answer and is returned as its JSON body.
+    None means the query itself failed (network/HTTP/JSON); the caller
+    must treat it as best-effort and degrade to an error dict.
+    """
+    headers = {"User-Agent": "sec-dashboard"}
+    if key:
+        headers["key"] = key
+    try:
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=15)
+        ) as session:
+            async with session.get(f"{_GREYNOISE_API_URL}{ip}", headers=headers) as resp:
+                data = await resp.json()
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+async def greynoise_lookup(target: str, **kw) -> dict:
+    """GreyNoise community lookup: is this IP a known scanner?
+
+    Works without GREYNOISE_API_KEY (public community endpoint); the key
+    raises the rate limit. Best-effort: any failure degrades to an error
+    dict.
+    """
+    ip = target
+    if not _is_ip(target):
+        try:
+            ip = await asyncio.to_thread(socket.gethostbyname, target)
+        except socket.gaierror:
+            return {"target": target, "error": "Could not resolve"}
+
+    key = os.environ.get("GREYNOISE_API_KEY", "")
+    data = await _greynoise_query(ip, key)
+    if data is None:
+        return {"target": target, "ip": ip,
+                "error": "GreyNoise API unavailable or returned an error"}
+    if "noise" not in data and "riot" not in data:
+        # 400 invalid IP / 401 bad key / 429 rate limit body
+        return {"target": target, "ip": ip,
+                "error": str(data.get("message", "GreyNoise API error"))[:120]}
+
+    noise = bool(data.get("noise"))
+    riot = bool(data.get("riot"))
+    if not (noise or riot):
+        return {
+            "target": target,
+            "ip": ip,
+            "found": False,
+            "message": data.get("message", "IP not observed scanning the internet."),
+        }
+
+    return {
+        "target": target,
+        "ip": ip,
+        "found": True,
+        "noise": noise,
+        "riot": riot,
+        "classification": data.get("classification") or "",
+        "name": data.get("name") or "",
+        "last_seen": data.get("last_seen") or "",
+    }
+
+
+# ── Hunter Domain Search (OSINT / api.hunter.io) ────────────────
+_HUNTER_API_URL = "https://api.hunter.io/v2/domain-search"
+_HUNTER_MAX_ROWS = 100
+
+
+async def _hunter_query(domain: str, key: str) -> list[dict] | None:
+    """One GET to Hunter domain-search; returns raw email rows.
+
+    None means the query itself failed (network/HTTP/JSON/auth); the
+    caller must treat it as best-effort and degrade to an error dict.
+    """
+    try:
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=30)
+        ) as session:
+            async with session.get(
+                _HUNTER_API_URL,
+                params={"domain": domain},
+                headers={
+                    "Authorization": f"Bearer {key}",
+                    "User-Agent": "sec-dashboard",
+                },
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    payload = data.get("data")
+    rows = payload.get("emails") if isinstance(payload, dict) else None
+    if not isinstance(rows, list):
+        return []
+    return [r for r in rows if isinstance(r, dict)]
+
+
+async def hunter_email_finder(target: str, **kw) -> dict:
+    """Known email addresses of a domain via Hunter (HUNTER_API_KEY).
+
+    Domain Search returns every email Hunter has seen on the domain with
+    confidence scores and identity context — exposure surface for
+    phishing and credential stuffing. No key: clean error dict, no
+    network call. Free plan caps results at 10 per call.
+    """
+    t = target.strip().lower()
+    if t.startswith(("http://", "https://")):
+        t = re.sub(r"^https?://", "", t)
+    host = t.split("/")[0].split(":")[0].strip()
+    if not host or _is_ip(host):
+        return {"target": host, "error": "hunter_email_finder requires a domain, not an IP"}
+
+    key = os.environ.get("HUNTER_API_KEY", "")
+    if not key:
+        return {"target": host, "error": "HUNTER_API_KEY not set (free key at hunter.io/api)"}
+
+    rows = await _hunter_query(host, key)
+    if rows is None:
+        return {"target": host, "error": "Hunter API unavailable or returned an error"}
+
+    emails: list[dict] = []
+    seen: set[str] = set()
+    for r in rows:
+        value = r.get("value")
+        if not isinstance(value, str) or not value.strip():
+            continue
+        v = value.strip().lower()
+        if v in seen:
+            continue
+        seen.add(v)
+        emails.append({
+            "email": v,
+            "confidence": r.get("confidence"),
+            "type": r.get("type") or "",
+            "first_name": r.get("first_name") or "",
+            "last_name": r.get("last_name") or "",
+            "position": r.get("position") or "",
+            "decision_maker": bool(r.get("decision_maker")),
+        })
+
+    emails = emails[:_HUNTER_MAX_ROWS]
+    return {"target": host, "count": len(emails), "emails": emails}

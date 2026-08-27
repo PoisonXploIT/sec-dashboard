@@ -767,6 +767,117 @@ def _adapt_urlscan_lookup(result: dict, target: str) -> list[Finding]:
     return out[:10]
 
 
+@register("greynoise_lookup")
+def _adapt_greynoise_lookup(result: dict, target: str) -> list[Finding]:
+    """IP reputation from the GreyNoise community dataset.
+
+    Known malicious scanner: HIGH. Any known scanner: LOW — expected
+    probing noise, context not alarm. RIOT-only (benign infra): INFO
+    profile. No data / error: no findings. Cap 1.
+    """
+    if not result.get("found"):
+        return []
+    ip = result.get("ip", "")
+    classification = result.get("classification") or ""
+    name = result.get("name") or ""
+    last_seen = result.get("last_seen") or ""
+    if result.get("noise") and classification == "malicious":
+        return [Finding(
+            tool="greynoise_lookup", category="OSINT", severity=Severity.HIGH,
+            title=f"IP {ip} is a known malicious scanner (GreyNoise)",
+            description=(f"GreyNoise classifies {ip} as '{classification}' "
+                         f"(last seen {last_seen or 'unknown'}). Traffic from "
+                         "this IP is very likely automated scanning."),
+            evidence={"ip": ip, "classification": classification,
+                      "name": name, "last_seen": last_seen},
+            remediation=("Correlate with access logs; if this IP hit the "
+                         "target, treat the events as scanner noise and "
+                         "consider blocking it."),
+            target=target, confidence=0.8,
+        )]
+    if result.get("noise"):
+        return [Finding(
+            tool="greynoise_lookup", category="OSINT", severity=Severity.LOW,
+            title=f"IP {ip} is a known scanner (GreyNoise)",
+            description=(f"GreyNoise has observed {ip} scanning the internet "
+                         f"(classification '{classification or 'unknown'}', "
+                         f"last seen {last_seen or 'unknown'})."),
+            evidence={"ip": ip, "classification": classification,
+                      "name": name, "last_seen": last_seen},
+            remediation=("Expect probe noise from this IP in logs; block it "
+                         "if it is not your own infrastructure."),
+            target=target, confidence=0.7,
+        )]
+    return [Finding(
+        tool="greynoise_lookup", category="OSINT", severity=Severity.INFO,
+        title=f"IP {ip} is benign internet-wide infrastructure (GreyNoise RIOT)",
+        description=(f"{name or 'The IP'} belongs to the RIOT dataset of "
+                     "benign cloud/hosting infrastructure."),
+        evidence={"ip": ip, "name": name, "classification": classification},
+        remediation="No action; use this context to filter false positives.",
+        target=target, confidence=0.9,
+    )]
+
+
+# Email local parts that indicate an admin/privileged role account.
+_HUNTER_SENSITIVE_LOCALS = {
+    "admin", "root", "ciso", "ceo", "director", "it", "security",
+    "backup", "git",
+}
+
+
+@register("hunter_email_finder")
+def _adapt_hunter_email_finder(result: dict, target: str) -> list[Finding]:
+    """Email exposure surface from Hunter Domain Search.
+
+    Sensitive local parts (admin@, ciso@, ...) and decision makers are
+    MEDIUM at confidence 0.7 — confirmed accounts with a sensitive role;
+    the full inventory rides along as one INFO profile finding. Cap 10.
+    """
+    emails = [e for e in result.get("emails") or [] if isinstance(e, dict)]
+    if not emails:
+        return []
+    out: list[Finding] = []
+    flagged: set[str] = set()
+    for e in emails:
+        email = e.get("email")
+        if not isinstance(email, str) or not email:
+            continue
+        local = email.split("@", 1)[0].lower()
+        if local in _HUNTER_SENSITIVE_LOCALS or e.get("decision_maker"):
+            flagged.add(email)
+    for email in sorted(flagged):
+        e = next((x for x in emails if x.get("email") == email), {})
+        out.append(Finding(
+            tool="hunter_email_finder", category="OSINT",
+            severity=Severity.MEDIUM,
+            title=f"Sensitive-role email exposed: {email}",
+            description=(f"Hunter has confirmed this address on the domain "
+                         f"(confidence {e.get('confidence', 'unknown')}). "
+                         "Primary target for phishing and credential stuffing."),
+            evidence={"email": email, "position": e.get("position") or "",
+                      "first_name": e.get("first_name") or "",
+                      "last_name": e.get("last_name") or "",
+                      "confidence": e.get("confidence")},
+            remediation=("Harden login (MFA), monitor for phishing, and review "
+                         "whether the address needs to be public."),
+            target=target, confidence=0.7,
+        ))
+    out.append(Finding(
+        tool="hunter_email_finder", category="OSINT", severity=Severity.INFO,
+        title=f"Hunter: {result.get('count', len(emails))} known emails for the domain",
+        description=("Passive email exposure inventory from hunter.io. "
+                     "Cross-check against real mailbox policy and anti-"
+                     "phishing posture."),
+        evidence={"count": result.get("count", len(emails)),
+                  "top": [e.get("email") for e in emails[:20] if isinstance(e, dict)][:20]},
+        remediation=("Review the full list for forgotten accounts or roles "
+                     "that should not be exposed."),
+        target=target, confidence=0.9,
+    ))
+    return out[:10]
+
+
 _DNS_HYGIENE_META = {
     # id: (severity, confidence, title, remediation)
     "spf_permissive_all": (

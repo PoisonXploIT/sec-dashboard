@@ -282,6 +282,20 @@ TOOLS = {
         "icon": "UL",
         "timeout": 60,
     },
+    "greynoise_lookup": {
+        "name": "GreyNoise Lookup",
+        "category": "OSINT",
+        "description": "Is this IP a known scanner? GreyNoise community API (public; GREYNOISE_API_KEY raises the rate limit)",
+        "icon": "GN",
+        "timeout": 15,
+    },
+    "hunter_email_finder": {
+        "name": "Hunter Email Finder",
+        "category": "OSINT",
+        "description": "Known email addresses of a domain via Hunter Domain Search (HUNTER_API_KEY)",
+        "icon": "HE",
+        "timeout": 30,
+    },
     # ─── Email Security ───
     "dnssec_checker": {
         "name": "DNSSEC Checker",
