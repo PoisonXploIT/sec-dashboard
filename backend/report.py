@@ -1,7 +1,8 @@
 """Report generator -- JSON and PDF export for scans and pipelines."""
+import csv
 import json
 from datetime import datetime
-from io import BytesIO
+from io import BytesIO, StringIO
 from typing import Any
 
 from fpdf import FPDF
@@ -108,6 +109,100 @@ def generate_pipeline_json(pipeline: dict, target: dict = None) -> str:
         "phases": result_data.get("phases", {}),
     }
     return json.dumps(export, indent=2, ensure_ascii=False, default=str)
+
+
+# -- CSV exports (SIEM / spreadsheets) --------------------------------
+
+# One row per finding; run metadata repeated on every row so each row is
+# self-contained for SIEM ingestion. UTF-8 with BOM + CRLF so Excel opens it
+# cleanly and the csv module round-trips for anything else.
+SCAN_CSV_FIELDS = [
+    "scan_id", "tool", "status", "target_name", "target_host",
+    "started_at", "finished_at", "elapsed_seconds", "score",
+    "finding_id", "severity", "category", "title", "description",
+    "evidence", "cve", "confidence", "remediation",
+]
+
+PIPELINE_CSV_FIELDS = [
+    "pipeline_id", "mode", "status", "target_name", "target_host",
+    "started_at", "finished_at", "elapsed_seconds", "total_tools", "score",
+    "tool", "finding_id", "severity", "category", "title", "description",
+    "evidence", "cve", "confidence", "remediation",
+]
+
+_FINDING_FIELDS = ("finding_id", "severity", "category", "title", "description",
+                   "evidence", "cve", "confidence", "remediation")
+
+
+def _csv_findings_blob(findings_raw) -> list:
+    """Parse a persisted findings JSON blob; NULL/corrupt legacy rows -> []."""
+    if not findings_raw:
+        return []
+    try:
+        parsed = json.loads(findings_raw)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def _csv_run_rows(fields: list, run_cols: list, findings: list, mid_fields=()) -> str:
+    """Shared writer: header + one row per finding; zero findings -> one summary row.
+
+    `mid_fields` are per-finding columns that sit between the run metadata and
+    the standard finding fields (e.g. the pipeline per-row `tool`).
+    """
+    buf = StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(fields)
+    if not findings:
+        # Keep the event visible for SIEM even when nothing was found.
+        writer.writerow(run_cols + [""] * (len(mid_fields) + len(_FINDING_FIELDS)))
+    else:
+        for f in findings:
+            writer.writerow(run_cols + [f.get(k, "") for k in mid_fields]
+                            + [f.get(k, "") for k in _FINDING_FIELDS])
+    return "\ufeff" + buf.getvalue()
+
+
+def generate_scan_csv(scan: dict, target: dict = None) -> str:
+    """Generate CSV export for a single scan (SIEM / spreadsheet friendly)."""
+    result_data = {}
+    if scan.get("result"):
+        try:
+            result_data = json.loads(scan["result"])
+        except (json.JSONDecodeError, TypeError):
+            result_data = {"raw": scan["result"]}
+
+    run_cols = [
+        scan.get("id"), scan.get("tool"), scan.get("status"),
+        target.get("name", "") if target else "",
+        target.get("host", "") if target else "",
+        scan.get("started_at"), scan.get("finished_at"),
+        result_data.get("elapsed_seconds"), scan.get("score"),
+    ]
+    return _csv_run_rows(SCAN_CSV_FIELDS, run_cols, _csv_findings_blob(scan.get("findings")))
+
+
+def generate_pipeline_csv(pipeline: dict, target: dict = None) -> str:
+    """Generate CSV export for a pipeline run (SIEM / spreadsheet friendly)."""
+    result_data = {}
+    if pipeline.get("result"):
+        try:
+            result_data = json.loads(pipeline["result"])
+        except (json.JSONDecodeError, TypeError):
+            result_data = {"raw": pipeline["result"]}
+
+    run_cols = [
+        pipeline.get("id"), pipeline.get("mode"), pipeline.get("status"),
+        target.get("name", "") if target else "",
+        target.get("host", "") if target else "",
+        pipeline.get("started_at"), pipeline.get("finished_at"),
+        result_data.get("elapsed_seconds"), result_data.get("total_tools"),
+        pipeline.get("score"),
+    ]
+    return _csv_run_rows(PIPELINE_CSV_FIELDS, run_cols,
+                         _csv_findings_blob(pipeline.get("findings")),
+                         mid_fields=("tool",))
 
 
 def generate_all_json(scans: list, pipelines: list, targets: list) -> str:

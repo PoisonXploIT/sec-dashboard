@@ -22,6 +22,7 @@ from backend.report import (
     generate_scan_json, generate_pipeline_json, generate_all_json,
     generate_scan_pdf, generate_pipeline_pdf, generate_all_pdf,
     generate_executive_pdf,
+    generate_scan_csv, generate_pipeline_csv,
 )
 from backend.validators import validate_target, is_remote_mode
 from backend.ratelimit import RateLimiter
@@ -226,6 +227,26 @@ async def export_scan_pdf(scan_id: int):
     finally:
         await db.close()
 
+@app.get("/api/scans/{scan_id}/export/csv")
+async def export_scan_csv(scan_id: int):
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT * FROM scans WHERE id = ?", (scan_id,))
+        scan = await cursor.fetchone()
+        if not scan:
+            raise HTTPException(404, "Scan not found")
+        scan = dict(scan)
+        target = None
+        if scan.get("target_id"):
+            cur2 = await db.execute("SELECT * FROM targets WHERE id = ?", (scan["target_id"],))
+            row = await cur2.fetchone()
+            if row: target = dict(row)
+        content = generate_scan_csv(scan, target)
+        return FastResponse(content=content.encode("utf-8"), media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="scan_{scan_id}.csv"'})
+    finally:
+        await db.close()
+
 @app.get("/api/pipelines/{pipeline_id}/export/json")
 async def export_pipeline_json(pipeline_id: int):
     db = await get_db()
@@ -263,6 +284,26 @@ async def export_pipeline_pdf_endpoint(pipeline_id: int):
         pdf_bytes = generate_pipeline_pdf(pipeline, target)
         return FastResponse(content=pdf_bytes, media_type="application/pdf",
             headers={"Content-Disposition": f'attachment; filename="pipeline_{pipeline_id}.pdf"'})
+    finally:
+        await db.close()
+
+@app.get("/api/pipelines/{pipeline_id}/export/csv")
+async def export_pipeline_csv(pipeline_id: int):
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT * FROM pipelines WHERE id = ?", (pipeline_id,))
+        pipeline = await cursor.fetchone()
+        if not pipeline:
+            raise HTTPException(404, "Pipeline not found")
+        pipeline = dict(pipeline)
+        target = None
+        if pipeline.get("target_id"):
+            cur2 = await db.execute("SELECT * FROM targets WHERE id = ?", (pipeline["target_id"],))
+            row = await cur2.fetchone()
+            if row: target = dict(row)
+        content = generate_pipeline_csv(pipeline, target)
+        return FastResponse(content=content.encode("utf-8"), media_type="text/csv; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="pipeline_{pipeline_id}.csv"'})
     finally:
         await db.close()
 
