@@ -513,7 +513,10 @@ def _render_csp_analyzer(pdf, result: dict):
     pdf.kv_row("Grade", result.get("grade", ""))
     pdf.kv_row("Score", str(result.get("score", "")))
     for issue in result.get("issues", [])[:5]:
-        pdf.kv_row(f"  {issue.get('severity', '')}", issue.get("description", "")[:60])
+        if isinstance(issue, dict):
+            pdf.kv_row(f"  {issue.get('severity', '')}", issue.get("description", "")[:60])
+        else:
+            pdf.kv_row("Issue", str(issue)[:80])
 
 
 @_register("sqli_scanner")
@@ -569,8 +572,8 @@ def generate_all_pdf(scans: list, pipelines: list, targets: list) -> bytes:
         for t in targets:
             scan_count = sum(1 for s in scans if s.get("target_id") == t["id"])
             pdf.cell(15, 6, str(t.get("id", "")), border=1)
-            pdf.cell(50, 6, str(t.get("name", ""))[:30], border=1)
-            pdf.cell(60, 6, str(t.get("host", ""))[:40], border=1)
+            pdf.cell(50, 6, _sanitize(str(t.get("name", "")))[:30], border=1)
+            pdf.cell(60, 6, _sanitize(str(t.get("host", "")))[:40], border=1)
             pdf.cell(40, 6, str(scan_count), border=1, new_x="LMARGIN", new_y="NEXT")
         pdf.ln(4)
 
@@ -588,7 +591,7 @@ def generate_all_pdf(scans: list, pipelines: list, targets: list) -> bytes:
         pdf.set_font("Helvetica", "", 8)
         for s in scans:
             tgt = target_map.get(s.get("target_id"))
-            tgt_host = tgt.get("host", "")[:25] if tgt else ""
+            tgt_host = _sanitize(tgt.get("host", ""))[:25] if tgt else ""
             result_data = {}
             if s.get("result"):
                 try:
@@ -622,7 +625,7 @@ def generate_all_pdf(scans: list, pipelines: list, targets: list) -> bytes:
                 continue
 
             tgt = target_map.get(s.get("target_id"))
-            tgt_host = tgt.get("host", "") if tgt else ""
+            tgt_host = _sanitize(tgt.get("host", "")) if tgt else ""
             tool = s.get("tool", "unknown")
 
             # Check page space — add page if near bottom
@@ -654,7 +657,7 @@ def generate_all_pdf(scans: list, pipelines: list, targets: list) -> bytes:
         pdf.set_font("Helvetica", "", 8)
         for p in pipelines:
             tgt = target_map.get(p.get("target_id"))
-            tgt_host = tgt.get("host", "")[:25] if tgt else ""
+            tgt_host = _sanitize(tgt.get("host", ""))[:25] if tgt else ""
             result_data = {}
             if p.get("result"):
                 try:
@@ -680,17 +683,17 @@ def generate_scan_pdf(scan: dict, target: dict = None) -> bytes:
     pdf.add_page()
 
     # Title
-    tool = scan.get("tool", "Unknown")
-    host = target.get("host", "") if target else ""
+    tool = _sanitize(str(scan.get("tool", "Unknown")))
+    host = _sanitize(target.get("host", "")) if target else ""
     pdf.section_title(f"Scan: {tool} -> {host}")
 
     # Metadata
     pdf.kv_row("Scan ID", str(scan.get("id", "")))
     pdf.kv_row("Tool", tool)
-    pdf.kv_row("Target", f"{target.get('name', '')} ({host})" if target else str(scan.get("target_id", "")))
-    pdf.kv_row("Status", scan.get("status", ""))
-    pdf.kv_row("Started", str(scan.get("started_at", "")))
-    pdf.kv_row("Finished", str(scan.get("finished_at", "")))
+    pdf.kv_row("Target", f"{_sanitize(str(target.get('name', '')))} ({host})" if target else str(scan.get("target_id", "")))
+    pdf.kv_row("Status", _sanitize(str(scan.get("status", ""))))
+    pdf.kv_row("Started", _sanitize(str(scan.get("started_at", ""))))
+    pdf.kv_row("Finished", _sanitize(str(scan.get("finished_at", ""))))
     pdf.ln(4)
 
     # Result
@@ -700,6 +703,8 @@ def generate_scan_pdf(scan: dict, target: dict = None) -> bytes:
             result_data = json.loads(scan["result"])
         except (json.JSONDecodeError, TypeError):
             result_data = {"raw": scan["result"]}
+    # fpdf core fonts are latin-1; sanitize every dynamic string before it hits the PDF.
+    result_data = _sanitize_dict(result_data)
 
     if result_data.get("success"):
         pdf.section_title("Result Summary")
@@ -776,17 +781,17 @@ def generate_pipeline_pdf(pipeline: dict, target: dict = None) -> bytes:
     pdf.alias_nb_pages()
     pdf.add_page()
 
-    mode = pipeline.get("mode", "Unknown")
-    host = target.get("host", "") if target else ""
+    mode = _sanitize(str(pipeline.get("mode", "Unknown")))
+    host = _sanitize(target.get("host", "")) if target else ""
     pdf.section_title(f"Pipeline: {mode} -> {host}")
 
     # Metadata
     pdf.kv_row("Pipeline ID", str(pipeline.get("id", "")))
     pdf.kv_row("Mode", mode)
-    pdf.kv_row("Target", f"{target.get('name', '')} ({host})" if target else str(pipeline.get("target_id", "")))
-    pdf.kv_row("Status", pipeline.get("status", ""))
-    pdf.kv_row("Started", str(pipeline.get("started_at", "")))
-    pdf.kv_row("Finished", str(pipeline.get("finished_at", "")))
+    pdf.kv_row("Target", f"{_sanitize(str(target.get('name', '')))} ({host})" if target else str(pipeline.get("target_id", "")))
+    pdf.kv_row("Status", _sanitize(str(pipeline.get("status", ""))))
+    pdf.kv_row("Started", _sanitize(str(pipeline.get("started_at", ""))))
+    pdf.kv_row("Finished", _sanitize(str(pipeline.get("finished_at", ""))))
     pdf.ln(4)
 
     # Parse result
@@ -837,7 +842,7 @@ def generate_pipeline_pdf(pipeline: dict, target: dict = None) -> bytes:
                 elif tool_result.get("error"):
                     pdf.set_font("Helvetica", "", 8)
                     pdf.set_text_color(200, 0, 0)
-                    pdf.cell(0, 5, f"  Error: {str(tool_result.get('error', ''))[:100]}", new_x="LMARGIN", new_y="NEXT")
+                    pdf.cell(0, 5, f"  Error: {_sanitize(str(tool_result.get('error', '')))[:100]}", new_x="LMARGIN", new_y="NEXT")
                     pdf.set_text_color(0, 0, 0)
                 pdf.ln(1)
 
