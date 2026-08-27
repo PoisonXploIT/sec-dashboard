@@ -24,7 +24,7 @@ from backend.tools.audit import ps_security_audit
 from backend.tools.wifi import wifi_marauder_scan, m5stick_networks
 from backend.tools.osint import (
     asn_lookup, reverse_dns, ct_logs, shodan_lookup, ip_geolocation,
-    publicwww_search,
+    publicwww_search, urlscan_lookup,
 )
 from backend.tools.emailsec import (
     dnssec_checker, email_security, dns_zone_hygiene,
@@ -75,6 +75,7 @@ HANDLERS: dict[str, Callable] = {
     "shodan_lookup": shodan_lookup,
     "ip_geolocation": ip_geolocation,
     "publicwww_search": publicwww_search,
+    "urlscan_lookup": urlscan_lookup,
     "dnsdumpster_enum": dnsdumpster_enum,
     # Email Security
     "dnssec_checker": dnssec_checker,

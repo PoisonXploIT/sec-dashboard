@@ -275,6 +275,13 @@ TOOLS = {
         "icon": "PW",
         "timeout": 60,
     },
+    "urlscan_lookup": {
+        "name": "URLScan Lookup",
+        "category": "OSINT",
+        "description": "Passive scan data (hosts) of a domain via urlscan.io search API (no key)",
+        "icon": "UL",
+        "timeout": 60,
+    },
     # ─── Email Security ───
     "dnssec_checker": {
         "name": "DNSSEC Checker",

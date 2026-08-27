@@ -433,3 +433,81 @@ async def publicwww_search(target: str, **kw) -> dict:
         "technologies": sorted(techs)[:100],
         "urls": urls[:200],
     }
+
+
+# ── URLScan Lookup (OSINT / urlscan.io) ───────────────────────
+_URLSCAN_API_URL = "https://urlscan.io/api/v1/search/"
+_URLSCAN_MAX_ROWS = 1000
+
+
+async def _urlscan_query(domain: str) -> list[dict] | None:
+    """One GET to the urlscan.io search API; returns raw result rows.
+
+    Anonymous (no key) search does NOT accept the `limit` param (400), so it
+    is never sent. None means the query itself failed (network/HTTP/JSON);
+    the caller must treat it as best-effort and degrade to an error dict.
+    """
+    try:
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=60)
+        ) as session:
+            async with session.get(
+                _URLSCAN_API_URL,
+                params={"q": f"domain:{domain}"},
+                headers={"User-Agent": "sec-dashboard"},
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    rows = data.get("results")
+    if not isinstance(rows, list):
+        return []
+    return [r for r in rows if isinstance(r, dict)][: _URLSCAN_MAX_ROWS]
+
+
+async def urlscan_lookup(target: str, **kw) -> dict:
+    """Passive scan data of a domain via urlscan.io (no key).
+
+    Searches the public urlscan.io corpus for every scan seen against the
+    domain and its subdomains — attack-surface discovery (stale hosts,
+    forgotten panels). Best-effort: any failure degrades to an error dict.
+    """
+    t = target.strip().lower()
+    if t.startswith(("http://", "https://")):
+        t = re.sub(r"^https?://", "", t)
+    host = t.split("/")[0].split(":")[0].strip()
+    if not host or _is_ip(host):
+        return {"target": host, "error": "urlscan_lookup requires a domain, not an IP"}
+
+    rows = await _urlscan_query(host)
+    if rows is None:
+        return {"target": host, "error": "URLScan API unavailable or returned an error"}
+
+    hosts: dict[str, None] = {}
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        task = r.get("task")
+        if isinstance(task, dict):
+            d = task.get("domain")
+            if isinstance(d, str) and d.strip():
+                hosts.setdefault(d.strip())
+        # canonical.task.url is the scanned host (canonical.page.url can be
+        # a post-redirect path like "github.com/login" — not a host).
+        canonical = r.get("canonical")
+        if isinstance(canonical, dict):
+            c = canonical.get("task")
+            if isinstance(c, dict):
+                u = c.get("url")
+                if isinstance(u, str) and u.strip():
+                    hosts.setdefault(u.strip())
+
+    return {
+        "target": host,
+        "count": len(rows),
+        "hosts": sorted(hosts)[:_URLSCAN_MAX_ROWS],
+    }

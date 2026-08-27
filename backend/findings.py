@@ -724,6 +724,49 @@ def _adapt_publicwww_search(result: dict, target: str) -> list[Finding]:
     return out[:10]
 
 
+@register("urlscan_lookup")
+def _adapt_urlscan_lookup(result: dict, target: str) -> list[Finding]:
+    """Passive scan inventory from urlscan.io.
+
+    Sensitive-name hosts are MEDIUM at confidence 0.7 (naming only, no
+    deployment confirmation — same criterion as the dnsdumpster/publicwww
+    adapters, reusing _sensitive_sub); the inventory rides along as one INFO
+    profile finding. Cap 10.
+    """
+    hosts = [h for h in result.get("hosts") or [] if isinstance(h, str)]
+    if not hosts:
+        return []
+    out: list[Finding] = []
+    sensitive = sorted({h for h in hosts if _sensitive_sub(h)})
+    for h in sensitive:
+        out.append(Finding(
+            tool="urlscan_lookup", category="OSINT",
+            severity=Severity.MEDIUM,
+            title=f"Sensitive subdomain name: {h}",
+            description=("urlscan.io has seen this host; the name suggests "
+                         "staging/dev/test/backup/internal usage."),
+            evidence={"host": h},
+            remediation=("Verify the host is intentional and not a stale or "
+                         "dangling record; remove or secure forgotten "
+                         "environments."),
+            target=target, confidence=0.7,
+        ))
+    out.append(Finding(
+        tool="urlscan_lookup", category="OSINT", severity=Severity.INFO,
+        title=f"URLScan: {result.get('count', len(hosts))} scans found for the domain",
+        description=("Passive scan inventory from urlscan.io. "
+                     "Cross-check hosts against live DNS/SSL for dangling "
+                     "records."),
+        evidence={
+            "count": result.get("count", len(hosts)),
+            "top_hosts": hosts[:20],
+        },
+        remediation="Review the full inventory for forgotten or dangling hosts.",
+        target=target, confidence=0.9,
+    ))
+    return out[:10]
+
+
 _DNS_HYGIENE_META = {
     # id: (severity, confidence, title, remediation)
     "spf_permissive_all": (
