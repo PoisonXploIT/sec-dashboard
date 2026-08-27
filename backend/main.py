@@ -28,6 +28,11 @@ from backend.validators import validate_target, is_remote_mode
 from backend.ratelimit import RateLimiter
 from backend import webhooks
 from backend import splunk
+from backend.applog import get_logger, setup_logging
+
+# Structured logging: rotating file (data/logs) + stdout, before anything runs.
+setup_logging()
+_log = get_logger("main")
 
 app = FastAPI(title="Sec-Dashboard", version="1.0.0")
 
@@ -433,9 +438,9 @@ async def startup():
             await db.execute("DROP TABLE scans_old")
             await db.execute("PRAGMA foreign_keys=ON")
             await db.commit()
-            print("[startup] Migrated scans table: target_id is now nullable")
+            _log.info("Migrated scans table: target_id is now nullable")
     except Exception as e:
-        print(f"[startup] Migration check: {e}")
+        _log.warning("scans migration check failed: %s", e)
     finally:
         await db.close()
 
@@ -468,9 +473,9 @@ async def startup():
             await db.execute("DROP TABLE scans_old")
             await db.execute("PRAGMA foreign_keys=ON")
             await db.commit()
-            print("[startup] Migrated scans table: added findings + score columns")
+            _log.info("Migrated scans table: added findings + score columns")
     except Exception as e:
-        print(f"[startup] Migration check (scans findings): {e}")
+        _log.warning("scans findings migration check failed: %s", e)
     finally:
         await db.close()
 
@@ -508,9 +513,9 @@ async def startup():
             await db.execute("DROP TABLE pipelines_old")
             await db.execute("PRAGMA foreign_keys=ON")
             await db.commit()
-            print("[startup] Migrated pipelines table: added findings + score columns")
+            _log.info("Migrated pipelines table: added findings + score columns")
     except Exception as e:
-        print(f"[startup] Migration check (pipelines findings): {e}")
+        _log.warning("pipelines findings migration check failed: %s", e)
     finally:
         await db.close()
 
@@ -525,9 +530,10 @@ async def startup():
         )
         if cur.rowcount:
             await db.commit()
-            print(f"[startup] Marked {cur.rowcount} orphaned running scans as failed")
+            _log.info("Marked %d orphaned running scans as failed", cur.rowcount)
     finally:
         await db.close()
+    _log.info("startup complete: %d tools registered, remote_mode=%s", len(TOOLS), is_remote_mode())
 
 
 # ── Health ─────────────────────────────────────────────────────
@@ -838,6 +844,7 @@ async def create_scan(body: ScanCreate):
     notified_target = "(redacted)" if _redact else effective_target
 
     async def _run_scan():
+        _log.info("scan started scan_id=%d tool=%s target=%s", scan_id, body.tool, effective_target)
         try:
             result = await run_tool(body.tool, effective_target, **body.params)
             status = "completed" if result.get("success") else "failed"
@@ -848,6 +855,12 @@ async def create_scan(body: ScanCreate):
                 for f in stored.get("findings", []):
                     f["target"] = "(redacted)"
             await _persist_scan_result(scan_id, status, stored)
+            _log.info(
+                "scan finished scan_id=%d tool=%s status=%s elapsed=%.2fs score=%s findings=%d",
+                scan_id, body.tool, status,
+                result.get("elapsed_seconds", 0),
+                result.get("score", 0), len(result.get("findings", [])),
+            )
 
             await broadcast({"type": "scan_complete", "scan_id": scan_id, "status": status, "tool": body.tool})
             # Webhook notification
@@ -879,6 +892,7 @@ async def create_scan(body: ScanCreate):
                     await splunk.index_full_results(body.tool, tool_result)
             return {"scan_id": scan_id, "status": status, "result": result}
         except asyncio.CancelledError:
+            _log.info("scan cancelled scan_id=%d tool=%s", scan_id, body.tool)
             db2 = await get_db()
             try:
                 await db2.execute(
@@ -891,6 +905,8 @@ async def create_scan(body: ScanCreate):
             await broadcast({"type": "scan_complete", "scan_id": scan_id, "status": "cancelled", "tool": body.tool})
             raise
         except Exception as e:
+            # M1: full traceback server-side only, client gets a clean error.
+            _log.exception("scan failed scan_id=%d tool=%s target=%s", scan_id, body.tool, effective_target)
             db2 = await get_db()
             try:
                 await db2.execute(
@@ -1117,10 +1133,20 @@ async def create_pipeline(body: PipelineCreate):
         )
 
         async def run_and_save():
+            _log.info(
+                "pipeline started pipeline_id=%d mode=%s target=%s",
+                pipeline_id, body.mode, target["host"],
+            )
             try:
                 result = await runner.run()
                 status = "completed" if result.get("status") == "completed" else "failed"
                 await _persist_pipeline_result(pipeline_id, status, result)
+                _log.info(
+                    "pipeline finished pipeline_id=%d mode=%s status=%s elapsed=%.2fs score=%s tools=%s",
+                    pipeline_id, body.mode, status,
+                    result.get("elapsed_seconds", 0),
+                    result.get("score", 0), result.get("total_tools", 0),
+                )
                 # Webhook notification
                 await webhooks.notify("pipeline_complete", {
                     "pipeline_id": pipeline_id,
@@ -1138,6 +1164,7 @@ async def create_pipeline(body: PipelineCreate):
                     result.get("total_tools", 0)
                 )
             except asyncio.CancelledError:
+                _log.info("pipeline cancelled pipeline_id=%d mode=%s", pipeline_id, body.mode)
                 try:
                     db2 = await get_db()
                     await db2.execute(
@@ -1151,7 +1178,8 @@ async def create_pipeline(body: PipelineCreate):
                 await broadcast({"type": "pipeline_complete", "pipeline_id": pipeline_id, "status": "cancelled"})
                 raise
             except Exception as e:
-                # Mark as failed if anything goes wrong
+                # Mark as failed if anything goes wrong; M1: traceback server-side only.
+                _log.exception("pipeline failed pipeline_id=%d mode=%s target=%s", pipeline_id, body.mode, target["host"])
                 try:
                     db2 = await get_db()
                     await db2.execute(

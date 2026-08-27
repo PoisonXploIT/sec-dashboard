@@ -6,7 +6,10 @@ from typing import Any
 
 import aiohttp
 
+from backend.applog import get_logger
 from backend.models import get_db
+
+_log = get_logger("splunk")
 
 
 # Splunk config (stored in memory, set via API)
@@ -70,10 +73,10 @@ async def _send_to_splunk(event: dict, sourcetype: str = None):
                 if resp.status == 200:
                     return True
                 else:
-                    print(f"[splunk] HTTP {resp.status}: {await resp.text()[:100]}")
+                    _log.warning("splunk HTTP %s: %s", resp.status, (await resp.text())[:100])
                     return False
     except Exception as e:
-        print(f"[splunk] Error: {str(e)[:100]}")
+        _log.warning("splunk index error: %s", str(e)[:100])
         return False
 
 

@@ -1,8 +1,9 @@
 """Scanner — maps tool names to handlers and executes them."""
 import asyncio
 import time
-import traceback
 from typing import Callable, Any
+
+from backend.applog import get_logger
 
 from backend.config import TOOLS, SPECIAL_TOOLS
 from backend.findings import extract_findings, score_findings
@@ -26,6 +27,8 @@ from backend.tools.emailsec import (
     dnssec_checker, email_security, dns_zone_hygiene,
     http_methods, robots_analyzer, caa_checker,
 )
+
+_log = get_logger("scanner")
 
 # ── Tool → Handler mapping ─────────────────────────────────────
 HANDLERS: dict[str, Callable] = {
@@ -135,7 +138,7 @@ async def run_tool(tool_name: str, target: str, **kwargs) -> dict:
     except Exception as e:
         elapsed = round(time.time() - start, 2)
         # M1: log full traceback server-side, but never leak it to the client
-        traceback.print_exc()
+        _log.exception("tool error tool=%s target=%s", tool_name, target)
         return {
             "tool": tool_name,
             "target": target,
