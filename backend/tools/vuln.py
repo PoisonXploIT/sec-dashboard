@@ -1,6 +1,7 @@
 """Vulnerability tools — pure Python, no external binaries required."""
 import asyncio
 import hashlib
+import os
 import html as html_lib
 import json
 import re
@@ -411,3 +412,107 @@ def _password_recommendations(analysis: dict, pwned: int | None) -> list:
     if pwned and pwned > 0:
         recs.append(f" Found in {pwned:,} data breaches — do NOT use!")
     return recs
+
+
+# ── Vulners (advisory database search) ───────────────────────────
+_VULNERS_API_URL = "https://api.vulners.com/v3/vuln"
+_VULNERS_MAX_RESULTS = 100
+
+
+async def _vulners_query(term: str, advisory: bool, limit: int, key: str) -> list[dict] | None:
+    """One GET to the Vulners v3 vuln API; returns raw result rows.
+
+    Documented contract: {"meta": {...}, "results": [{id, title, type, severity,
+    description, published, modified, references, ...}]}. Auth via the
+    X-Vuls-API-KEY header. None means the query itself failed (network/HTTP/
+    JSON/auth); the caller must treat it as best-effort and degrade to an
+    error dict.
+    """
+    params = {"limit": limit}
+    if advisory:
+        params["advisory"] = term
+    else:
+        params["search"] = term
+    try:
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=30)
+        ) as session:
+            async with session.get(
+                _VULNERS_API_URL,
+                params=params,
+                headers={
+                    "X-Vuls-API-KEY": key,
+                    "User-Agent": "sec-dashboard",
+                },
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    rows = data.get("results")
+    if not isinstance(rows, list):
+        return []
+    return [r for r in rows if isinstance(r, dict)]
+
+
+async def vulners_search(query: str, max_results: int = 50, **kw) -> dict:
+    """Advisories for a product keyword or CVE (VULNERS_API_KEY).
+
+    Alternative/complement to exploitdb_search: Vulners aggregates CVEs and
+    vendor advisories with severity and references. Requires a free key
+    (vulners.com); without one the tool returns a clean error dict and makes
+    no network call (same criterion as dnsdumpster_enum). A bare CVE id goes
+    through the exact `advisory` param, anything else through free-text
+    `search`. Best-effort: any failure degrades to an error dict.
+    """
+    query = (query or "").strip()
+    if not query:
+        return {"query": "", "error": "No query provided"}
+
+    try:
+        max_results = int(max_results)
+    except (TypeError, ValueError):
+        max_results = 50
+    max_results = max(1, min(max_results, _VULNERS_MAX_RESULTS))
+
+    key = os.environ.get("VULNERS_API_KEY", "")
+    if not key:
+        return {"query": query, "error": "VULNERS_API_KEY not set (free key at vulners.com)"}
+
+    cve_match = re.match(r"(?i)^CVE-\d{4}-\d+$", query)
+    term = cve_match.group(0).upper() if cve_match else query
+
+    rows = await _vulners_query(term, bool(cve_match), max_results, key)
+    if rows is None:
+        return {"query": query, "error": "Vulners API unavailable or returned an error"}
+
+    vulns: list[dict] = []
+    seen: set[str] = set()
+    for r in rows:
+        vid = str(r.get("id") or "").strip()
+        if not vid or vid in seen:
+            continue
+        seen.add(vid)
+        vtype = str(r.get("type") or "cve").strip() or "cve"
+        desc = r.get("description")
+        vulns.append({
+            "id": vid,
+            "title": html_lib.unescape(str(r.get("title") or ""))[:500],
+            "type": vtype,
+            "severity": str(r.get("severity") or "").strip().lower(),
+            "description": (str(desc)[:500] if desc is not None else ""),
+            "published": r.get("published"),
+            "url": f"https://vulners.com/{vtype.lower()}/{vid}",
+        })
+
+    # ISO dates: string order == time order, newest first.
+    vulns.sort(key=lambda v: v["published"] or "", reverse=True)
+
+    return {
+        "query": query,
+        "count": len(vulns),
+        "vulns": vulns[:max_results],
+    }

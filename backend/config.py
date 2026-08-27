@@ -196,6 +196,13 @@ TOOLS = {
         "icon": "Ex",
         "timeout": 30,
     },
+    "vulners_search": {
+        "name": "Vulners Search",
+        "category": "Vulnerability",
+        "description": "Advisories (CVE/vendor) for a product or CVE via Vulners (VULNERS_API_KEY)",
+        "icon": "Vu",
+        "timeout": 30,
+    },
     # ─── System ───
     "network_connections": {
         "name": "Net Connections",
@@ -296,6 +303,13 @@ TOOLS = {
         "icon": "HE",
         "timeout": 30,
     },
+    "grepapp_search": {
+        "name": "Grep.app Code Search",
+        "category": "OSINT",
+        "description": "Where a term (domain, email, token prefix) appears in public code on GitHub (no key)",
+        "icon": "GA",
+        "timeout": 30,
+    },
     # ─── Email Security ───
     "dnssec_checker": {
         "name": "DNSSEC Checker",
@@ -386,6 +400,11 @@ SPECIAL_TOOLS = {
     "exploitdb_search": {
         "input_label": "Product / version or CVE ID",
         "input_placeholder": "e.g. Apache HTTPd 2.4 or CVE-2014-0160",
+        "input_type": "text",
+    },
+    "vulners_search": {
+        "input_label": "Product / version or CVE ID",
+        "input_placeholder": "e.g. Apache HTTPd 2.4 or CVE-2014-0160 (VULNERS_API_KEY)",
         "input_type": "text",
     },
     "network_connections": {

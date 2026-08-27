@@ -668,3 +668,104 @@ async def hunter_email_finder(target: str, **kw) -> dict:
 
     emails = emails[:_HUNTER_MAX_ROWS]
     return {"target": host, "count": len(emails), "emails": emails}
+
+# ── grep.app (public code search) ───────────────────────────────
+_GREPPAPP_API_URL = "https://grep.app/api/search"
+_GREPPAPP_MAX_ROWS = 100
+# Verified live: Vercel Security Checkpoint answers 429 to non-browser
+# User-Agents, so the request must look like a browser.
+_GREPPAPP_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
+
+
+async def _grepapp_query(query: str) -> dict | None:
+    """One GET to the grep.app search API; returns the raw JSON body.
+
+    Contract (verified live): top-level {time, facets:{lang:{buckets:[{val,count}]}},
+    hits:{total, hits[]}} where each hit is {repo ("owner/repo"), path (file in
+    repo), branch, total_matches, content:{snippet (HTML)}}. None means the
+    query itself failed (network/HTTP/JSON); the caller must treat it as
+    best-effort and degrade to an error dict.
+    """
+    try:
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=30)
+        ) as session:
+            async with session.get(
+                _GREPPAPP_API_URL,
+                params={"q": query},
+                headers={
+                    "User-Agent": _GREPPAPP_UA,
+                    "Accept": "application/json",
+                },
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+    except Exception:
+        return None
+    if not isinstance(data, dict) or not isinstance(data.get("hits"), dict):
+        return None
+    return data
+
+
+async def grepapp_search(query: str, max_results: int = 50, **kw) -> dict:
+    """Where a term appears in public code (grep.app over GitHub).
+
+    Given a domain, email or token prefix it lists the public repos/files that
+    contain it — leaked credentials, forgotten configs, hardcoded endpoints.
+    No key required. Best-effort: any failure degrades to an error dict.
+    """
+    query = (query or "").strip()
+    if not query:
+        return {"query": "", "error": "No query provided"}
+
+    try:
+        max_results = int(max_results)
+    except (TypeError, ValueError):
+        max_results = 50
+    max_results = max(1, min(max_results, _GREPPAPP_MAX_ROWS))
+
+    data = await _grepapp_query(query)
+    if data is None:
+        return {"query": query, "error": "grep.app search unavailable or returned an error"}
+
+    hits_block = data.get("hits") or {}
+    raw_hits = hits_block.get("hits") if isinstance(hits_block, dict) else None
+    repos: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for h in raw_hits or []:
+        if not isinstance(h, dict):
+            continue
+        repo = h.get("repo")
+        path = h.get("path")
+        if not isinstance(repo, str) or not repo.strip() or not isinstance(path, str):
+            continue
+        key = (repo.lower(), path.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        repos.append({
+            "repo": repo.strip(),
+            "path": path,
+            "branch": h.get("branch") or "",
+            "total_matches": h.get("total_matches"),
+        })
+        if len(repos) >= max_results:
+            break
+
+    languages: list[dict] = []
+    facets = data.get("facets") or {}
+    lang_buckets = (facets.get("lang") or {}).get("buckets") if isinstance(facets, dict) else None
+    for b in lang_buckets or []:
+        if not isinstance(b, dict) or not isinstance(b.get("val"), str):
+            continue
+        languages.append({"lang": b["val"], "count": b.get("count", 0)})
+
+    return {
+        "query": query,
+        "count": len(repos),
+        "total": (hits_block.get("total") if isinstance(hits_block, dict) else None),
+        "repos": repos,
+        "languages": languages[:20],
+    }

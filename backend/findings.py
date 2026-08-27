@@ -878,6 +878,116 @@ def _adapt_hunter_email_finder(result: dict, target: str) -> list[Finding]:
     return out[:10]
 
 
+# ── grep.app code search ───────────────────────────────────────
+_GREPPAPP_SENSITIVE_PATHS = (
+    ".env", ".pem", "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519",
+    ".netrc", "credentials", "secrets", "known_hosts",
+)
+
+
+def _grepapp_sensitive_path(path: str) -> bool:
+    p = (path or "").lower()
+    base = p.rsplit("/", 1)[-1]
+    if any(s in base for s in _GREPPAPP_SENSITIVE_PATHS):
+        return True
+    if base.endswith((".pem", ".key", ".p12", ".pfx", ".jks", ".keystore")):
+        return True
+    if ".env" in base or base.startswith(".env"):
+        return True
+    return False
+
+
+@register("grepapp_search")
+def _adapt_grepapp_search(result: dict, target: str) -> list[Finding]:
+    """Term found in public code is an exposure signal.
+
+    A hit inside a credential/secret-looking file (.env, id_rsa, *.pem,
+    credentials, ...) is MEDIUM at confidence 0.7 — the term plausibly sits
+    next to real material; any other hit is only an INFO profile (the full
+    inventory rides along). Cap 10.
+    """
+    repos = [r for r in result.get("repos") or [] if isinstance(r, dict)]
+    if not repos:
+        return []
+    out: list[Finding] = []
+    sensitive = sorted({f"{r.get('repo')}:{r.get('path')}" for r in repos
+                        if _grepapp_sensitive_path(str(r.get("path") or ""))})
+    for loc in sensitive:
+        r = next((x for x in repos if f"{x.get('repo')}:{x.get('path')}" == loc), {})
+        out.append(Finding(
+            tool="grepapp_search", category="OSINT",
+            severity=Severity.MEDIUM,
+            title=f"Sensitive file mentions the term: {loc}",
+            description=(f"The queried term appears in a public repo file that "
+                         f"by name holds credentials or secrets ({loc}). "
+                         "Possible leaked material in public code."),
+            evidence={"repo": r.get("repo"), "path": r.get("path"),
+                      "branch": r.get("branch") or "",
+                      "total_matches": r.get("total_matches")},
+            remediation=("Assume the material is public: rotate any secret that "
+                         "could sit in that file and review repo visibility."),
+            target=target, confidence=0.7,
+        ))
+    out.append(Finding(
+        tool="grepapp_search", category="OSINT", severity=Severity.INFO,
+        title=f"grep.app: {result.get('count', len(repos))} public repos mention the term",
+        description=("Passive code-exposure inventory from grep.app over public "
+                     "GitHub data. Review the listed files for anything that "
+                     "should not be public."),
+        evidence={"count": result.get("count", len(repos)),
+                  "total": result.get("total"),
+                  "top": [f"{r.get('repo')}:{r.get('path')}" for r in repos[:20]],
+                  "languages": result.get("languages") or []},
+        remediation=("Audit the exposed files; move secrets to a private repo "
+                     "or rotate them."),
+        target=target, confidence=0.9,
+    ))
+    return out[:10]
+
+
+# ── Vulners advisory search ─────────────────────────────────────
+_VULNERS_SEVERITY_MAP = {
+    "critical": (Severity.HIGH, 0.75),
+    "high": (Severity.HIGH, 0.75),
+    "medium": (Severity.MEDIUM, 0.7),
+    "low": (Severity.LOW, 0.6),
+}
+
+
+@register("vulners_search")
+def _adapt_vulners_search(result: dict, target: str) -> list[Finding]:
+    """Advisories from Vulners for the queried product or CVE.
+
+    The tool does not confirm deployment (it searches a database), so
+    severity maps with reduced confidence: critical/high HIGH 0.75, medium
+    MEDIUM 0.7, low/unknown LOW 0.6. Dedup by id, cap 10.
+    """
+    vulns = [v for v in result.get("vulns") or [] if isinstance(v, dict)]
+    out: list[Finding] = []
+    seen: set[str] = set()
+    for v in vulns:
+        vid = str(v.get("id") or "")
+        if not vid or vid in seen:
+            continue
+        seen.add(vid)
+        sev = str(v.get("severity") or "").lower()
+        severity, confidence = _VULNERS_SEVERITY_MAP.get(sev, (Severity.LOW, 0.5))
+        out.append(Finding(
+            tool="vulners_search", category="Vulnerability",
+            severity=severity,
+            title=f"{vid}: {str(v.get('title') or 'advisory')[:100]}",
+            description=str(v.get("description") or "")[:300],
+            evidence={"id": vid, "type": v.get("type") or "",
+                      "severity": sev or "unknown",
+                      "published": v.get("published"),
+                      "url": v.get("url") or ""},
+            remediation=("Patch or mitigate following the advisory references; "
+                        "verify whether the queried product/version is deployed."),
+            target=target, confidence=confidence,
+        ))
+    return out[:10]
+
+
 _DNS_HYGIENE_META = {
     # id: (severity, confidence, title, remediation)
     "spf_permissive_all": (
