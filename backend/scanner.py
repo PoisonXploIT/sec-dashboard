@@ -10,7 +10,7 @@ from backend.findings import extract_findings, score_findings
 from backend.tools.network import (
     port_scanner, dns_recon, subdomain_enum, http_probe,
     whois_lookup, ping_sweep, traceroute, ssl_analyzer,
-    subdomain_takeover, ssl_deep_analyzer,
+    subdomain_takeover, ssl_deep_analyzer, dnsdumpster_enum,
 )
 from backend.tools.web import (
     header_analyzer, dir_fuzzer, sqli_scanner, xss_scanner,
@@ -22,7 +22,10 @@ from backend.tools.vuln import cve_search, exploitdb_search, hash_checker, passw
 from backend.tools.system import network_connections, process_monitor, system_info
 from backend.tools.audit import ps_security_audit
 from backend.tools.wifi import wifi_marauder_scan, m5stick_networks
-from backend.tools.osint import asn_lookup, reverse_dns, ct_logs, shodan_lookup, ip_geolocation
+from backend.tools.osint import (
+    asn_lookup, reverse_dns, ct_logs, shodan_lookup, ip_geolocation,
+    publicwww_search,
+)
 from backend.tools.emailsec import (
     dnssec_checker, email_security, dns_zone_hygiene,
     http_methods, robots_analyzer, caa_checker,
@@ -71,6 +74,8 @@ HANDLERS: dict[str, Callable] = {
     "ct_logs": ct_logs,
     "shodan_lookup": shodan_lookup,
     "ip_geolocation": ip_geolocation,
+    "publicwww_search": publicwww_search,
+    "dnsdumpster_enum": dnsdumpster_enum,
     # Email Security
     "dnssec_checker": dnssec_checker,
     "email_security": email_security,

@@ -8,6 +8,12 @@ def test_every_handler_has_registry_entry():
     assert not missing, f"Tools in HANDLERS but not in TOOLS: {missing}"
 
 
+def test_every_registered_tool_has_handler():
+    """Reverse guard: a tool in TOOLS without a handler is unrunnable (unknown tool)."""
+    missing = set(config.TOOLS) - set(HANDLERS)
+    assert not missing, f"Tools in TOOLS but not in HANDLERS: {missing}"
+
+
 def test_every_registered_tool_has_required_fields():
     for name, meta in config.TOOLS.items():
         for field in ("name", "category", "description", "timeout"):
