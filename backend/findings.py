@@ -429,6 +429,42 @@ def _adapt_tech_detector(result: dict, target: str) -> list[Finding]:
     )]
 
 
+@register("favicon_fingerprint")
+def _adapt_favicon_fingerprint(result: dict, target: str) -> list[Finding]:
+    """Matched stack = INFO (instalacion por defecto / sin rebrandear).
+
+    Icono desconocido = INFO con los hashes para lookup manual. Sin iconos:
+    sin finding (un favicon ausente no es en si una vulnerabilidad).
+    """
+    out: list[Finding] = []
+    for m in result.get("matches", []):
+        out.append(Finding(
+            tool="favicon_fingerprint", category="Web Security",
+            severity=Severity.INFO,
+            title=f"Favicon fingerprint: {m.get('stack', '')} default icon at {m.get('path', '')}",
+            description=("Icon byte-identical to the official favicon of a known stack. "
+                         "Possible default or unrebranded install."),
+            evidence={"md5": m.get("md5"), "source": m.get("source")},
+            remediation="Confirm the platform and review its CVE surface (cve_correlation).",
+            target=target, confidence=0.8,
+        ))
+    if not out:
+        icons = result.get("icons", [])
+        if icons:
+            first = icons[0]
+            out.append(Finding(
+                tool="favicon_fingerprint", category="Web Security",
+                severity=Severity.INFO,
+                title=f"Favicon served at {first.get('path', '')} (unknown to local DB)",
+                description=("Icon not present in the local hash database; hashes included "
+                             "for manual lookup against public favicon databases."),
+                evidence={"md5": first.get("md5"), "sha256": first.get("sha256")},
+                remediation="Compare hashes manually against public favicon databases.",
+                target=target, confidence=0.6,
+            ))
+    return out
+
+
 _DNS_HYGIENE_META = {
     # id: (severity, confidence, title, remediation)
     "spf_permissive_all": (

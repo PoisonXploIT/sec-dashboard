@@ -146,6 +146,13 @@ TOOLS = {
         "icon": "SK",
         "timeout": 90,
     },
+    "favicon_fingerprint": {
+        "name": "Favicon Fingerprint",
+        "category": "Web Security",
+        "description": "MD5/SHA256 hash of /favicon.ico and common icon paths, matched against a local stack hash DB",
+        "icon": "Fv",
+        "timeout": 30,
+    },
     # ─── Vulnerability ───
     "cve_search": {
         "name": "CVE Search",

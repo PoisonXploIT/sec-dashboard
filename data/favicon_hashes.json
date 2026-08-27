@@ -1,0 +1,50 @@
+[
+  {
+    "name": "WordPress",
+    "source": "https://wordpress.org/favicon.ico",
+    "content_type": "image/x-icon",
+    "bytes": 4286,
+    "md5": "53a151ba1af3acdefe16fbbdad937ee4",
+    "sha256": "2cea359431715d7f9036ab6314eb4bc67266b7ac73b8206f30336d8f87f77e5f"
+  },
+  {
+    "name": "Drupal",
+    "source": "https://www.drupal.org/favicon.ico",
+    "content_type": "image/vnd.microsoft.icon",
+    "bytes": 299637,
+    "md5": "5a2ae336f3c5cbb72b578aefa33e73fa",
+    "sha256": "31fb84648f6558654a0ddf08c705efa06557e1ff792e86c04c3b92d12627ac1b"
+  },
+  {
+    "name": "Joomla",
+    "source": "https://www.joomla.org/favicon.ico",
+    "content_type": "image/x-icon",
+    "bytes": 1150,
+    "md5": "8894791e84f5cafebd47311d14a3703c",
+    "sha256": "24168e09893e89aee7daa843fad42b5719bee447b3a2c588b933397822c9637b"
+  },
+  {
+    "name": "Shopify",
+    "source": "https://www.shopify.com/favicon.ico",
+    "content_type": "image/x-icon",
+    "bytes": 14389,
+    "md5": "52cc2aaef273e941abaa30c77821a774",
+    "sha256": "a0d9f7b8adf1a699a94c7d8381d7a47a7a7fa810faebe8a67e7b9aab525546d3"
+  },
+  {
+    "name": "Ghost",
+    "source": "https://ghost.org/favicon.ico",
+    "content_type": "image/vnd.microsoft.icon",
+    "bytes": 15406,
+    "md5": "a9c6dbdcdc3ae568f4e0dad92149a0e3",
+    "sha256": "467b9feccbe0d278bd918d989b50c1b956a730dc2dbc7cf4b650840f031a326d"
+  },
+  {
+    "name": "Wix",
+    "source": "https://www.wix.com/favicon.ico",
+    "content_type": "image/x-icon",
+    "bytes": 3477,
+    "md5": "f4feb61d53bc0de67557513853fa54f1",
+    "sha256": "295a1f6f927fd11a3842a4c9f508b4152eca150cb4c54d6cfb64736fad659b80"
+  }
+]

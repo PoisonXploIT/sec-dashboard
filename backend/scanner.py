@@ -16,6 +16,7 @@ from backend.tools.web import (
     cors_checker, tech_detector, csp_analyzer, open_redirect,
     cve_correlation, secret_leak_scan,
 )
+from backend.tools.favicon import favicon_fingerprint
 from backend.tools.vuln import cve_search, hash_checker, password_audit
 from backend.tools.system import network_connections, process_monitor, system_info
 from backend.tools.audit import ps_security_audit
@@ -48,6 +49,7 @@ HANDLERS: dict[str, Callable] = {
     "csp_analyzer": csp_analyzer,
     "open_redirect": open_redirect,
     "secret_leak_scan": secret_leak_scan,
+    "favicon_fingerprint": favicon_fingerprint,
     # Vulnerability
     "cve_search": cve_search,
     "cve_correlation": cve_correlation,
