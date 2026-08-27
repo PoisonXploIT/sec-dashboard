@@ -1,6 +1,7 @@
 """OSINT tools -- passive reconnaissance, no packets to target."""
 import asyncio
 import json
+import os
 import socket
 from urllib.parse import urlparse
 
@@ -160,9 +161,65 @@ async def ct_logs(target: str, **kw) -> dict:
     return results
 
 
-# -- 4. Shodan (free tier - no key for basic) ---------------------
+# -- 4. Shodan (free InternetDB + optional API key) -----------------
+
+_SHODAN_DSEARCH_URL = "https://api.shodan.io/shodan/dsearch"
+_SHODAN_HOST_URL = "https://api.shodan.io/shodan/host"
+_SHODAN_FIELDS = "port,product,version,banner,vulns,tags,cpe,os,hostnames"
+_SHODAN_MAX_RESULTS = 100
+
+
+async def _shodan_query(ip: str, key: str) -> dict | None:
+    """One dsearch query for an IP; returns the parsed JSON.
+
+    None means the query itself failed (network/HTTP/JSON); the caller
+    must treat it as best-effort and fall back to /host.
+    """
+    params = {
+        "query": ip,
+        "key": key,
+        "min": "0",
+        "max": str(_SHODAN_MAX_RESULTS),
+        "fields": _SHODAN_FIELDS,
+    }
+    try:
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=15)
+        ) as session:
+            async with session.get(_SHODAN_DSEARCH_URL, params=params) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+async def _shodan_host_query(ip: str, key: str) -> dict | None:
+    """One /host lookup for an IP; returns the parsed JSON.
+
+    None means the query itself failed (network/HTTP/JSON).
+    """
+    try:
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=15)
+        ) as session:
+            async with session.get(f"{_SHODAN_HOST_URL}/{ip}", params={"key": key}) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
+
+
 async def shodan_lookup(target: str, **kw) -> dict:
-    """Shodan internet intelligence lookup."""
+    """Shodan internet intelligence lookup.
+
+    Without SHODAN_API_KEY: free InternetDB (no key). With the key:
+    dsearch query API (banners, vulns, tags), falling back to /host if
+    dsearch is empty or fails. Best-effort throughout.
+    """
     ip = target
     if not _is_ip(target):
         try:
@@ -170,7 +227,6 @@ async def shodan_lookup(target: str, **kw) -> dict:
         except socket.gaierror:
             return {"target": target, "error": "Could not resolve"}
 
-    import os
     shodan_key = os.environ.get("SHODAN_API_KEY", "")
 
     if not shodan_key:
@@ -196,29 +252,51 @@ async def shodan_lookup(target: str, **kw) -> dict:
         except Exception as e:
             return {"target": target, "ip": ip, "source": "shodan_internetdb", "error": str(e)[:80]}
 
-    # Paid API with key
-    try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15), connector=get_aiohttp_connector()) as session:
-            async with session.get(f"https://api.shodan.io/shodan/host/{ip}?key={shodan_key}") as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    return {
-                        "target": target,
-                        "ip": ip,
-                        "source": "shodan_api",
-                        "ports": data.get("ports", []),
-                        "vulns": data.get("vulns", []),
-                        "os": data.get("os"),
-                        "org": data.get("org", ""),
-                        "isp": data.get("isp", ""),
-                        "hostnames": data.get("hostnames", []),
-                        "services": [
-                            {"port": s.get("port"), "transport": s.get("transport"), "product": s.get("product", ""), "version": s.get("version", "")}
-                            for s in data.get("data", [])[:20]
-                        ],
-                    }
-    except Exception as e:
-        return {"target": target, "ip": ip, "error": str(e)[:80]}
+    data = await _shodan_query(ip, shodan_key)
+    rows: list[dict] = []
+    if isinstance(data, dict):
+        for r in data.get("result_set") or []:
+            if not isinstance(r, dict):
+                continue
+            rows.append({
+                "port": r.get("port"),
+                "product": r.get("product", ""),
+                "version": r.get("version", ""),
+                "banner": (r.get("banner") or "")[:500],
+                "vulns": [str(v) for v in r.get("vulns") or [] if isinstance(v, str)],
+                "tags": r.get("tags") or [],
+                "cpe": r.get("cpe", ""),
+                "os": r.get("os", ""),
+                "hostnames": r.get("hostnames") or [],
+            })
+    if rows:
+        return {
+            "target": target,
+            "ip": ip,
+            "source": "shodan_dsearch",
+            "total": data.get("total"),
+            "count": len(rows),
+            "results": rows,
+        }
+
+    # dsearch empty or failed: fall back to /host.
+    host_data = await _shodan_host_query(ip, shodan_key)
+    if isinstance(host_data, dict):
+        return {
+            "target": target,
+            "ip": ip,
+            "source": "shodan_api",
+            "ports": host_data.get("ports", []),
+            "vulns": host_data.get("vulns", []),
+            "os": host_data.get("os"),
+            "org": host_data.get("org", ""),
+            "isp": host_data.get("isp", ""),
+            "hostnames": host_data.get("hostnames", []),
+            "services": [
+                {"port": s.get("port"), "transport": s.get("transport"), "product": s.get("product", ""), "version": s.get("version", "")}
+                for s in (host_data.get("data") or [])[:20] if isinstance(s, dict)
+            ],
+        }
 
     return {"target": target, "ip": ip, "error": "No results"}
 

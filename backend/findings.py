@@ -194,6 +194,19 @@ def _adapt_ssl_deep_analyzer(result: dict, target: str) -> list[Finding]:
     return out
 
 
+# Exposed management/admin ports worth reporting (shared by the
+# port_scanner and shodan_lookup adapters).
+_SENSITIVE_PORTS: dict[int, tuple[str, str]] = {
+    22: ("SSH exposed", "Restrict with key-only auth, fail2ban or VPN."),
+    3389: ("RDP exposed", "Remove RDP from internet-facing hosts; use VPN."),
+    3306: ("MySQL exposed", "Bind MySQL to localhost or put it behind the firewall."),
+    5432: ("PostgreSQL exposed", "Bind PostgreSQL to localhost or put it behind the firewall."),
+    27017: ("MongoDB exposed", "Disable unauthenticated remote access; require auth."),
+    6379: ("Redis exposed", "Do not expose Redis without auth; bind to internal networks."),
+    8080: ("HTTP alternate port", "Review what service runs here and whether it is needed."),
+}
+
+
 @register("port_scanner")
 def _adapt_port_scanner(result: dict, target: str) -> list[Finding]:
     out: list[Finding] = []
@@ -201,24 +214,111 @@ def _adapt_port_scanner(result: dict, target: str) -> list[Finding]:
         port = p.get("port")
         service = p.get("service", "")
         # Exposed management/admin ports are the notable ones.
-        sensitive = {
-            22: ("SSH exposed", "Restrict with key-only auth, fail2ban or VPN."),
-            3389: ("RDP exposed", "Remove RDP from internet-facing hosts; use VPN."),
-            3306: ("MySQL exposed", "Bind MySQL to localhost or put it behind the firewall."),
-            5432: ("PostgreSQL exposed", "Bind PostgreSQL to localhost or put it behind the firewall."),
-            27017: ("MongoDB exposed", "Disable unauthenticated remote access; require auth."),
-            6379: ("Redis exposed", "Do not expose Redis without auth; bind to internal networks."),
-            8080: ("HTTP alternate port", "Review what service runs here and whether it is needed."),
-        }
-        if port in sensitive:
-            title, rem = sensitive[port]
-            out.append(Finding(
-                tool="port_scanner", category="Network Recon", severity=Severity.MEDIUM,
-                title=title, description=f"Port {port}/{p.get('state', 'open')} — service: {service}",
-                evidence={"port": port, "state": p.get("state"), "service": service},
-                remediation=rem, target=target, confidence=0.9,
-            ))
+        info = _SENSITIVE_PORTS.get(port)
+        if info is None:
+            continue
+        title, rem = info
+        out.append(Finding(
+            tool="port_scanner", category="Network Recon", severity=Severity.MEDIUM,
+            title=title, description=f"Port {port}/{p.get('state', 'open')} — service: {service}",
+            evidence={"port": port, "state": p.get("state"), "service": service},
+            remediation=rem, target=target, confidence=0.9,
+        ))
     return out
+
+
+@register("shodan_lookup")
+def _adapt_shodan_lookup(result: dict, target: str) -> list[Finding]:
+    """Shodan-attested weaknesses on the IP.
+
+    Vuln ids come from Shodan's banner matching (no deployment confirmation
+    beyond the banner itself), so they are HIGH at confidence 0.75;
+    sensitive exposed ports MEDIUM; os/tags profile INFO. Cap 10.
+    """
+    rows = [r for r in result.get("results") or [] if isinstance(r, dict)]
+    top_vulns = [str(v) for v in result.get("vulns") or [] if isinstance(v, str)]
+
+    vuln_ctx: list[tuple[str, dict]] = []
+    ports: set[int] = set()
+    if rows:
+        for r in rows:
+            port = r.get("port")
+            if isinstance(port, int):
+                ports.add(port)
+            svc = f"{r.get('product') or 'unknown'} {r.get('version') or ''}".strip()
+            for cid in r.get("vulns") or []:
+                vuln_ctx.append((str(cid), {
+                    "port": port, "service": svc,
+                    "banner": (r.get("banner") or "")[:200],
+                }))
+    else:
+        for s in result.get("services") or []:
+            if isinstance(s, dict) and isinstance(s.get("port"), int):
+                ports.add(s["port"])
+        # internetdb (and /host) report the open ports as a top-level list.
+        for p in result.get("ports") or []:
+            if isinstance(p, int):
+                ports.add(p)
+        vuln_ctx = [(cid, {}) for cid in top_vulns]
+
+    out: list[Finding] = []
+    seen_cves: set[str] = set()
+    for cid, ctx in vuln_ctx:
+        if cid in seen_cves:
+            continue
+        seen_cves.add(cid)
+        svc, port = ctx.get("service"), ctx.get("port")
+        title = f"Known vulnerability {cid}" + (
+            f" on {svc} (port {port})" if svc and port is not None else ""
+        )
+        out.append(Finding(
+            tool="shodan_lookup", category="Vulnerability",
+            severity=Severity.HIGH,
+            title=title,
+            description=(
+                "Shodan matches this CVE id against the live service banner; "
+                "unverified deployment — confirm before acting."
+            ),
+            evidence={
+                "port": port, "service": svc or None,
+                "banner": ctx.get("banner") or None,
+                "source": result.get("source"),
+            },
+            cve=cid,
+            remediation="Verify the deployed version is affected and patch.",
+            target=target, confidence=0.75,
+        ))
+
+    for port in sorted(ports):
+        info = _SENSITIVE_PORTS.get(port)
+        if info is None:
+            continue
+        title, rem = info
+        out.append(Finding(
+            tool="shodan_lookup", category="Network Recon",
+            severity=Severity.MEDIUM,
+            title=title,
+            description=f"Shodan reports port {port} open on this IP.",
+            evidence={"port": port, "source": result.get("source")},
+            remediation=rem, target=target, confidence=0.9,
+        ))
+
+    os_name = result.get("os") or (rows[0].get("os") if rows else "")
+    tags = result.get("tags") or (rows[0].get("tags") if rows else [])
+    if os_name or tags:
+        out.append(Finding(
+            tool="shodan_lookup", category="Network Recon",
+            severity=Severity.INFO,
+            title=f"Shodan profile: {os_name or 'unknown OS'}",
+            description="Operating system and tags as seen by Shodan.",
+            evidence={
+                "os": os_name, "tags": list(tags)[:20],
+                "source": result.get("source"),
+            },
+            target=target, confidence=1.0,
+        ))
+
+    return out[:10]
 
 
 @register("cors_checker")

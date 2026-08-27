@@ -243,7 +243,7 @@ TOOLS = {
     "shodan_lookup": {
         "name": "Shodan Lookup",
         "category": "OSINT",
-        "description": "Shodan internet intelligence -- ports, vulns, services (free InternetDB)",
+        "description": "Shodan internet intelligence -- ports, vulns, banners, tags (InternetDB free tier; dsearch API with SHODAN_API_KEY)",
         "icon": "Sh",
         "timeout": 15,
     },
