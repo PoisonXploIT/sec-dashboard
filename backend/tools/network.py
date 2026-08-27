@@ -1,5 +1,6 @@
 """Network Recon tools — pure Python, no external binaries required."""
 import asyncio
+import os
 import re
 import socket
 import ssl
@@ -1234,3 +1235,84 @@ async def ssl_deep_analyzer(target: str, **kw) -> dict:
         return {"target": host, "port": port,
                 "error": "No TLS handshake succeeded (port closed or filtered)"}
     return result
+
+
+# ── DNSDumpster Enum (OSINT / dnsdumpster.com) ───────────────────
+_DNSDUMPSTER_API_URL = "https://api.dnsdumpster.com/domain/"
+_DNSDUMPSTER_MAX_SUBS = 1000
+
+
+async def _dnsdumpster_query(domain: str, key: str) -> list[str] | None:
+    """One GET to the dnsdumpster API; returns subdomain names.
+
+    The response carries a/cname/mx/ns record lists, each entry with a
+    host name. None means the query itself failed (network/HTTP/JSON);
+    the caller must treat it as best-effort and degrade to an error dict.
+    """
+    try:
+        async with aiohttp.ClientSession(
+            timeout=aiohttp.ClientTimeout(total=60)
+        ) as session:
+            async with session.get(
+                f"{_DNSDUMPSTER_API_URL}{domain}",
+                headers={"X-API-Key": key, "User-Agent": "sec-dashboard"},
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    return _dnsdumpster_hosts(data)[:_DNSDUMPSTER_MAX_SUBS]
+
+
+def _dnsdumpster_hosts(data: dict) -> list[str]:
+    """Unique host names out of a dnsdumpster API response (a/cname/mx/ns)."""
+    subs: list[str] = []
+    for rec in ("a", "cname", "mx", "ns"):
+        for entry in data.get(rec) or []:
+            if isinstance(entry, dict) and isinstance(entry.get("host"), str):
+                name = entry["host"].strip()
+                if name:
+                    subs.append(name)
+    return subs
+
+
+async def dnsdumpster_enum(target: str, **kw) -> dict:
+    """Subdomain enumeration via the dnsdumpster.com API (passive).
+
+    Asks the dnsdumpster service for every record it has found for the
+    domain and returns the unique host names — attack-surface discovery
+    (stale panels, forgotten staging hosts, dangling CNAMEs). Requires
+    DNSDUMPSTER_API_KEY (free account at dnsdumpster.com); best-effort:
+    any failure degrades to an error dict.
+    """
+    t = target.strip().lower()
+    t = re.sub(r"^https?://", "", t)
+    host = t.split("/")[0].split(":")[0].strip()
+    if not host or _is_ip(host):
+        return {"target": host, "error": "dnsdumpster_enum requires a domain, not an IP"}
+
+    key = os.environ.get("DNSDUMPSTER_API_KEY", "").strip()
+    if not key:
+        return {
+            "target": host,
+            "error": ("dnsdumpster_enum requires DNSDUMPSTER_API_KEY "
+                      "(free account at dnsdumpster.com)"),
+        }
+
+    subs = await _dnsdumpster_query(host, key)
+    if subs is None:
+        return {"target": host, "error": "dnsdumpster API unavailable or returned an error"}
+
+    seen: dict[str, None] = {}
+    for s in subs:
+        if isinstance(s, str) and s.strip():
+            seen.setdefault(s.strip())
+    out_subs = sorted(seen)[:_DNSDUMPSTER_MAX_SUBS]
+    return {
+        "target": host,
+        "count": len(out_subs),
+        "subdomains": out_subs,
+    }

@@ -261,6 +261,13 @@ TOOLS = {
         "icon": "WB",
         "timeout": 60,
     },
+    "dnsdumpster_enum": {
+        "name": "DNSDumpster Enum",
+        "category": "OSINT",
+        "description": "Subdomain enumeration via the dnsdumpster.com API (DNSDUMPSTER_API_KEY, free account)",
+        "icon": "DD",
+        "timeout": 60,
+    },
     # ─── Email Security ───
     "dnssec_checker": {
         "name": "DNSSEC Checker",

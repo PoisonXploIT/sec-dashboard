@@ -626,6 +626,60 @@ def _adapt_wayback_urls(result: dict, target: str) -> list[Finding]:
     )]
 
 
+# Subdomain labels that suggest staging/dev/test/backup/internal usage.
+_DNSDUMPSTER_SENSITIVE_LABELS = {
+    "admin", "staging", "stage", "dev", "development", "test", "testing",
+    "qa", "old", "backup", "bak", "git", "github", "jenkins", "ci",
+    "internal", "vpn", "sandbox", "demo", "debug", "tmp",
+}
+
+
+def _sensitive_sub(sub: str) -> bool:
+    labels = [l for l in sub.lower().split(".") if l]
+    return any(
+        lab in _DNSDUMPSTER_SENSITIVE_LABELS or lab.startswith(("old-", "dev-"))
+        for lab in labels[:-1]  # ignore the TLD label
+    )
+
+
+@register("dnsdumpster_enum")
+def _adapt_dnsdumpster_enum(result: dict, target: str) -> list[Finding]:
+    """Subdomain inventory from dnsdumpster.com.
+
+    Sensitive-name subs are MEDIUM at confidence 0.7 — naming only, no
+    deployment confirmation; the full inventory rides along as one INFO
+    profile finding. Cap 10.
+    """
+    subs = [s for s in result.get("subdomains") or [] if isinstance(s, str)]
+    if not subs:
+        return []
+    out: list[Finding] = []
+    sensitive = sorted({s for s in subs if _sensitive_sub(s)})
+    for s in sensitive:
+        out.append(Finding(
+            tool="dnsdumpster_enum", category="OSINT",
+            severity=Severity.MEDIUM,
+            title=f"Sensitive subdomain name: {s}",
+            description=("Subdomain name suggests staging/dev/test/backup/"
+                         "internal usage."),
+            evidence={"subdomain": s},
+            remediation=("Verify the host is intentional and not a stale or "
+                         "dangling record; remove or secure forgotten "
+                         "environments."),
+            target=target, confidence=0.7,
+        ))
+    out.append(Finding(
+        tool="dnsdumpster_enum", category="OSINT", severity=Severity.INFO,
+        title=f"dnsdumpster: {result.get('count', len(subs))} subdomains found",
+        description=("Passive subdomain inventory from dnsdumpster.com. "
+                     "Cross-check against live DNS/SSL for dangling records."),
+        evidence={"count": result.get("count", len(subs)), "top": subs[:20]},
+        remediation="Review the full list for forgotten or dangling subdomains.",
+        target=target, confidence=0.9,
+    ))
+    return out[:10]
+
+
 _DNS_HYGIENE_META = {
     # id: (severity, confidence, title, remediation)
     "spf_permissive_all": (
