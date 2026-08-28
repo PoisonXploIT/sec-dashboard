@@ -376,9 +376,17 @@ TOOLS = {
         "icon": "M5",
         "timeout": 30,
     },
+    # ─── RF Hardware (offline capture analysis) ───
+    "hackrf_cff_analyzer": {
+        "name": "HackRF CFF Analyzer",
+        "category": "RF Hardware",
+        "description": "Characterizes HackRF .cff captures offline: DC, dominant tones, symbol timing, packets, sub-bursts and FSK demod",
+        "icon": "HC",
+        "timeout": 300,
+    },
 }
 
-CATEGORIES = ["Network Recon", "Web Security", "Vulnerability", "System", "OSINT", "Email Security"]
+CATEGORIES = ["Network Recon", "Web Security", "Vulnerability", "System", "OSINT", "Email Security", "RF Hardware"]
 
 # ── Special tools (don't use target domain/IP, need custom input) ──
 SPECIAL_TOOLS = {
@@ -436,6 +444,11 @@ SPECIAL_TOOLS = {
         "input_label": "M5Stick Viewer URL",
         "input_placeholder": "http://127.0.0.1:5000",
         "input_type": "text",
+    },
+    "hackrf_cff_analyzer": {
+        "input_label": "HackRF .cff capture",
+        "input_placeholder": "Upload a .cff file (int8 I/Q interleaved, no header)",
+        "input_type": "cff_upload",
     },
 }
 

@@ -1076,6 +1076,75 @@ def _adapt_dns_zone_hygiene(result: dict, target: str) -> list[Finding]:
     return out[:20]
 
 
+# ── RF Hardware: HackRF CFF offline analysis ───────────────────
+@register("hackrf_cff_analyzer")
+def _adapt_hackrf_cff_analyzer(result: dict, target: str) -> list[Finding]:
+    """Offline RF capture characterization.
+
+    File metadata and burst structure are INFO (context, no vulnerability);
+    a demodulated FSK stream whose internal code is not yet validated is LOW
+    (regla 5: pending own-capture validation); a VALIDADO code means a working
+    keyfob code was recovered, which is clonable — MEDIUM.
+    """
+    if "error" in result:
+        return []
+    out: list[Finding] = []
+    profile = result.get("profile", "")
+    freq_mhz = round(result.get("center_freq_hz", 0) / 1e6, 3)
+    out.append(Finding(
+        tool="hackrf_cff_analyzer", category="RF Hardware", severity=Severity.INFO,
+        title=f"HackRF CFF capture analyzed ({profile}, {freq_mhz} MHz center)",
+        description=(f"Offline analysis of an uploaded .cff capture: "
+                     f"{result.get('size_bytes', 0)} bytes, "
+                     f"{result.get('duration_s', 0):.3f} s at "
+                     f"{result.get('sample_rate', 0) / 1e6:.2f} MSPS."),
+        evidence={"file": target, "size_bytes": result.get("size_bytes"),
+                  "duration_s": result.get("duration_s"),
+                  "profile": profile},
+        remediation="", target=target, confidence=1.0,
+    ))
+    if result.get("n_packets"):
+        sub = (result.get("subbursts") or {}).get("n")
+        out.append(Finding(
+            tool="hackrf_cff_analyzer", category="RF Hardware", severity=Severity.INFO,
+            title=f"Burst structure: {result['n_packets']} packets"
+                  + (f", {sub} sub-bursts" if sub is not None else ""),
+            description=("Transmit activity detected above the noise floor; "
+                         "packet and sub-burst statistics in the result."),
+            evidence={"n_packets": result["n_packets"],
+                      "subbursts": result.get("subbursts"),
+                      "packet_dur_ms": result.get("packet_dur_ms")},
+            remediation="", target=target, confidence=0.9,
+        ))
+    status = result.get("code_status")
+    if status == "pendiente_validacion":
+        out.append(Finding(
+            tool="hackrf_cff_analyzer", category="RF Hardware", severity=Severity.LOW,
+            title="FSK demodulated — internal code not yet validated",
+            description=("A two-tone FSK stream was demodulated, but the "
+                         "internal code does not repeat stably between frames "
+                         "(possible rolling code or demod to refine). The exact "
+                         "code is NOT fixed until own captures validate it."),
+            evidence={"streams": (result.get("streams") or [])[:4],
+                      "positional_agreement_pct": result.get("positional_agreement_pct")},
+            remediation=("Capture more frames with verified sync and fixed "
+                         "distance; compare bitstreams between presses."),
+            target=target, confidence=0.6,
+        ))
+    elif status == "validado":
+        out.append(Finding(
+            tool="hackrf_cff_analyzer", category="RF Hardware", severity=Severity.MEDIUM,
+            title="Validated keyfob code recovered (clonable)",
+            description=("The internal FSK code repeats stably between frames; "
+                         "a working keyfob code was recovered and can be cloned."),
+            evidence={"streams": (result.get("streams") or [])[:4]},
+            remediation=("Treat the code as compromised: rekey/rotate the remote "
+                         "or replace the transmitter if it is not your own device."),
+            target=target, confidence=0.9,
+        ))
+    return out[:4]
+
+
 def extract_findings(tool: str, result: dict, target: str = "") -> list[Finding]:
     """Translate a tool result into normalized findings.
 

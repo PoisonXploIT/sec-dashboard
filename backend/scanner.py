@@ -22,6 +22,7 @@ from backend.tools.vuln import cve_search, exploitdb_search, vulners_search, has
 from backend.tools.system import network_connections, process_monitor, system_info
 from backend.tools.audit import ps_security_audit
 from backend.tools.wifi import wifi_marauder_scan, m5stick_networks
+from backend.tools.rf import hackrf_cff_analyzer
 from backend.tools.osint import (
     asn_lookup, reverse_dns, ct_logs, shodan_lookup, ip_geolocation,
     publicwww_search, urlscan_lookup, greynoise_lookup, hunter_email_finder,
@@ -96,6 +97,8 @@ HANDLERS: dict[str, Callable] = {
     # WiFi Hardware (M5Stick devices)
     "wifi_marauder_scan": wifi_marauder_scan,
     "m5stick_networks": m5stick_networks,
+    # RF Hardware (offline capture analysis)
+    "hackrf_cff_analyzer": hackrf_cff_analyzer,
 }
 
 
