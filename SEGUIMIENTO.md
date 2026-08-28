@@ -542,6 +542,16 @@ Reglas para cada tool de este backlog:
 - Push del plan de seguridad (`0ae4c44`): despliegue activo en sec.sammideblas.com. CI pasada, suite verde.
 - Pendiente / siguiente: network policies (limitar egress — lado deploy/Railway) y encriptación DB en reposo (opcional, fuera de MVP).
 
+### 2026-08-28 — Decisiones de infraestructura/deploy registradas (network policies + DB en reposo)
+- **Network policies (egress)**: no bloquear. La degradación graceful + rate limiting + auth ya mitigan el abuso; un firewall egress agresivo rompe más herramientas de las que protege sin beneficio proporcional.
+  - Documentado: solo se expone puerto 8080; todo el tráfico saliente es HTTPS (443) a dominios OSINT conocidos (HIBP, shodan.io, exploit-db.com, archive.org, greynoise.io, hunter.io, vulners.com, urlscan.io, etc.).
+  - Si se quiere limitar más adelante: proxy outbound dentro del container (tinyproxy/squid) con reglas por dominio; complejidad operativa que no vale la pena en el MVP.
+- **Encriptación DB en reposo**: omitir en MVP. Railway cifra los discos a nivel infraestructura por defecto; añadir SQLCipher rompe "sin dependencias nuevas" y requiere gestión de clave separada + migración de conexión por un riesgo marginal (los datos son recon pasivo sobre dominios públicos, sin secrets sensibles).
+- **Plan de respuesta operativo** validado:
+  - Escaneo masivo no autorizado → rotar API key + revisar logs para patrón.
+  - Railway cae → health check + alerta vía CI/deploy hooks.
+  - Finding con secret real filtrado → revocar/rotar inmediatamente las keys afectadas.
+
 ## 7. Reglas y restricciones del proyecto (NO VIOLAR)
 
 1. **NO emojis, flechas de texto ni símbolos de color** en ninguna salida, nota, script o commit (regla global del usuario). Escribir las palabras.
@@ -571,13 +581,13 @@ M5 Stick + CC1101 + nRF24 (Bruce), WiFi Marauder ESP32 v6, LilyGo T-Embed + Bus 
 
 ---
 
-*Última actualización: 2026-08-28 — **PLAN DE SEGURIDAD (BUNKER) PUSHEADO Y DESPLEGADO** (`b7665a3` docs + `0ae4c44` feat). Test masivo contra sammideblas.com completado: full_depth ~15s 5 tools operativas score 0, nuclear ~20s 25 tools operativas score 18/100 (port 8080 MEDIUM, headers faltantes LOW), SPECIAL_TOOLS todas operativas. Degradación graceful en asn_lookup (bgpview.io unreachable desde este entorno, fallback ip-api OK). Ninguna herramienta bloqueada ni con timeouts anormales; no requiere reparación ni ajuste. CI verde, Railway desplegado.
+*Última actualización: 2026-08-28 — **PLAN DE SEGURIDAD (BUNKER) PUSHEADO Y DESPLEGADO** (`b7665a3` docs + `0ae4c44` feat). Test masivo contra sammideblas.com completado y decisiones de infraestructura/deploy registradas: network policies (no bloquear egress, degradación graceful + rate limiting + auth ya mitigan el abuso; documentado puerto 8080 expuesto + HTTPS saliente a dominios OSINT), DB en reposo (omitir en MVP, Railway cifra discos por defecto; SQLCipher rompe "sin dependencias nuevas" por riesgo marginal), plan de respuesta operativo validado. CI verde, Railway desplegado.
 
 **PROMPT PARA LA PRÓXIMA SESIÓN** (arrancar con contexto nuevo):
 Eres el agente de sec-dashboard. Repo C:\Users\Sammi\sec-dashboard (origin/master = github.com/PoisonXploIT/sec-dashboard, deploy Railway en sec.sammideblas.com). Lee primero SEGUIMIENTO.md entero: la sección 7 son reglas NO VIOLAR y las secciones 4-5 documentan las convenciones de la suite (tests sin red, stubs/monkeypatch, asyncio.run() dentro de tests síncronos, DB temporal con monkeypatch de models.DB_PATH).
 
 Estado: todo el backlog OSINT cerrado. Plan de seguridad (bunker) desplegado en producción (`0ae4c44`): 2.1 authguard.py (FailedAuthTracker lockout + truncate_key cableado en require_api_key con 403+Retry-After y logs WARNING/DEBUG key truncada; rate limit por API key con buckets _key_* keyed por k:sha256(presented)[:32]), 2.3 maintenance.py (purge retention + backup DB, loop cada 6h desde startup), 2.4 audit logs scan/pipeline created + alerta N fallos consecutivos, 2.5 Docker non-root appuser + CI pip-audit + dependabot. WS auth verificado (?key= o Cloudflare Access). Suite **339** en verde ~1.3s.
 
-Siguiente micro-paso: network policies (limitar egress — lado deploy/Railway, no código) y encriptación DB en reposo (opcional, fuera de MVP; SQLite no lo hace por defecto). Plan de respuesta es OPERATIVO (sin código): escaneo masivo no autorizado → rotar API key; Railway cae → health check + alerta; finding con secret real filtrado → revocar/rotar inmediatamente.
+Siguiente micro-paso: según decisión del usuario — hardware con capturas reales (B WiFi Marauder v6/CYD reutiliza `wifi.py`; C Bruce y D HackRF/BusPirate requieren capturas) o backlog pendiente (`--save` CLI, TUI, tests de integración end-to-end, config por env).
 
 Reglas: MVP sin dependencias nuevas, tests sin red, commits feat:/fix: largos y descriptivos, push solo con suite verde y confirmado, sin emojis ni símbolos de color. Comandos: .venv\Scripts\python.exe -m pytest -q (~1.3s), -m ruff check backend tests, -m compileall -q backend. Al cerrar sesión: añadir entrada al FINAL de la sección 6 (append-only) y actualizar el footer con el siguiente micro-paso.
