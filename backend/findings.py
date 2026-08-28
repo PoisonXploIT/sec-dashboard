@@ -1145,6 +1145,70 @@ def _adapt_hackrf_cff_analyzer(result: dict, target: str) -> list[Finding]:
     return out[:4]
 
 
+# ── RF Hardware: 802.11 pcap offline analysis ─────────────────
+@register("pcap_analyzer")
+def _adapt_pcap_analyzer(result: dict, target: str) -> list[Finding]:
+    """Offline 802.11 capture statistics (Marauder / Wireshark imports).
+
+    Summary metadata is INFO; open networks are LOW (visible cleartext air);
+    WPS-active APs and deauth storms are MEDIUM (known attack surface /
+    possible DoS in progress).
+    """
+    if "error" in result:
+        return []
+    out: list[Finding] = []
+    n80211 = result.get("n_80211", 0)
+    ssids = result.get("ssids") or []
+    out.append(Finding(
+        tool="pcap_analyzer", category="RF Hardware", severity=Severity.INFO,
+        title=f"802.11 pcap analyzed: {n80211} frames, "
+              f"{len(ssids)} SSID(s)",
+        description=(f"Offline analysis of an uploaded capture: "
+                     f"{result.get('size_bytes', 0)} bytes, "
+                     f"{result.get('duration_s', 0):.1f} s."),
+        evidence={"file": target, "n_80211": n80211,
+                  "frame_types": result.get("frame_types")},
+        remediation="", target=target, confidence=1.0,
+    ))
+    open_nets = (result.get("security") or {}).get("open", 0)
+    if open_nets:
+        out.append(Finding(
+            tool="pcap_analyzer", category="RF Hardware", severity=Severity.LOW,
+            title=f"{open_nets} open network(s) beaconing (no encryption)",
+            description=("Beacons without RSN/cipher suites were seen; "
+                         "cleartext management air and no confidentiality."),
+            evidence={"security": result.get("security")},
+            remediation=("Enable WPA2/WPA3 on the AP if it is in your control; "
+                        "otherwise treat as recon data only."),
+            target=target, confidence=0.8,
+        ))
+    wps = result.get("wps_frames", 0)
+    if wps:
+        out.append(Finding(
+            tool="pcap_analyzer", category="RF Hardware", severity=Severity.MEDIUM,
+            title=f"WPS active on {wps} frame(s)",
+            description=("APs advertising WPS (vendor OUI 00:03:7F, IE id 221); "
+                         "PIN relay / PAWS-style attacks apply to those APs."),
+            evidence={"wps_frames": wps},
+            remediation=("Disable WPS on the AP if it is in your control; "
+                        "otherwise flag the network for WPS attack testing scope."),
+            target=target, confidence=0.8,
+        ))
+    deauth = result.get("deauth_count", 0)
+    if deauth >= 10:
+        out.append(Finding(
+            tool="pcap_analyzer", category="RF Hardware", severity=Severity.MEDIUM,
+            title=f"Deauthentication storm: {deauth} frames",
+            description=("High deauth volume in the capture; possible active "
+                         "DoS/attack or a noisy monitor-mode recording."),
+            evidence={"deauth_count": deauth},
+            remediation=("Correlate timestamps and source MACs to identify the "
+                        "emitter; enable 802.11w (PMF) where controllable."),
+            target=target, confidence=0.7,
+        ))
+    return out[:4]
+
+
 def extract_findings(tool: str, result: dict, target: str = "") -> list[Finding]:
     """Translate a tool result into normalized findings.
 

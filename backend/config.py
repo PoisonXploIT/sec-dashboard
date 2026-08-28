@@ -384,6 +384,13 @@ TOOLS = {
         "icon": "HC",
         "timeout": 300,
     },
+    "pcap_analyzer": {
+        "name": "WiFi 802.11 Pcap Analyzer",
+        "category": "RF Hardware",
+        "description": "Offline statistics for Marauder/Wireshark 802.11 captures: SSIDs, security, channels, deauth and WPS",
+        "icon": "PC",
+        "timeout": 300,
+    },
 }
 
 CATEGORIES = ["Network Recon", "Web Security", "Vulnerability", "System", "OSINT", "Email Security", "RF Hardware"]
@@ -449,6 +456,11 @@ SPECIAL_TOOLS = {
         "input_label": "HackRF .cff capture",
         "input_placeholder": "Upload a .cff file (int8 I/Q interleaved, no header)",
         "input_type": "cff_upload",
+    },
+    "pcap_analyzer": {
+        "input_label": "802.11 pcap capture",
+        "input_placeholder": "Upload a .pcap/.pcapng file (Marauder SD export or Wireshark)",
+        "input_type": "pcap_upload",
     },
 }
 
