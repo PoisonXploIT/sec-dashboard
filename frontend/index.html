@@ -377,6 +377,9 @@
             <a class="nav-item" onclick="filterCategory('Email Security')">
                 <span class="icon">EM</span> Email Security
             </a>
+            <a class="nav-item" onclick="filterCategory('RF Hardware')">
+                <span class="icon">RF</span> RF Hardware
+            </a>
             <div style="flex:1"></div>
             <div style="padding: 16px; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-muted);">
                 <div id="sidebar-toolcount">Loading...</div>
@@ -434,6 +437,15 @@
             if (!r.ok) {
                 let err;
                 try { err = await r.json(); } catch { err = {detail: r.statusText}; }
+                throw new Error(err.detail || `HTTP ${r.status}`);
+            }
+            return r.json();
+        },
+        async upload(path, formData) {
+            const r = await fetch(`${API_BASE}/api${path}`, { method: 'POST', headers: api._headers(), body: formData });
+            if (r.status === 401) { promptApiKey(); throw new Error('API key requerida (401)'); }
+            if (!r.ok) {
+                let err; try { err = await r.json(); } catch { err = {detail: r.statusText}; }
                 throw new Error(err.detail || `HTTP ${r.status}`);
             }
             return r.json();
@@ -545,8 +557,8 @@
     }
 
     function esc(str) { return String(str||'').replace(/\\/g,'&#92;').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/'/g,'&#39;'); }
-    function catIcon(cat) { return {'Network Recon':'','Web Security':'','Vulnerability':'','System':'','OSINT':'OS','Email Security':'EM'}[cat]||''; }
-    function catClass(cat) { return {'Network Recon':'network','Web Security':'web','Vulnerability':'vuln','System':'system','OSINT':'osint','Email Security':'emailsec'}[cat]||'network'; }
+    function catIcon(cat) { return {'Network Recon':'','Web Security':'','Vulnerability':'','System':'','OSINT':'OS','Email Security':'EM','RF Hardware':'RF'}[cat]||''; }
+    function catClass(cat) { return {'Network Recon':'network','Web Security':'web','Vulnerability':'vuln','System':'system','OSINT':'osint','Email Security':'emailsec','RF Hardware':'rfhw'}[cat]||'network'; }
 
     // ── Dashboard ──────────────────────────────
     function timeAgo(ts) {
@@ -758,7 +770,7 @@
                     <!-- Categories -->
                     <div class="card">
                         <div class="card-header"><div class="card-title">Categories</div></div>
-                        ${['Network Recon','Web Security','Vulnerability','System','OSINT','Email Security'].map(cat => `
+                        ${['Network Recon','Web Security','Vulnerability','System','OSINT','Email Security','RF Hardware'].map(cat => `
                             <div style="display:flex;align-items:center;gap:10px;padding:6px 0;cursor:pointer" onclick="filterCategory('${cat}')">
                                 <span style="font-size:16px">${catIcon(cat)}</span>
                                 <span style="flex:1;font-size:13px">${cat}</span>
@@ -791,7 +803,7 @@
         content.innerHTML = `
             <div class="tabs">
                 <div class="tab ${!state.categoryFilter?'active':''}" onclick="state.categoryFilter=null;renderTools()">All (${state.tools.length})</div>
-                ${['Network Recon','Web Security','Vulnerability','System','OSINT','Email Security'].map(c =>
+                ${['Network Recon','Web Security','Vulnerability','System','OSINT','Email Security','RF Hardware'].map(c =>
                     `<div class="tab ${state.categoryFilter===c?'active':''}" onclick="filterCategory('${c}')">${catIcon(c)} ${c} (${state.tools.filter(t=>t.category===c).length})</div>`
                 ).join('')}
             </div>
@@ -844,7 +856,10 @@
         await _executeScan(toolId, state.selectedTarget.id, params, '');
     }
 
+    const CFF_PROFILES = ['keycard-433.92','subghz-315','subghz-434.42','subghz-868.3','subghz-915','wifi-2400','wifi-2442','wifi-5180'];
+
     function showSpecialInput(toolId, spec) {
+        if (spec.input_type === 'cff_upload') { showCffUpload(toolId, spec); return; }
         const overlay = document.createElement('div');
         overlay.className = 'modal-overlay';
         overlay.innerHTML = `<div class="modal"><h3>${esc(toolId.replace(/_/g, ' '))}</h3>
@@ -856,6 +871,40 @@
         </div>`;
         document.body.appendChild(overlay);
         document.getElementById('special-input').focus();
+    }
+
+    function showCffUpload(toolId, spec) {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.innerHTML = `<div class="modal"><h3>${esc(toolId.replace(/_/g, ' '))}</h3>
+            <div class="input-group"><label>${esc(spec.input_label)}</label>
+                <input type="file" id="special-input" accept=".cff">
+            </div>
+            <div class="input-group"><label>Profile</label>
+                <select id="special-profile">${CFF_PROFILES.map(p => `<option value="${p}">${p}</option>`).join('')}</select>
+            </div>
+            <div class="modal-actions"><button class="btn" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+            <button class="btn btn-primary" id="cff-run-btn">Upload + Run</button></div>
+        </div>`;
+        document.body.appendChild(overlay);
+        document.getElementById('special-input').focus();
+        document.getElementById('cff-run-btn').onclick = async () => {
+            const fileInput = document.getElementById('special-input');
+            if (!fileInput.files.length) { toast('Select a .cff file', 'error'); return; }
+            const profile = document.getElementById('special-profile').value;
+            const btn = document.getElementById('cff-run-btn');
+            btn.disabled = true; btn.textContent = 'Uploading...';
+            try {
+                const fd = new FormData();
+                fd.append('file', fileInput.files[0]);
+                const up = await api.upload('/upload/cff', fd);
+                document.querySelector('.modal-overlay')?.remove();
+                await _executeScan(toolId, 0, { profile: profile }, up.path);
+            } catch (e) {
+                btn.disabled = false; btn.textContent = 'Upload + Run';
+                toast(e.message, 'error');
+            }
+        };
     }
 
     async function runSpecialTool(toolId) {
@@ -952,10 +1001,43 @@
             http_methods: formatHttpMethods,
             robots_analyzer: formatRobots,
             caa_checker: formatCAA,
+            hackrf_cff_analyzer: formatHackrfCff,
         };
         const formatter = formatters[toolId];
         if (formatter) return formatter(data);
         return `<div class="result-panel"><pre>${esc(JSON.stringify(data, null, 2))}</pre></div>`;
+    }
+
+    function formatHackrfCff(d) {
+        if (d.error) return `<div class="finding-card vuln"><strong> ${esc(d.error)}</strong>${d.hint ? `<div style="margin-top:4px;font-size:12px">${esc(d.hint)}</div>` : ''}</div>`;
+        const mb = d.size_bytes ? (d.size_bytes / 1048576).toFixed(1) + ' MB' : '?';
+        let html = `<div class="result-section"><h4> Capture metadata </h4><div class="kv-grid">
+            <span class="key">File</span><span class="value">${esc(d.file || '')}</span>
+            <span class="key">Size</span><span class="value">${mb}</span>
+            <span class="key">Sample rate</span><span class="value">${((d.sample_rate||0)/1e6).toFixed(2)} MSPS</span>
+            <span class="key">Duration</span><span class="value">${(d.duration_s||0).toFixed(3)} s</span>
+            <span class="key">Profile</span><span class="value">${esc(d.profile || '')}</span>
+            <span class="key">Center freq</span><span class="value">${((d.center_freq_hz||0)/1e6).toFixed(3)} MHz</span>
+        </div></div>`;
+        if (d.n_packets !== undefined) {
+            const sub = d.subbursts || {};
+            html += `<div class="result-section"><h4> Characterization </h4><div class="kv-grid">
+                <span class="key">Packets</span><span class="value">${d.n_packets}</span>
+                <span class="key">Packet dur (med)</span><span class="value">${(d.packet_dur_ms||{}).med} ms</span>
+                <span class="key">Tone A / B</span><span class="value">${d.tone_a_khz} / ${d.tone_b_khz} kHz (sep ${d.sep_khz})</span>
+                <span class="key">Symbol Ts</span><span class="value">${d.ts_us} us (replica ${d.ts_replica_us ?? '?'} us)</span>
+                <span class="key">Sub-bursts</span><span class="value">${sub.n} (med ${sub.med_ms} ms)</span>
+                <span class="key">DC</span><span class="value">${d.dc_db_rel} dB rel</span>
+            </div></div>`;
+        }
+        if ((d.streams||[]).length) {
+            html += `<div class="result-section"><h4> FSK streams (top ${d.streams.length}) </h4>` + d.streams.map(s => `<div style="font-family:monospace;font-size:12px;padding:2px 0;color:var(--text-secondary)">${esc(s.bits)} <span class="tag tag-accent">x${s.count}</span></div>`).join('') + `</div>`;
+        }
+        if (d.code_status) {
+            const ok = d.code_status === 'validado';
+            html += `<div class="finding-card ${ok ? 'safe' : 'warn'}"><strong> Code status: ${esc(d.code_status.toUpperCase())}</strong>${ok ? '' : ` <span style="font-size:12px">Internal code not fixed until own captures validate it (regla 5).</span>`}</div>`;
+        }
+        return html;
     }
 
     function formatPortScanner(d) {

@@ -15,6 +15,7 @@ build/
 # Database
 *.db
 data/results/
+data/uploads/
 
 # Logs
 *.log

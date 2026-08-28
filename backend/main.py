@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, Request
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query, Request, File, UploadFile
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -904,6 +904,52 @@ async def _persist_pipeline_result(pipeline_id: int, status: str, result: dict):
         await db.commit()
     finally:
         await db.close()
+
+
+# ── CFF upload (HackRF captures) ─────────────────────────
+UPLOAD_DIR = DATA_DIR / "uploads"
+_CFF_MAX_BYTES = 1024 * 1024 * 1024  # 1 GB cap (a 30 s capture @ 2 MSPS is ~120 MB)
+
+
+@app.post("/api/upload/cff")
+async def upload_cff(file: UploadFile = File(...)):
+    """Store an uploaded HackRF .cff capture under data/uploads/ with a unique name.
+
+    The returned absolute path is the 'target' for hackrf_cff_analyzer
+    (SPECIAL_TOOLS input_type cff_upload). Only .cff files are accepted;
+    the server generates the stored name (timestamp + short content hash),
+    so no user-controlled path reaches disk.
+    """
+    fname = file.filename or ""
+    if not fname.lower().endswith(".cff"):
+        raise HTTPException(400, "Only .cff files are accepted (HackRF int8 I/Q interleaved, no header)")
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    ts = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    tmp_path = UPLOAD_DIR / f".{ts}_{os.getpid()}_uploading"
+    digest = hashlib.sha256()
+    size = 0
+    try:
+        with open(tmp_path, "wb") as out:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > _CFF_MAX_BYTES:
+                    raise HTTPException(413, "File too large (max 1 GB)")
+                out.write(chunk)
+                digest.update(chunk)
+        final = UPLOAD_DIR / f"cff_{ts}_{digest.hexdigest()[:8]}.cff"
+        os.replace(tmp_path, final)
+    except HTTPException:
+        if tmp_path.exists():
+            tmp_path.unlink()
+        raise
+    except OSError as e:
+        if tmp_path.exists():
+            tmp_path.unlink()
+        raise HTTPException(500, f"Could not store upload: {e}")
+    return {"path": str(final), "name": final.name, "size": size}
 
 
 @app.post("/api/scans")

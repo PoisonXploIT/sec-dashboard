@@ -14,7 +14,7 @@ COPY backend/ backend/
 COPY frontend/ frontend/
 
 # Non-root (bunker 2.5): the container runs as appuser, which owns the data dir.
-RUN useradd -m appuser && mkdir -p /app/data/results && chown -R appuser:appuser /app/data
+RUN useradd -m appuser && mkdir -p /app/data/results /app/data/uploads && chown -R appuser:appuser /app/data
 USER appuser
 
 EXPOSE 8444
