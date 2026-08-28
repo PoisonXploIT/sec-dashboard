@@ -5,29 +5,16 @@ no header) uploaded to the dashboard via /api/upload/cff. No live capture:
 the file is recorded externally with hackrf_transfer and then analyzed here.
 
 The 'target' parameter is the absolute path of the uploaded .cff file, not a
-network target; this tool never opens the network.
+network target; this tool never opens the network. The heavy DSP runs in a
+worker thread (asyncio.to_thread) so the event loop stays responsive.
 """
+import asyncio
 import os
 
+from backend.tools import rf_parser
 
 # Default sample rate of the capture protocol (hackrf_transfer -s 2000000).
 DEFAULT_SAMPLE_RATE = 2_000_000
-
-# Band profiles: name -> center frequency in Hz. Metadata + sanity only:
-# the analysis runs in baseband relative to the capture center, so the
-# profile never changes the DSP, it only labels the result and warns when
-# a center lies outside the declared hardware range (Mayhem HackRF/SDR
-# mode = 1 MHz - 6 GHz).
-PROFILES: dict[str, int] = {
-    "keycard-433.92": 433_920_000,   # Sandero III 2022 key (own dataset)
-    "subghz-315": 315_000_000,       # ISM 300-348 MHz EU
-    "subghz-434.42": 434_420_000,    # ISM 433-434 MHz EU, top edge
-    "subghz-868.3": 868_310_000,     # SRD 868-870 MHz EU
-    "subghz-915": 915_000_000,       # ISM 902-928 MHz US
-    "wifi-2400": 2_400_000_000,      # WiFi ch1 2.4 GHz (raw spectrum)
-    "wifi-2442": 2_442_000_000,      # WiFi ch13 2.4 GHz (raw spectrum)
-    "wifi-5180": 5_180_000_000,      # WiFi 5 GHz (raw spectrum)
-}
 
 
 async def hackrf_cff_analyzer(target: str = "", profile: str = "keycard-433.92",
@@ -38,25 +25,38 @@ async def hackrf_cff_analyzer(target: str = "", profile: str = "keycard-433.92",
     profile: band profile name (metadata + sanity; analysis is baseband).
     sample_rate: samples per second of the capture (default 2 MSPS, the
         capture protocol rate; overridable via params).
+    max_demod: max packets to demodulate (params, clamped 1..500).
 
-    Returns metadata for now: file size, sample rate, estimated duration
-    (bytes / 2 / sample_rate, int8 I/Q interleaved) and the profile center
-    frequency.
+    Returns file metadata plus the full characterization from rf_parser:
+    DC, dominant tones A/B, symbol timing Ts (+ replica cross-check),
+    packet/sub-burst structure, clusters, FSK streams and the code status
+    ("validado" | "pendiente_validacion" | None — regla 5).
     """
     if not target or not os.path.isfile(target):
         return {"error": f"No such file: {target}",
                 "hint": "Upload a .cff capture first (POST /api/upload/cff)."}
-    if profile not in PROFILES:
+    if profile not in rf_parser.PROFILES:
         return {"error": f"Unknown profile: {profile}",
-                "profiles": sorted(PROFILES)}
+                "profiles": sorted(rf_parser.PROFILES)}
+
+    try:
+        sr = int(sample_rate)
+        if sr <= 0:
+            raise ValueError("sample_rate must be > 0")
+        max_demod = int(kwargs.get("max_demod", 200))
+        max_demod = max(1, min(max_demod, 500))
+        data = await asyncio.to_thread(rf_parser.analyze, target, sr, profile, max_demod)
+    except (ValueError, OSError, MemoryError) as e:
+        return {"error": f"Analysis failed: {e}"}
 
     size = os.path.getsize(target)
-    duration_s = round(size / 2 / sample_rate, 6) if sample_rate else 0.0
-    return {
+    out = {
         "file": target,
         "size_bytes": size,
-        "sample_rate": sample_rate,
-        "duration_s": duration_s,
+        "sample_rate": sr,
+        "duration_s": round(data["n_samples"] / sr, 6),
         "profile": profile,
-        "center_freq_hz": PROFILES[profile],
+        "center_freq_hz": rf_parser.PROFILES[profile][0],
     }
+    out.update(data)
+    return out
