@@ -906,23 +906,22 @@ async def _persist_pipeline_result(pipeline_id: int, status: str, result: dict):
         await db.close()
 
 
-# ── CFF upload (HackRF captures) ─────────────────────────
+# ── Capture uploads (HackRF .cff + 802.11 pcap) ───────────────
 UPLOAD_DIR = DATA_DIR / "uploads"
-_CFF_MAX_BYTES = 1024 * 1024 * 1024  # 1 GB cap (a 30 s capture @ 2 MSPS is ~120 MB)
+_MAX_UPLOAD_BYTES = 1024 * 1024 * 1024  # 1 GB cap (a 30 s capture @ 2 MSPS is ~120 MB)
 
 
-@app.post("/api/upload/cff")
-async def upload_cff(file: UploadFile = File(...)):
-    """Store an uploaded HackRF .cff capture under data/uploads/ with a unique name.
+async def _store_upload(file: UploadFile, allowed_exts: tuple[str, ...],
+                        prefix: str) -> dict:
+    """Stream an uploaded capture to data/uploads/ under a server-generated name.
 
-    The returned absolute path is the 'target' for hackrf_cff_analyzer
-    (SPECIAL_TOOLS input_type cff_upload). Only .cff files are accepted;
-    the server generates the stored name (timestamp + short content hash),
-    so no user-controlled path reaches disk.
+    The returned absolute path is the 'target' for the matching special tool;
+    only the given extensions are accepted and no user-controlled path
+    reaches disk (timestamp + short content hash).
     """
     fname = file.filename or ""
-    if not fname.lower().endswith(".cff"):
-        raise HTTPException(400, "Only .cff files are accepted (HackRF int8 I/Q interleaved, no header)")
+    if not fname.lower().endswith(allowed_exts):
+        raise HTTPException(400, f"Only {', '.join(allowed_exts)} files are accepted")
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     ts = datetime.utcnow().strftime("%Y%m%d%H%M%S")
     tmp_path = UPLOAD_DIR / f".{ts}_{os.getpid()}_uploading"
@@ -935,11 +934,12 @@ async def upload_cff(file: UploadFile = File(...)):
                 if not chunk:
                     break
                 size += len(chunk)
-                if size > _CFF_MAX_BYTES:
+                if size > _MAX_UPLOAD_BYTES:
                     raise HTTPException(413, "File too large (max 1 GB)")
                 out.write(chunk)
                 digest.update(chunk)
-        final = UPLOAD_DIR / f"cff_{ts}_{digest.hexdigest()[:8]}.cff"
+        ext = os.path.splitext(fname)[1].lower()
+        final = UPLOAD_DIR / f"{prefix}_{ts}_{digest.hexdigest()[:8]}{ext}"
         os.replace(tmp_path, final)
     except HTTPException:
         if tmp_path.exists():
@@ -950,6 +950,20 @@ async def upload_cff(file: UploadFile = File(...)):
             tmp_path.unlink()
         raise HTTPException(500, f"Could not store upload: {e}")
     return {"path": str(final), "name": final.name, "size": size}
+
+
+@app.post("/api/upload/cff")
+async def upload_cff(file: UploadFile = File(...)):
+    """Store an uploaded HackRF .cff capture (target for hackrf_cff_analyzer,
+    SPECIAL_TOOLS input_type cff_upload). int8 I/Q interleaved, no header."""
+    return await _store_upload(file, (".cff",), "cff")
+
+
+@app.post("/api/upload/pcap")
+async def upload_pcap(file: UploadFile = File(...)):
+    """Store an uploaded 802.11 .pcap/.pcapng capture (target for pcap_analyzer,
+    SPECIAL_TOOLS input_type pcap_upload). Marauder SD export or Wireshark."""
+    return await _store_upload(file, (".pcap", ".pcapng", ".cap"), "pcap")
 
 
 @app.post("/api/scans")

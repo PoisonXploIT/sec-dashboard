@@ -860,6 +860,7 @@
 
     function showSpecialInput(toolId, spec) {
         if (spec.input_type === 'cff_upload') { showCffUpload(toolId, spec); return; }
+        if (spec.input_type === 'pcap_upload') { showPcapUpload(toolId, spec); return; }
         const overlay = document.createElement('div');
         overlay.className = 'modal-overlay';
         overlay.innerHTML = `<div class="modal"><h3>${esc(toolId.replace(/_/g, ' '))}</h3>
@@ -900,6 +901,36 @@
                 const up = await api.upload('/upload/cff', fd);
                 document.querySelector('.modal-overlay')?.remove();
                 await _executeScan(toolId, 0, { profile: profile }, up.path);
+            } catch (e) {
+                btn.disabled = false; btn.textContent = 'Upload + Run';
+                toast(e.message, 'error');
+            }
+        };
+    }
+
+    function showPcapUpload(toolId, spec) {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay';
+        overlay.innerHTML = `<div class="modal"><h3>${esc(toolId.replace(/_/g, ' '))}</h3>
+            <div class="input-group"><label>${esc(spec.input_label)}</label>
+                <input type="file" id="special-input" accept=".pcap,.pcapng,.cap">
+            </div>
+            <div class="modal-actions"><button class="btn" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+            <button class="btn btn-primary" id="pcap-run-btn">Upload + Run</button></div>
+        </div>`;
+        document.body.appendChild(overlay);
+        document.getElementById('special-input').focus();
+        document.getElementById('pcap-run-btn').onclick = async () => {
+            const fileInput = document.getElementById('special-input');
+            if (!fileInput.files.length) { toast('Select a .pcap/.pcapng file', 'error'); return; }
+            const btn = document.getElementById('pcap-run-btn');
+            btn.disabled = true; btn.textContent = 'Uploading...';
+            try {
+                const fd = new FormData();
+                fd.append('file', fileInput.files[0]);
+                const up = await api.upload('/upload/pcap', fd);
+                document.querySelector('.modal-overlay')?.remove();
+                await _executeScan(toolId, 0, {}, up.path);
             } catch (e) {
                 btn.disabled = false; btn.textContent = 'Upload + Run';
                 toast(e.message, 'error');
@@ -1002,6 +1033,7 @@
             robots_analyzer: formatRobots,
             caa_checker: formatCAA,
             hackrf_cff_analyzer: formatHackrfCff,
+            pcap_analyzer: formatPcap,
         };
         const formatter = formatters[toolId];
         if (formatter) return formatter(data);
@@ -1036,6 +1068,41 @@
         if (d.code_status) {
             const ok = d.code_status === 'validado';
             html += `<div class="finding-card ${ok ? 'safe' : 'warn'}"><strong> Code status: ${esc(d.code_status.toUpperCase())}</strong>${ok ? '' : ` <span style="font-size:12px">Internal code not fixed until own captures validate it (regla 5).</span>`}</div>`;
+        }
+        return html;
+    }
+
+    function formatPcap(d) {
+        if (d.error) return `<div class="finding-card vuln"><strong> ${esc(d.error)}</strong>${d.hint ? `<div style="margin-top:4px;font-size:12px">${esc(d.hint)}</div>` : ''}</div>`;
+        const mb = d.size_bytes ? (d.size_bytes / 1048576).toFixed(1) + ' MB' : '?';
+        let html = `<div class="result-section"><h4> Capture metadata </h4><div class="kv-grid">
+            <span class="key">File</span><span class="value">${esc(d.file || '')}</span>
+            <span class="key">Size</span><span class="value">${mb}</span>
+            <span class="key">Frames</span><span class="value">${d.n_frames}${d.truncated ? ' (truncated)' : ''}</span>
+            <span class="key">802.11 frames</span><span class="value">${d.n_80211}</span>
+            <span class="key">Duration</span><span class="value">${(d.duration_s||0).toFixed(1)} s</span>
+        </div></div>`;
+        const ft = d.frame_types || {};
+        html += `<div class="result-section"><h4> Frame types </h4><div class="kv-grid">
+            <span class="key">Mgmt / Ctrl / Data</span><span class="value">${ft.mgmt||0} / ${ft.ctrl||0} / ${ft.data||0}</span>
+            <span class="key">Beacons</span><span class="value">${(d.mgmt_subtypes||{}).beacon||0}</span>
+            <span class="key">Deauth</span><span class="value">${d.deauth_count||0}</span>
+            <span class="key">WPS frames</span><span class="value">${d.wps_frames||0}</span>
+            <span class="key">Channels</span><span class="value">${(d.channels||[]).length ? (d.channels||[]).join(', ') : 'n/a (no RadioTap)'}</span>
+        </div></div>`;
+        const sec = d.security || {};
+        html += `<div class="result-section"><h4> Security (unique BSSIDs) </h4><div class="kv-grid">
+            <span class="key">Open</span><span class="value">${sec.open||0}</span>
+            <span class="key">WPA2/RSN</span><span class="value">${sec.wpa2||0}</span>
+            <span class="key">Legacy (WEP/TKIP)</span><span class="value">${sec.legacy||0}</span>
+        </div></div>`;
+        if ((d.ssids||[]).length) {
+            html += `<div class="result-section"><h4> SSIDs (top ${d.ssids.length}) </h4>` +
+                d.ssids.map(s => `<div style="font-family:monospace;font-size:12px;padding:2px 0;color:var(--text-secondary)">${esc(s.ssid)} <span class="tag tag-accent">x${s.count}</span></div>`).join('') + `</div>`;
+        }
+        if ((d.bssids||[]).length) {
+            html += `<div class="result-section"><h4> BSSIDs (top ${d.bssids.length}) </h4>` +
+                d.bssids.map(s => `<div style="font-family:monospace;font-size:12px;padding:2px 0;color:var(--text-secondary)">${esc(s.bssid)} <span class="tag tag-accent">x${s.count}</span></div>`).join('') + `</div>`;
         }
         return html;
     }
