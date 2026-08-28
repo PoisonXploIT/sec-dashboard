@@ -13,7 +13,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/ backend/
 COPY frontend/ frontend/
 
-RUN mkdir -p data/results
+# Non-root (bunker 2.5): the container runs as appuser, which owns the data dir.
+RUN useradd -m appuser && mkdir -p /app/data/results && chown -R appuser:appuser /app/data
+USER appuser
 
 EXPOSE 8444
 

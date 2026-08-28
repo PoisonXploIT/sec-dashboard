@@ -1,5 +1,6 @@
 """FastAPI backend — REST API + WebSocket for real-time updates."""
 import asyncio
+import hashlib
 import json
 import os
 import time
@@ -13,7 +14,10 @@ from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from backend.config import TOOLS, CATEGORIES, PIPELINES, RESULTS_DIR, SPECIAL_TOOLS
+from backend.config import (
+    TOOLS, CATEGORIES, PIPELINES, RESULTS_DIR, SPECIAL_TOOLS,
+    DATA_DIR, DB_PATH,
+)
 from backend.models import init_db, get_db
 from backend.scanner import run_tool, run_parallel
 from backend.pipeline import PipelineRunner
@@ -26,6 +30,8 @@ from backend.report import (
 )
 from backend.validators import validate_target, is_remote_mode
 from backend.ratelimit import RateLimiter
+from backend.authguard import FailedAuthTracker, truncate_key
+from backend.maintenance import purge_old_runs, backup_db
 from backend import webhooks
 from backend import splunk
 from backend.applog import get_logger, setup_logging
@@ -53,6 +59,15 @@ app.add_middleware(
 # Cloudflare, only reachable through it) and are allowed without a key.
 API_KEY = os.environ.get("SEC_DASHBOARD_API_KEY", "")
 
+# Lockout after repeated failed auth (bunker 2.1): N failures inside a window
+# ban the peer for `lockout` seconds. Env-tunable; defaults 5 / 300s / 900s.
+_AUTH_MAX_FAILURES = int(os.environ.get("SEC_AUTH_MAX_FAILURES", "5"))
+_AUTH_FAILURE_WINDOW = float(os.environ.get("SEC_AUTH_FAILURE_WINDOW", "300"))
+_AUTH_LOCKOUT_SECONDS = float(os.environ.get("SEC_AUTH_LOCKOUT", "900"))
+_auth_lockout = FailedAuthTracker(
+    _AUTH_MAX_FAILURES, _AUTH_FAILURE_WINDOW, _AUTH_LOCKOUT_SECONDS
+)
+
 
 def _passed_cloudflare_access(request: Request) -> bool:
     """True if Cloudflare Access authenticated this request (SSO login)."""
@@ -64,7 +79,30 @@ async def require_api_key(request: Request, call_next):
     if API_KEY and request.url.path.startswith("/api"):
         # Let CORS preflight through so the browser can negotiate
         if request.method != "OPTIONS":
-            if not _passed_cloudflare_access(request) and request.headers.get("X-API-Key") != API_KEY:
+            peer = request.client.host if request.client else "?"
+            blocked, retry_after = _auth_lockout.is_blocked(peer)
+            if blocked:
+                return JSONResponse(
+                    {"detail": "Too many failed auth attempts; temporarily blocked"},
+                    status_code=403,
+                    headers={"Retry-After": str(retry_after)},
+                )
+            presented = request.headers.get("X-API-Key", "")
+            if _passed_cloudflare_access(request):
+                pass  # Cloudflare Access already authenticated this request
+            elif presented == API_KEY:
+                _auth_lockout.record_success(peer)
+                _log.debug(
+                    "auth ok ip=%s key=%s path=%s",
+                    peer, truncate_key(presented), request.url.path,
+                )
+            else:
+                _auth_lockout.record_failure(peer)
+                # Audit: every failed attempt, key truncated (never full).
+                _log.warning(
+                    "auth failed ip=%s key=%s path=%s",
+                    peer, truncate_key(presented), request.url.path,
+                )
                 return JSONResponse({"detail": "Invalid or missing API key"}, status_code=401)
     return await call_next(request)
 
@@ -81,6 +119,11 @@ READ_RATE_LIMIT = 600      # req/min per IP on GET /api/*
 
 _mutation_limiter = RateLimiter(MUTATION_RATE_LIMIT)
 _read_limiter = RateLimiter(READ_RATE_LIMIT)
+# Per-API-key buckets (bunker 2.1): fairer than per-IP behind Cloudflare,
+# where one origin IP is shared by every client. Keyed by sha256 of the
+# presented key so the raw secret never lands in memory beyond the hash.
+_key_mutation_limiter = RateLimiter(MUTATION_RATE_LIMIT)
+_key_read_limiter = RateLimiter(READ_RATE_LIMIT)
 
 _MUTATION_PATHS = {"/api/scans", "/api/pipelines", "/api/targets"}
 
@@ -94,8 +137,26 @@ def _rate_limit_bucket(method: str, path: str):
     return None
 
 
+def _key_rate_limit_bucket(method: str, path: str):
+    """Per-key bucket; None when auth is off or the request carries no key."""
+    if not API_KEY:
+        return None
+    if method == "POST" and path in _MUTATION_PATHS:
+        return _key_mutation_limiter
+    if method == "GET" and path.startswith("/api/"):
+        return _key_read_limiter
+    return None
+
+
 def _rate_limit_key(request: Request) -> str:
     return request.client.host if request.client else "?"
+
+
+def _key_rate_limit_id(request: Request):
+    presented = request.headers.get("X-API-Key", "")
+    if not presented:
+        return None  # missing key: auth answers 401, IP bucket still caps it
+    return "k:" + hashlib.sha256(presented.encode()).hexdigest()[:32]
 
 
 @app.middleware("http")
@@ -103,15 +164,25 @@ async def rate_limit(request: Request, call_next):
     # Defined after require_api_key, so it is outermost and runs first:
     # floods are capped before any auth work happens.
     bucket = _rate_limit_bucket(request.method, request.url.path)
-    if bucket is None:
-        return await call_next(request)
-    allowed, retry_after = bucket.check(_rate_limit_key(request))
-    if not allowed:
-        return JSONResponse(
-            {"detail": "Rate limit exceeded"},
-            status_code=429,
-            headers={"Retry-After": str(retry_after)},
-        )
+    if bucket is not None:
+        allowed, retry_after = bucket.check(_rate_limit_key(request))
+        if not allowed:
+            return JSONResponse(
+                {"detail": "Rate limit exceeded"},
+                status_code=429,
+                headers={"Retry-After": str(retry_after)},
+            )
+    key_bucket = _key_rate_limit_bucket(request.method, request.url.path)
+    if key_bucket is not None:
+        key_id = _key_rate_limit_id(request)
+        if key_id is not None:
+            allowed, retry_after = key_bucket.check(key_id)
+            if not allowed:
+                return JSONResponse(
+                    {"detail": "Rate limit exceeded for this API key"},
+                    status_code=429,
+                    headers={"Retry-After": str(retry_after)},
+                )
     return await call_next(request)
 
 
@@ -533,7 +604,34 @@ async def startup():
             _log.info("Marked %d orphaned running scans as failed", cur.rowcount)
     finally:
         await db.close()
+    # Retention + backup (bunker 2.3): purge runs/pipelines older than
+    # SEC_DASHBOARD_RETENTION_DAYS (0 disables) and copy the DB to
+    # data/backups keeping SEC_DASHBOARD_BACKUP_KEEP copies. First pass here,
+    # then every 6h.
+    retention_days = int(os.environ.get("SEC_DASHBOARD_RETENTION_DAYS", "30"))
+    backup_keep = int(os.environ.get("SEC_DASHBOARD_BACKUP_KEEP", "7"))
+    asyncio.create_task(_maintenance_loop(retention_days, backup_keep))
+
     _log.info("startup complete: %d tools registered, remote_mode=%s", len(TOOLS), is_remote_mode())
+
+
+async def _maintenance_loop(retention_days: int, backup_keep: int):
+    """Hourly-ish maintenance pass: retention purge + DB backup."""
+    while True:
+        try:
+            db = await get_db()
+            try:
+                n_scans, n_pipelines = await purge_old_runs(db, retention_days)
+                if n_scans or n_pipelines:
+                    _log.info("retention purged scans=%d pipelines=%d", n_scans, n_pipelines)
+            finally:
+                await db.close()
+            dest = backup_db(DB_PATH, DATA_DIR / "backups", backup_keep)
+            if dest:
+                _log.info("db backup written %s", dest.name)
+        except Exception:
+            _log.exception("maintenance pass failed")
+        await asyncio.sleep(6 * 3600)
 
 
 # ── Health ─────────────────────────────────────────────────────
@@ -717,6 +815,25 @@ async def delete_target(target_id: int):
         await db.close()
 
 
+# Consecutive-failure alert (bunker 2.4): N failed scans in a row raise an
+# ERROR log line. No external alert channel is configured (webhooks are the
+# user's own); the log line is the hookpoint.
+_FAIL_STREAK_THRESHOLD = int(os.environ.get("SEC_ALERT_CONSECUTIVE_FAILURES", "5"))
+_fail_streak = {"n": 0}
+
+
+def _bump_failure_streak(status: str) -> None:
+    if status == "failed":
+        _fail_streak["n"] += 1
+        if _fail_streak["n"] >= _FAIL_STREAK_THRESHOLD:
+            _log.error(
+                "ALERT %d consecutive failed scans (threshold %d); check tools/network",
+                _fail_streak["n"], _FAIL_STREAK_THRESHOLD,
+            )
+    else:
+        _fail_streak["n"] = 0
+
+
 # ── Scans ──────────────────────────────────────────────────────
 @app.get("/api/scans")
 async def list_scans(target_id: int = None, page: int = 1, per_page: int = 50):
@@ -790,7 +907,7 @@ async def _persist_pipeline_result(pipeline_id: int, status: str, result: dict):
 
 
 @app.post("/api/scans")
-async def create_scan(body: ScanCreate):
+async def create_scan(body: ScanCreate, request: Request):
     if body.tool not in TOOLS:
         raise HTTPException(404, f"Tool '{body.tool}' not found")
 
@@ -830,6 +947,14 @@ async def create_scan(body: ScanCreate):
     finally:
         await db.close()
 
+    # Audit log (bunker 2.4): who started what, key truncated.
+    _log.info(
+        "audit scan created scan_id=%d tool=%s target=%s key=%s ip=%s",
+        scan_id, body.tool, target_host or "(none)",
+        truncate_key(request.headers.get("X-API-Key")),
+        request.client.host if request.client else "?",
+    )
+
     # Run tool in background task so we can track/cancel it
     await broadcast({"type": "scan_start", "scan_id": scan_id, "tool": body.tool})
 
@@ -855,6 +980,7 @@ async def create_scan(body: ScanCreate):
                 for f in stored.get("findings", []):
                     f["target"] = "(redacted)"
             await _persist_scan_result(scan_id, status, stored)
+            _bump_failure_streak(status)
             _log.info(
                 "scan finished scan_id=%d tool=%s status=%s elapsed=%.2fs score=%s findings=%d",
                 scan_id, body.tool, status,
@@ -1106,7 +1232,7 @@ async def compare_pipelines(target_id: int):
 
 
 @app.post("/api/pipelines")
-async def create_pipeline(body: PipelineCreate):
+async def create_pipeline(body: PipelineCreate, request: Request):
     if body.mode not in PIPELINES:
         raise HTTPException(400, f"Invalid mode. Use: {list(PIPELINES.keys())}")
 
@@ -1123,6 +1249,14 @@ async def create_pipeline(body: PipelineCreate):
         )
         pipeline_id = cursor.lastrowid
         await db.commit()
+
+        # Audit log (bunker 2.4): who started what, key truncated.
+        _log.info(
+            "audit pipeline created pipeline_id=%d mode=%s target=%s key=%s ip=%s",
+            pipeline_id, body.mode, target["host"],
+            truncate_key(request.headers.get("X-API-Key")),
+            request.client.host if request.client else "?",
+        )
 
         # Run pipeline in background
         runner = PipelineRunner(
