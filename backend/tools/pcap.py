@@ -103,8 +103,10 @@ def parse_pcap(path: str) -> dict:
             frame_types["data"] += 1
 
         rt = pkt.getlayer(RadioTap)
-        if rt is not None and int(rt.Channel) > 0:
-            channels.add(int(rt.Channel))
+        if rt is not None:
+            ch = rt.Channel
+            if ch is not None and int(ch) > 0:
+                channels.add(int(ch))
 
         raw = bytes(pkt)
         if _WPS_IE_RE.search(raw):
