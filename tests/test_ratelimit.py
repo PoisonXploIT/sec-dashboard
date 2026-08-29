@@ -126,10 +126,22 @@ def test_bucket_mapping_and_limits():
     # Cualquier GET de /api/* cae en el bucket de lectura.
     assert main._rate_limit_bucket("GET", "/api/scans/5/export/json") is read
 
+    # Mutacion extendida: uploads (disco), config proxy/Splunk (SSRF)
+    # y webhooks (sondas salientes) comparten el bucket estricto.
+    assert main._rate_limit_bucket("POST", "/api/upload/cff") is mut
+    assert main._rate_limit_bucket("POST", "/api/upload/pcap") is mut
+    assert main._rate_limit_bucket("POST", "/api/proxy") is mut
+    assert main._rate_limit_bucket("POST", "/api/splunk") is mut
+    assert main._rate_limit_bucket("POST", "/api/webhooks") is mut
+    assert main._rate_limit_bucket("POST", "/api/webhooks/1/test") is mut
+    # DELETE es mutacion; /api/reset lleva su bucket horario estricto.
+    assert main._rate_limit_bucket("DELETE", "/api/targets/1") is mut
+    assert main._rate_limit_bucket("DELETE", "/api/scans/5") is mut
+    assert main._rate_limit_bucket("DELETE", "/api/reset") is main._reset_limiter
+    assert main._reset_limiter.limit == main.RESET_RATE_LIMIT == 5
+
     # Sin limitar: otros metodos, sub-rutas y no-API.
-    assert main._rate_limit_bucket("DELETE", "/api/targets/1") is None
     assert main._rate_limit_bucket("POST", "/api/scans/5/cancel") is None
-    assert main._rate_limit_bucket("POST", "/api/webhooks") is None
     assert main._rate_limit_bucket("GET", "/") is None
 
 
@@ -193,8 +205,8 @@ def test_middleware_passes_unlimited_requests(monkeypatch):
     monkeypatch.setattr(main, "_mutation_limiter", fresh)
 
     nxt = CallNext()
-    # DELETE /api/targets/1 no esta en ningun bucket: siempre pasa.
+    # POST /api/scans/5/cancel no esta en ningun bucket: siempre pasa.
     for _ in range(40):
-        resp = asyncio.run(main.rate_limit(_http_request("DELETE", "/api/targets/1"), nxt))
+        resp = asyncio.run(main.rate_limit(_http_request("POST", "/api/scans/5/cancel"), nxt))
         assert resp == "next"
     assert nxt.calls == 40

@@ -124,14 +124,36 @@ _read_limiter = RateLimiter(READ_RATE_LIMIT)
 # presented key so the raw secret never lands in memory beyond the hash.
 _key_mutation_limiter = RateLimiter(MUTATION_RATE_LIMIT)
 _key_read_limiter = RateLimiter(READ_RATE_LIMIT)
+# DELETE /api/reset wipes all data: its own strict bucket (5 req/hour per IP).
+RESET_RATE_LIMIT = 5
+_reset_limiter = RateLimiter(RESET_RATE_LIMIT, 3600.0)
 
 _MUTATION_PATHS = {"/api/scans", "/api/pipelines", "/api/targets"}
+# Extra mutation endpoints: uploads (disk DoS), proxy/Splunk config (SSRF
+# surface) and webhooks (outbound probes). Everything else under POST
+# /api/* stays unlimited except the core scan/pipeline/target creates.
+_EXTRA_MUTATION_POST_PREFIXES = ("/api/upload/", "/api/webhooks")
+_EXTRA_MUTATION_POST_EXACT = {"/api/proxy", "/api/splunk"}
+
+
+def _is_mutation_post(path: str) -> bool:
+    return path in _MUTATION_PATHS or (
+        path.startswith(_EXTRA_MUTATION_POST_PREFIXES)
+        or path in _EXTRA_MUTATION_POST_EXACT
+    )
 
 
 def _rate_limit_bucket(method: str, path: str):
     """Return the limiter bucket for a request, or None if unlimited."""
-    if method == "POST" and path in _MUTATION_PATHS:
+    if method == "POST" and _is_mutation_post(path):
         return _mutation_limiter
+    if method == "DELETE":
+        # Deletes are mutations too (targets/scans/pipelines/webhooks);
+        # /api/reset gets the strict hourly bucket.
+        if path == "/api/reset":
+            return _reset_limiter
+        if path.startswith("/api/"):
+            return _mutation_limiter
     if method == "GET" and path.startswith("/api/"):
         return _read_limiter
     return None
@@ -141,7 +163,9 @@ def _key_rate_limit_bucket(method: str, path: str):
     """Per-key bucket; None when auth is off or the request carries no key."""
     if not API_KEY:
         return None
-    if method == "POST" and path in _MUTATION_PATHS:
+    if method == "POST" and _is_mutation_post(path):
+        return _key_mutation_limiter
+    if method == "DELETE" and path.startswith("/api/"):
         return _key_mutation_limiter
     if method == "GET" and path.startswith("/api/"):
         return _key_read_limiter
@@ -186,6 +210,29 @@ async def rate_limit(request: Request, call_next):
     return await call_next(request)
 
 
+# ── Security response headers (defense in depth) ─────────────
+# Cloudflare Access fronts the deployment, but the backend must not depend
+# on it: every HTTP response gets basic hardening headers. CSP allows only
+# same-origin resources plus inline script/style (the frontend is a single
+# self-contained index.html with no CDN). HSTS only on HTTPS requests.
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'",
+    )
+    if request.scope.get("scheme", "http") == "https":
+        response.headers.setdefault(
+            "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+        )
+    return response
+
+
 # -- Proxy / Anonymity -----------------------------------------
 class ProxyConfig(BaseModel):
     enabled: bool = False
@@ -205,6 +252,14 @@ async def get_proxy():
 
 @app.post("/api/proxy")
 async def update_proxy(body: ProxyConfig):
+    # C3: an active proxy pointing at private/loopback/metadata hosts lets an
+    # authenticated user reach the internal network or cloud metadata
+    # (SSRF). Validate only when the proxy is actually enabled so a plain
+    # "disable" round-trip of the current config keeps working.
+    if body.enabled and body.type not in ("none", ""):
+        valid, reason = validate_target(body.host)
+        if not valid:
+            raise HTTPException(400, f"Proxy host blocked: {reason}")
     config = body.dict()
     # Don't overwrite password if masked
     if config.get("password") == "***":
@@ -739,10 +794,29 @@ async def list_tools():
     return {"tools": tools, "categories": CATEGORIES}
 
 
+# C4: tools that read the local machine (OS, hostname, IPs, processes,
+# PowerShell) are meaningless on a remote deployment and would leak
+# container/server internals to anyone holding an API key. Same treatment
+# as the WiFi tools, which are useless without local hardware.
+_SYSTEM_TOOLS = {"network_connections", "process_monitor", "system_info",
+                 "ps_security_audit"}
+
+
+def _check_system_tools(tool_id: str, request: Request):
+    if is_remote_mode() and tool_id in _SYSTEM_TOOLS:
+        _log.warning(
+            "system tool blocked remote_mode ip=%s tool=%s key=%s",
+            request.client.host if request.client else "?", tool_id,
+            truncate_key(request.headers.get("X-API-Key")),
+        )
+        raise HTTPException(403, "System tools are disabled in remote mode")
+
+
 @app.post("/api/tools/{tool_id}/run")
-async def run_single_tool(tool_id: str, body: ToolRun):
+async def run_single_tool(tool_id: str, body: ToolRun, request: Request):
     if tool_id not in TOOLS:
         raise HTTPException(404, f"Tool '{tool_id}' not found")
+    _check_system_tools(tool_id, request)
 
     # For special tools, use direct_input as the target
     effective_target = body.direct_input if body.direct_input and tool_id in SPECIAL_TOOLS else body.target
@@ -759,6 +833,11 @@ async def run_single_tool(tool_id: str, body: ToolRun):
             host_to_check = urlparse(host_to_check).hostname or host_to_check
         valid, reason = validate_target(host_to_check)
         if not valid:
+            _log.warning(
+                "ssrf blocked ip=%s tool=%s target=%s reason=%s",
+                request.client.host if request.client else "?", tool_id,
+                host_to_check, reason,
+            )
             raise HTTPException(400, f"Invalid target: {reason}")
 
     result = await run_tool(tool_id, effective_target, **body.params)
@@ -921,6 +1000,7 @@ async def _store_upload(file: UploadFile, allowed_exts: tuple[str, ...],
     """
     fname = file.filename or ""
     if not fname.lower().endswith(allowed_exts):
+        _log.warning("upload rejected ext filename=%r allowed=%s", fname, allowed_exts)
         raise HTTPException(400, f"Only {', '.join(allowed_exts)} files are accepted")
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     ts = datetime.utcnow().strftime("%Y%m%d%H%M%S")
@@ -935,6 +1015,7 @@ async def _store_upload(file: UploadFile, allowed_exts: tuple[str, ...],
                     break
                 size += len(chunk)
                 if size > _MAX_UPLOAD_BYTES:
+                    _log.warning("upload rejected size>1GB filename=%r", fname)
                     raise HTTPException(413, "File too large (max 1 GB)")
                 out.write(chunk)
                 digest.update(chunk)
@@ -970,6 +1051,7 @@ async def upload_pcap(file: UploadFile = File(...)):
 async def create_scan(body: ScanCreate, request: Request):
     if body.tool not in TOOLS:
         raise HTTPException(404, f"Tool '{body.tool}' not found")
+    _check_system_tools(body.tool, request)
 
     is_special = body.tool in SPECIAL_TOOLS
 
@@ -1508,6 +1590,12 @@ async def get_splunk():
 
 @app.post("/api/splunk")
 async def update_splunk(body: SplunkConfig):
+    # C3: the Splunk URL is an outbound target; in remote mode it must pass
+    # the same SSRF checks as webhook URLs (no private/loopback/metadata).
+    # Only validated when enabling, so disabling with a stale default URL
+    # (https://127.0.0.1:8089) still works.
+    if body.enabled:
+        _validate_webhook_url(body.url)
     config = body.dict()
     # Don't overwrite password if masked
     if config.get("password") == "***":
@@ -1529,10 +1617,15 @@ async def splunk_export_all():
 
 # ── Reset ──────────────────────────────────────────────────────
 @app.delete("/api/reset")
-async def reset_all(confirm: bool = Query(False)):
+async def reset_all(request: Request, confirm: bool = Query(False)):
     """Reset all data. Requires ?confirm=true to prevent accidental wipes."""
     if not confirm:
         raise HTTPException(400, "Confirmation required: add ?confirm=true to reset all data")
+    _log.warning(
+        "reset requested ip=%s key=%s",
+        request.client.host if request.client else "?",
+        truncate_key(request.headers.get("X-API-Key")),
+    )
     db = await get_db()
     try:
         await db.execute("DELETE FROM scans")

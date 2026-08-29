@@ -1,8 +1,12 @@
-﻿"""Target validation -- SSRF protection for remote deployments."""
+"""Target validation -- SSRF protection for remote deployments."""
 import ipaddress
 import os
 import socket
 from pathlib import Path
+
+from backend.applog import get_logger
+
+_log = get_logger("validators")
 
 
 def is_remote_mode() -> bool:
@@ -20,8 +24,16 @@ def validate_target(host: str) -> tuple[bool, str]:
     """Validate a target host. Returns (is_valid, reason).
 
     In remote mode, blocks private/loopback/link-local/metadata IPs.
-    In local mode, allows everything.
+    In local mode, allows everything. Rejections in remote mode are logged
+    as WARNING so SSRF attempts show up in the audit trail.
     """
+    ok, reason = _validate_host(host)
+    if not ok and is_remote_mode():
+        _log.warning("ssrf blocked target=%s reason=%s", host, reason)
+    return ok, reason
+
+
+def _validate_host(host: str) -> tuple[bool, str]:
     if not host or not host.strip():
         return False, "Host cannot be empty"
 
