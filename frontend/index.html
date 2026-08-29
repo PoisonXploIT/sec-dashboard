@@ -250,8 +250,6 @@
 
         /* Search bar */
         .search-bar { position: relative; margin-bottom: 16px; }
-        .search-bar input { padding-left: 36px; }
-        .search-bar::before { content: '\1F50D'; position: absolute; left: 10px; top: 50%; transform: translateY(-50%); font-size: 14px; z-index: 1; }
 
         /* Formatted result cards */
         .kv-grid { display: grid; grid-template-columns: 140px 1fr; gap: 4px 12px; font-size: 13px; }
@@ -1997,17 +1995,20 @@
                     <code>WiFi Marauder Scan</code> (polls <a href="https://github.com/PoisonXploIT/wifi-marauder-viewer" target="_blank">wifi-marauder-viewer</a> Flask app -- M5StickC Marauder),
                     and <code>M5Stick Networks</code> (polls <a href="https://github.com/PoisonXploIT/Visualizacion_extendida_M5StickPlus2" target="_blank">M5Stick Plus 2 viewer</a> -- Evil-M5Project).
                     WiFi tools ask for the viewer URL (default <code>http://127.0.0.1:5000</code>). Results are sent to Splunk with custom sourcetypes (<code>powershell:audit</code>, <code>wifi:marauder</code>, <code>m5stick:networks</code>).</p>
+                    <p><strong>11. RF capture analysis (upload)</strong> -- The <strong>RF Hardware</strong> category analyzes captures offline, no target needed. Click <code>HackRF CFF Analyzer</code> and upload a <code>.cff</code> file, or click <code>WiFi 802.11 Pcap Analyzer</code> and upload a <code>.pcap</code>/<code>.pcapng</code> (Marauder SD export or Wireshark). The pcap analyzer reports SSIDs, security buckets, channels, deauth storms, WPS, EAPOL 4-way handshakes (M1-M4), hidden-SSID BSSIDs and a client MAC list.</p>
+                    <p><strong>Remote deployments:</strong> on the public instance (<code>SEC_DASHBOARD_REMOTE=1</code>) the system tools (<code>Net Connections</code>, <code>Process Monitor</code>, <code>System Info</code>) and the WiFi hardware polling tools are disabled (HTTP 403) -- they would report or poll the server, not your machine. Run the dashboard locally to use them.</p>
                 </div>
             </div>
 
             <div class="card">
                 <div class="card-header"><div class="card-title">Tools Reference</div></div>
                 <div class="tabs mb-16">
-                    <div class="tab active" onclick="document.getElementById('guide-network').style.display='';document.getElementById('guide-web').style.display='none';document.getElementById('guide-vuln').style.display='none';document.getElementById('guide-sys').style.display='none';document.getElementById('guide-osint').style.display='none'">Network (9)</div>
-                    <div class="tab" onclick="document.getElementById('guide-network').style.display='none';document.getElementById('guide-web').style.display='';document.getElementById('guide-vuln').style.display='none';document.getElementById('guide-sys').style.display='none';document.getElementById('guide-osint').style.display='none'">Web (10)</div>
-                    <div class="tab" onclick="document.getElementById('guide-network').style.display='none';document.getElementById('guide-web').style.display='none';document.getElementById('guide-vuln').style.display='';document.getElementById('guide-sys').style.display='none';document.getElementById('guide-osint').style.display='none'">Vuln (3)</div>
-                    <div class="tab" onclick="document.getElementById('guide-network').style.display='none';document.getElementById('guide-web').style.display='none';document.getElementById('guide-vuln').style.display='none';document.getElementById('guide-sys').style.display='';document.getElementById('guide-osint').style.display='none'">System (6)</div>
-                    <div class="tab" onclick="document.getElementById('guide-network').style.display='none';document.getElementById('guide-web').style.display='none';document.getElementById('guide-vuln').style.display='none';document.getElementById('guide-sys').style.display='none';document.getElementById('guide-osint').style.display=''">OSINT (5)</div>
+                    <div class="tab active" onclick="document.getElementById('guide-network').style.display='';document.getElementById('guide-web').style.display='none';document.getElementById('guide-vuln').style.display='none';document.getElementById('guide-sys').style.display='none';document.getElementById('guide-osint').style.display='none';document.getElementById('guide-rf').style.display='none'">Network (9)</div>
+                    <div class="tab" onclick="document.getElementById('guide-network').style.display='none';document.getElementById('guide-web').style.display='';document.getElementById('guide-vuln').style.display='none';document.getElementById('guide-sys').style.display='none';document.getElementById('guide-osint').style.display='none';document.getElementById('guide-rf').style.display='none'">Web (10)</div>
+                    <div class="tab" onclick="document.getElementById('guide-network').style.display='none';document.getElementById('guide-web').style.display='none';document.getElementById('guide-vuln').style.display='';document.getElementById('guide-sys').style.display='none';document.getElementById('guide-osint').style.display='none';document.getElementById('guide-rf').style.display='none'">Vuln (3)</div>
+                    <div class="tab" onclick="document.getElementById('guide-network').style.display='none';document.getElementById('guide-web').style.display='none';document.getElementById('guide-vuln').style.display='none';document.getElementById('guide-sys').style.display='';document.getElementById('guide-osint').style.display='none';document.getElementById('guide-rf').style.display='none'">System (6)</div>
+                    <div class="tab" onclick="document.getElementById('guide-network').style.display='none';document.getElementById('guide-web').style.display='none';document.getElementById('guide-vuln').style.display='none';document.getElementById('guide-sys').style.display='none';document.getElementById('guide-osint').style.display='';document.getElementById('guide-rf').style.display='none'">OSINT (5)</div>
+                    <div class="tab" onclick="document.getElementById('guide-network').style.display='none';document.getElementById('guide-web').style.display='none';document.getElementById('guide-vuln').style.display='none';document.getElementById('guide-sys').style.display='none';document.getElementById('guide-osint').style.display='none';document.getElementById('guide-rf').style.display=''">RF Hardware (2)</div>
                 </div>
 
                 <div id="guide-network">
@@ -2072,6 +2073,17 @@
                         <tr><td>Shodan Lookup</td><td>Ports, vulns, services via Shodan InternetDB</td><td>Domain or IP</td><td>Open ports, CVEs, hostnames, OS</td></tr>
                         <tr><td>IP Geolocation</td><td>Geolocation, ISP, proxy/hosting detection</td><td>Domain or IP</td><td>Country, city, ISP, proxy flag</td></tr>
                     </tbody></table>
+                </div>
+                <div id="guide-rf" style="display:none">
+                    <table><thead><tr><th>Tool</th><th>What it does</th><th>Input</th><th>Output</th></tr></thead><tbody>
+                        <tr><td>HackRF CFF Analyzer</td><td>Characterizes HackRF .cff captures offline: DC offset, dominant tones, symbol timing, packets, sub-bursts and FSK demod</td><td>Upload a .cff file</td><td>Capture characterization + FSK demod report</td></tr>
+                        <tr><td>WiFi 802.11 Pcap Analyzer</td><td>Offline statistics for Marauder/Wireshark 802.11 captures: SSIDs, security buckets, channels, deauth storms, WPS, EAPOL handshakes (M1-M4), hidden-SSID BSSIDs and client MAC list</td><td>Upload a .pcap/.pcapng file</td><td>Capture metadata table + findings (handshake, open nets, WPS, deauth, hidden SSID)</td></tr>
+                    </tbody></table>
+                    <div style="margin-top:12px;padding:12px;background:rgba(255,255,255,0.05);border-radius:6px;font-size:12px">
+                        <strong>Notes:</strong>
+                        <p style="margin-top:4px">Uploads are analyzed offline on the server and stored under <code>data/uploads/</code>; no network access is needed. Max 200,000 frames per capture (larger files are truncated and flagged).</p>
+                        <p style="margin-top:4px">The EAPOL handshake finding means the PSK/PMKID can be recovered offline from that capture -- treat files containing handshakes as sensitive material.</p>
+                    </div>
                 </div>
             </div>
 
