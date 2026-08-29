@@ -1150,9 +1150,10 @@ def _adapt_hackrf_cff_analyzer(result: dict, target: str) -> list[Finding]:
 def _adapt_pcap_analyzer(result: dict, target: str) -> list[Finding]:
     """Offline 802.11 capture statistics (Marauder / Wireshark imports).
 
-    Summary metadata is INFO; open networks are LOW (visible cleartext air);
-    WPS-active APs and deauth storms are MEDIUM (known attack surface /
-    possible DoS in progress).
+    Summary metadata is INFO; WPA 4-way handshakes are MEDIUM (crackable
+    capture); open networks and hidden-SSID BSSIDs are LOW; WPS-active APs
+    and deauth storms are MEDIUM (known attack surface / possible DoS in
+    progress).
     """
     if "error" in result:
         return []
@@ -1170,6 +1171,22 @@ def _adapt_pcap_analyzer(result: dict, target: str) -> list[Finding]:
                   "frame_types": result.get("frame_types")},
         remediation="", target=target, confidence=1.0,
     ))
+    if result.get("wpa_handshake_seen"):
+        msgs = result.get("handshake_msgs") or {}
+        out.append(Finding(
+            tool="pcap_analyzer", category="RF Hardware",
+            severity=Severity.MEDIUM,
+            title=("WPA 4-way handshake present in capture "
+                   f"({result.get('eapol_frames', 0)} EAPOL frame(s))"),
+            description=("EAPOL-Key M1/M2 (and/or M3/M4) frames were seen; "
+                         "the PSK/PMKID can be recovered offline from this "
+                         "capture. Treat the file as sensitive material."),
+            evidence={"handshake_msgs": msgs,
+                      "eapol_frames": result.get("eapol_frames", 0)},
+            remediation=("Store the capture with access controls; if it is "
+                        "yours, rotate the PSK after any unauthorized share."),
+            target=target, confidence=0.8,
+        ))
     open_nets = (result.get("security") or {}).get("open", 0)
     if open_nets:
         out.append(Finding(
@@ -1206,7 +1223,21 @@ def _adapt_pcap_analyzer(result: dict, target: str) -> list[Finding]:
                         "emitter; enable 802.11w (PMF) where controllable."),
             target=target, confidence=0.7,
         ))
-    return out[:4]
+    hidden = result.get("hidden_bssid_count", 0)
+    if hidden:
+        out.append(Finding(
+            tool="pcap_analyzer", category="RF Hardware",
+            severity=Severity.LOW,
+            title=f"{hidden} BSSID(s) beaconing with hidden SSID",
+            description=("Beacons carry an empty SSID element; the network "
+                         "name is not advertised (weak obscurity, trivially "
+                         "recovered from probe traffic)."),
+            evidence={"hidden_bssids": result.get("hidden_bssids")},
+            remediation=("Hidden SSIDs do not protect; if the AP is in your "
+                        "control, advertise the SSID and rely on WPA2/3."),
+            target=target, confidence=0.7,
+        ))
+    return out[:6]
 
 
 def extract_findings(tool: str, result: dict, target: str = "") -> list[Finding]:

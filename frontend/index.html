@@ -1088,6 +1088,9 @@
             <span class="key">Beacons</span><span class="value">${(d.mgmt_subtypes||{}).beacon||0}</span>
             <span class="key">Deauth</span><span class="value">${d.deauth_count||0}</span>
             <span class="key">WPS frames</span><span class="value">${d.wps_frames||0}</span>
+            <span class="key">EAPOL frames</span><span class="value">${d.eapol_frames||0}${d.wpa_handshake_seen ? ' <span class="tag tag-red">4-way handshake</span>' : ''}</span>
+            <span class="key">Hidden SSID BSSIDs</span><span class="value">${d.hidden_bssid_count||0}</span>
+            <span class="key">Unique clients</span><span class="value">${d.n_clients||0}</span>
             <span class="key">Channels</span><span class="value">${(d.channels||[]).length ? (d.channels||[]).join(', ') : 'n/a (no RadioTap)'}</span>
         </div></div>`;
         const sec = d.security || {};
@@ -1103,6 +1106,10 @@
         if ((d.bssids||[]).length) {
             html += `<div class="result-section"><h4> BSSIDs (top ${d.bssids.length}) </h4>` +
                 d.bssids.map(s => `<div style="font-family:monospace;font-size:12px;padding:2px 0;color:var(--text-secondary)">${esc(s.bssid)} <span class="tag tag-accent">x${s.count}</span></div>`).join('') + `</div>`;
+        }
+        if ((d.clients||[]).length) {
+            html += `<div class="result-section"><h4> Client MACs (top ${d.clients.length}) </h4>` +
+                d.clients.map(s => `<div style="font-family:monospace;font-size:12px;padding:2px 0;color:var(--text-secondary)">${esc(s.mac)} <span class="tag tag-accent">${s.count} frame(s)</span></div>`).join('') + `</div>`;
         }
         return html;
     }
