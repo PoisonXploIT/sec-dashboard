@@ -187,3 +187,10 @@ uvicorn backend.main:app --host 127.0.0.1 --port 8444
 ## License
 
 MIT License. See [LICENSE](LICENSE) for details.
+
+---
+
+## Contacto
+
+- Pagina: [sammideblas.com](https://sammideblas.com)
+- Email: analista@sammideblas.com
