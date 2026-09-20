@@ -35,6 +35,7 @@ from backend.maintenance import purge_old_runs, backup_db
 from backend import webhooks
 from backend import splunk
 from backend import jev
+from backend import local_llm
 from backend.applog import get_logger, setup_logging
 
 # Structured logging: rotating file (data/logs) + stdout, before anything runs.
@@ -1722,6 +1723,46 @@ async def update_jev(body: JevConfig):
 @app.post("/api/jev/test")
 async def test_jev_endpoint():
     return await jev.test_jev()
+
+
+# ── Local LLM explainer (Fase J5): reference layer over Jev verdicts ──
+class LocalLlmConfig(BaseModel):
+    enabled: bool = False
+    base_url: str = ""
+    model: str = ""
+    timeout: int = 60
+
+
+class LlmExplainRequest(BaseModel):
+    state: dict = {}
+    verdict: dict = {}
+
+
+@app.get("/api/llm")
+async def get_local_llm():
+    return {"config": local_llm.get_local_llm_config()}
+
+
+@app.post("/api/llm")
+async def update_local_llm(body: LocalLlmConfig):
+    config = body.dict()
+    # Loopback-only (any port): the explainer must never reach outside the
+    # machine, so this is stricter than the Jev base_url rule.
+    if config["enabled"]:
+        if not config.get("base_url") or not local_llm.is_loopback_url(config["base_url"]):
+            raise HTTPException(400, "base_url must be a loopback URL (127.0.0.1/localhost, any port)")
+    local_llm.set_local_llm_config(config)
+    return {"status": "updated", "enabled": config["enabled"]}
+
+
+@app.post("/api/llm/test")
+async def test_local_llm_endpoint():
+    return await local_llm.test_local_llm()
+
+
+@app.post("/api/llm/explain")
+async def explain_finding_endpoint(body: LlmExplainRequest):
+    return await local_llm.explain_finding(body.state, body.verdict)
 
 
 @app.post("/api/splunk/export-all")

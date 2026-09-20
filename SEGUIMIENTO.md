@@ -598,6 +598,19 @@ Reglas para cada tool de este backlog:
 - **Riesgos**: LLM offline degrada a sin explicacion; update de modelo local -> pin de nombre en config y salida etiquetada referencial; separacion visual oficial (Jev) vs referencial (LLM) en UI y PDFs.
 - Estado: APROBADO (2026-09-20) con el ajuste de LLM manual. Empezando J4a (funcion triage + tests).
 
+### 2026-09-20 — Fase J5a/J5b: explicador LLM local de veredictos Jev (COMPLETADO)
+- **J5a — backend** (`backend/local_llm.py`, sin dependencias nuevas, solo stdlib + aiohttp ya en uso):
+  - Config en memoria (nunca a disco): `{enabled, base_url, model, timeout}`. Sin API key.
+  - `base_url` SOLO loopback (127.0.0.1 / localhost / ::1), cualquier puerto; sin ambos (url+model) y enabled, todo degrada a "explicacion no disponible".
+  - `POST /api/llm/explain {state, verdict}`: prompt fijo, temp 0, max_tokens 2048, `reasoning_effort: low` (para modelos de razonamiento), salida JSON acotada `{resumen, porque, sugerencia}` (300 chars/campo). Cualquier fallo -> `{status: unavailable, reason}`; NUNCA rompe un scan.
+  - Endpoints: `GET /api/llm`, `POST /api/llm` (valida loopback, 400 si no), `POST /api/llm/test`, `POST /api/llm/explain`. Sin defaults de URL/puerto/modelo (decision del usuario).
+  - Tests: `tests/test_local_llm.py` (16 tests, sin red; `_chat` monkeypatcheado): loopback, activacion, parsing acotado, empty/unparseable/network/http-500 -> unavailable, endpoints.
+- **J5b — UI** (`frontend/index.html`):
+  - Tarjeta "Explicador LLM local (referencial)" en la pagina Jev AI: base_url (placeholder `http://127.0.0.1:8080`), model, timeout, enabled; botones Save + Test Connection.
+  - Columna "LLM local" en la tabla AI Verdicts con boton "Explicar" por fila -> panel expandible con resumen/porque/sugerencia, etiquetado "referencial — el veredicto oficial es el de Jev". Sin LLM configurado: "explicacion no disponible (reason) — configura el LLM local en la pagina Jev AI".
+- **E2E real**: scan 54 (header_analyzer, example.com) + Jev `jev-1.13.0` + LLM local llama.cpp `dirk-qwen3.8-27b-iq3` en :8099 -> `POST /api/llm/explain` devolvio explicacion en espanol acotada y correcta (HSTS). Coste Jev inalterado; J5 = $0 local.
+- Siguiente: J4c (guia UI + inspector "Ver query") y, opcional, J5c (explicaciones top N en export).
+
 ## 7. Reglas y restricciones del proyecto (NO VIOLAR)
 
 1. **NO emojis, flechas de texto ni símbolos de color** en ninguna salida, nota, script o commit (regla global del usuario). Escribir las palabras.

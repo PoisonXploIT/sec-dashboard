@@ -2011,20 +2011,32 @@
         }, {});
         const triageHeader = Object.entries(triageCounts)
             .map(([b, n]) => `${JEV_TRIAGE.LABELS[b]}: ${n}`).join(' | ');
-        const trs = rows.map(({f, v, risk, bucket}) => `
+        // J5: data for the local LLM explainer buttons (state + verdict per row).
+        window._jevRows = rows.map(({f, v}) => ({
+            title: String(f.title||''),
+            state: {
+                tool: String(f.tool||''), category: String(f.category||''),
+                severity: String(f.severity||''), title: String(f.title||''),
+                description: String(f.description||''),
+            },
+            verdict: v,
+        }));
+        const trs = rows.map(({f, v, risk, bucket}, idx) => `
             <tr>
                 <td style="font-size:12px">${risk ? risk.toFixed(1) : '<span style="color:var(--text-muted)">-</span>'}</td>
                 <td><span class="tag ${evoSevClass(f.severity)}">${esc(String(f.severity||'').toUpperCase())}</span></td>
                 <td style="font-size:12px"><strong>${esc(f.title||'')}</strong> <span style="color:var(--text-muted)">${esc(f.tool||'')}</span></td>
                 <td>${jevBadge(v)}</td>
                 <td>${bucket ? `<span class="tag ${JEV_TRIAGE.CLASSES[bucket]}">${JEV_TRIAGE.LABELS[bucket]}</span>` : '<span style="color:var(--text-muted)">-</span>'}</td>
+                <td><button class="btn btn-sm" title="Explicar con el LLM local (referencial)" onclick="explainJev(${idx})">Explicar</button></td>
             </tr>`).join('');
         return `
             <div class="card" style="margin-top:16px">
                 <div class="card-header"><div class="card-title">AI Verdicts (Jev)</div>
                     <span style="font-size:12px;color:var(--text-muted)">${esc(jev.model||'')} | ${jev.count} findings | riesgo = severidad x score AI</span></div>
                 ${triageHeader ? `<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">Triage — ${triageHeader}</div>` : ''}
-                <table><thead><tr><th>Risk</th><th>Sev</th><th>Finding</th><th>AI</th><th>Triage</th></tr></thead><tbody>${trs}</tbody></table>
+                <table><thead><tr><th>Risk</th><th>Sev</th><th>Finding</th><th>AI</th><th>Triage</th><th>LLM local</th></tr></thead><tbody>${trs}</tbody></table>
+                <div id="jev-explain-panel"></div>
             </div>`;
     }
 
@@ -2676,9 +2688,14 @@ search index=sec_dashboard | timechart count</pre></div>
         const content = document.getElementById('content');
         content.innerHTML = '<div class="skeleton" style="height:200px;margin-bottom:16px"></div>';
         let config = {enabled: false, api_key: '', model: 'jev-1.13.0', base_url: 'https://api.typesafe.ai/v1/systemone', timeout: 30, max_findings: 100};
+        let llm = {enabled: false, base_url: '', model: '', timeout: 60};
         try {
             const data = await api.get('/jev');
             config = data.config || config;
+        } catch (e) { /* use defaults */ }
+        try {
+            const dataLlm = await api.get('/llm');
+            llm = dataLlm.config || llm;
         } catch (e) { /* use defaults */ }
 
         content.innerHTML = `
@@ -2732,7 +2749,96 @@ search index=sec_dashboard | timechart count</pre></div>
                     <p><strong>Remote deploy:</strong> enabling it on sec.sammideblas.com sends findings to a third party under your individual responsibility. Do not enable it there while scanning sensitive third-party targets.</p>
                 </div>
             </div>
+            <div class="card">
+                <div class="card-header"><div class="card-title">Explicador LLM local (referencial)</div>
+                    <span class="badge-status ${llm.enabled?'badge-completed':'badge-pending'}">${llm.enabled?'Enabled':'Disabled'}</span>
+                </div>
+                <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px">
+                    Opcional y 100% local: un servidor llama.cpp (endpoint compatible OpenAI) explica en lenguaje
+                    sencillo cada veredicto de Jev. No es segundo oraculo: nunca cambia el veredicto ni el bucket,
+                    su salida se etiqueta "referencial". Sin base_url y modelo configurados queda deshabilitado.
+                    Solo loopback (127.0.0.1 / localhost), cualquier puerto; sin API key.
+                </p>
+                <div class="flex gap-8 mb-16">
+                    <button class="btn btn-primary" onclick="saveLocalLlm()">Save Settings</button>
+                    <button class="btn" onclick="testLocalLlm()">Test Connection</button>
+                </div>
+                <div id="llm-result" class="mt-16"></div>
+                <div class="input-group"><label>Server URL (loopback, any port)</label>
+                    <input type="text" id="llm-url" value="${esc(llm.base_url)}" placeholder="http://127.0.0.1:8080">
+                </div>
+                <div class="input-group"><label>Model name (cualquier modelo del servidor)</label>
+                    <input type="text" id="llm-model" value="${esc(llm.model)}" placeholder="gemma-4-12b-it-q4">
+                </div>
+                <div class="input-group"><label>Timeout (s)</label>
+                    <input type="number" id="llm-timeout" value="${llm.timeout}" min="5" max="600">
+                </div>
+                <div class="input-group"><label>Enable local explainer</label>
+                    <select id="llm-enabled">
+                        <option value="0" ${!llm.enabled?'selected':''}>Disabled</option>
+                        <option value="1" ${llm.enabled?'selected':''}>Enabled</option>
+                    </select>
+                </div>
+            </div>
         `;
+    }
+
+    async function saveLocalLlm() {
+        const config = {
+            enabled: document.getElementById('llm-enabled').value === '1',
+            base_url: document.getElementById('llm-url').value.trim(),
+            model: document.getElementById('llm-model').value.trim(),
+            timeout: parseInt(document.getElementById('llm-timeout').value, 10) || 60,
+        };
+        try {
+            await api.post('/llm', config);
+            toast('Local LLM settings saved', 'success');
+        } catch (e) { toast('Save failed: ' + e.message, 'error'); }
+    }
+
+    async function testLocalLlm() {
+        const resultDiv = document.getElementById('llm-result');
+        if (!resultDiv) return;
+        resultDiv.innerHTML = '<div class="skeleton" style="width:200px"></div>';
+        try {
+            await saveLocalLlm();
+            const result = await api.post('/llm/test', {});
+            if (result.status === 'ok') {
+                resultDiv.innerHTML = `<div class="finding-card safe"><strong>Connected!</strong> Model: ${esc(result.model||'')} | reply: ${esc(result.reply||'')}</div>`;
+                toast('Local LLM connection OK', 'success');
+            } else {
+                resultDiv.innerHTML = `<div class="finding-card vuln"><strong>Connection failed:</strong> ${esc(result.reason||'Unknown')}</div>`;
+                toast('Local LLM test failed', 'error');
+            }
+        } catch (e) {
+            resultDiv.innerHTML = `<div class="finding-card vuln"><strong>Error:</strong> ${esc(e.message)}</div>`;
+            toast('Test failed: ' + e.message, 'error');
+        }
+    }
+
+    async function explainJev(idx) {
+        const row = (window._jevRows || [])[idx];
+        const panel = document.getElementById('jev-explain-panel');
+        if (!row || !panel) return;
+        panel.innerHTML = `<div class="skeleton" style="width:200px"></div>`;
+        try {
+            const result = await api.post('/llm/explain', {state: row.state, verdict: row.verdict});
+            if (result.status === 'ok') {
+                const ex = result.explanation || {};
+                panel.innerHTML = `
+                    <div style="margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:6px;background:var(--bg-tertiary)">
+                        <div style="font-size:12px;font-weight:600;margin-bottom:8px">${esc(row.title)} — explicacion LLM local (${esc(result.model||'')})</div>
+                        <p style="font-size:13px;margin:4px 0"><strong>Resumen:</strong> ${esc(ex.resumen||'')}</p>
+                        <p style="font-size:13px;margin:4px 0"><strong>Porque:</strong> ${esc(ex.porque||'')}</p>
+                        <p style="font-size:13px;margin:4px 0"><strong>Sugerencia:</strong> ${esc(ex.sugerencia||'')}</p>
+                        <div style="font-size:11px;color:var(--text-muted);margin-top:8px">referencial — el veredicto oficial es el de Jev</div>
+                    </div>`;
+            } else {
+                panel.innerHTML = `<div style="margin-top:12px;font-size:13px;color:var(--text-muted)">explicacion no disponible (${esc(result.reason||'')}) — configura el LLM local en la pagina Jev AI</div>`;
+            }
+        } catch (e) {
+            panel.innerHTML = `<div style="margin-top:12px;font-size:13px;color:var(--text-muted)">explicacion no disponible (${esc(e.message)})</div>`;
+        }
     }
 
     async function saveJev() {
