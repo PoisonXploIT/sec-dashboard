@@ -588,10 +588,17 @@ class ScanCreate(BaseModel):
     params: dict = {}
     direct_input: str = ""  # For special tools
     wait: bool = True  # False = return immediately, poll GET /api/scans/{id}
+    # J6: per-run AI options. None (or True) = automatic (run if configured);
+    # False = explicit opt-out for this run only.
+    jev: bool | None = None
+    llm: bool | None = None
 
 class PipelineCreate(BaseModel):
     target_id: int
     mode: str
+    # J6: per-run AI options (same semantics as ScanCreate).
+    jev: bool | None = None
+    llm: bool | None = None
 
 class ToolRun(BaseModel):
     target: str
@@ -1013,21 +1020,40 @@ async def list_scans(target_id: int = None, page: int = 1, per_page: int = 50):
         await db.close()
 
 
-async def _persist_scan_result(scan_id: int, status: str, result: dict):
+def _ai_run_flags(jev_opt: bool | None = None,
+                  llm_opt: bool | None = None) -> tuple[bool, bool]:
+    """J6: effective AI options for a run (pure, tested separately).
+
+    opt=None (or True) means automatic: run it if configured. opt=False is an
+    explicit per-run opt-out. Requested-but-unconfigured degrades to classic
+    output (fail-safe: the scan never fails because of AI).
+    """
+    run_jev = (jev_opt is not False) and bool(jev.get_jev_config().get("enabled"))
+    run_llm = (llm_opt is not False) and bool(local_llm.get_local_llm_config().get("enabled"))
+    return run_jev, run_llm
+
+
+async def _persist_scan_result(scan_id: int, status: str, result: dict,
+                               jev_opt: bool | None = None,
+                               llm_opt: bool | None = None):
     """Persist a finished scan's result plus normalized findings and score (Fase 0.4)."""
-    # Fase J: optional Jev enrichment (non-blocking; degrades to classic scoring).
+    # Fase J/J6: optional Jev enrichment + local-LLM explanations, each gated
+    # by the per-run option; non-blocking, degrades to classic scoring.
+    run_jev, run_llm = _ai_run_flags(jev_opt, llm_opt)
     try:
-        jev_info = await jev.enrich_findings(result.get("findings", []))
-        if jev_info.get("status") == "ok":
-            result["jev"] = jev_info
-            # J5d: local-LLM explanations of the top verdicts, generated here
-            # (before any export) when the user has a local LLM configured.
-            try:
-                llm_expl = await _llm_explanations_for(result)
-                if llm_expl:
-                    result["llm_explanations"] = llm_expl
-            except Exception as e:
-                _log.warning("llm explanations failed scan=%d: %s", scan_id, e)
+        if run_jev:
+            jev_info = await jev.enrich_findings(result.get("findings", []))
+            if jev_info.get("status") == "ok":
+                result["jev"] = jev_info
+                # J5d/J6: local-LLM explanations of the top verdicts, generated
+                # here (before any export) when the user has a local LLM.
+                if run_llm:
+                    try:
+                        llm_expl = await _llm_explanations_for(result)
+                        if llm_expl:
+                            result["llm_explanations"] = llm_expl
+                    except Exception as e:
+                        _log.warning("llm explanations failed scan=%d: %s", scan_id, e)
     except Exception as e:
         _log.warning("jev enrichment failed scan=%d: %s", scan_id, e)
     db = await get_db()
@@ -1047,21 +1073,27 @@ async def _persist_scan_result(scan_id: int, status: str, result: dict):
         await db.close()
 
 
-async def _persist_pipeline_result(pipeline_id: int, status: str, result: dict):
+async def _persist_pipeline_result(pipeline_id: int, status: str, result: dict,
+                                   jev_opt: bool | None = None,
+                                   llm_opt: bool | None = None):
     """Persist a finished pipeline's result plus aggregated findings and score (Fase 0.4)."""
-    # Fase J: optional Jev enrichment (non-blocking; degrades to classic scoring).
+    # Fase J/J6: optional Jev enrichment + local-LLM explanations, each gated
+    # by the per-run option; non-blocking, degrades to classic scoring.
+    run_jev, run_llm = _ai_run_flags(jev_opt, llm_opt)
     try:
-        jev_info = await jev.enrich_findings(result.get("findings", []))
-        if jev_info.get("status") == "ok":
-            result["jev"] = jev_info
-            # J5d: local-LLM explanations of the top verdicts, generated here
-            # (before any export) when the user has a local LLM configured.
-            try:
-                llm_expl = await _llm_explanations_for(result)
-                if llm_expl:
-                    result["llm_explanations"] = llm_expl
-            except Exception as e:
-                _log.warning("llm explanations failed pipeline=%d: %s", pipeline_id, e)
+        if run_jev:
+            jev_info = await jev.enrich_findings(result.get("findings", []))
+            if jev_info.get("status") == "ok":
+                result["jev"] = jev_info
+                # J5d/J6: local-LLM explanations of the top verdicts, generated
+                # here (before any export) when the user has a local LLM.
+                if run_llm:
+                    try:
+                        llm_expl = await _llm_explanations_for(result)
+                        if llm_expl:
+                            result["llm_explanations"] = llm_expl
+                    except Exception as e:
+                        _log.warning("llm explanations failed pipeline=%d: %s", pipeline_id, e)
     except Exception as e:
         _log.warning("jev enrichment failed pipeline=%d: %s", pipeline_id, e)
     db = await get_db()
@@ -1217,7 +1249,7 @@ async def create_scan(body: ScanCreate, request: Request):
                 stored["target"] = "(redacted)"
                 for f in stored.get("findings", []):
                     f["target"] = "(redacted)"
-            await _persist_scan_result(scan_id, status, stored)
+            await _persist_scan_result(scan_id, status, stored, body.jev, body.llm)
             _bump_failure_streak(status)
             _log.info(
                 "scan finished scan_id=%d tool=%s status=%s elapsed=%.2fs score=%s findings=%d",
@@ -1575,7 +1607,8 @@ async def create_pipeline(body: PipelineCreate, request: Request):
             try:
                 result = await runner.run()
                 status = "completed" if result.get("status") == "completed" else "failed"
-                await _persist_pipeline_result(pipeline_id, status, result)
+                await _persist_pipeline_result(pipeline_id, status, result,
+                                               body.jev, body.llm)
                 _log.info(
                     "pipeline finished pipeline_id=%d mode=%s status=%s elapsed=%.2fs score=%s tools=%s",
                     pipeline_id, body.mode, status,

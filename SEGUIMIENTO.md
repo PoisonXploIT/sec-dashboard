@@ -636,6 +636,14 @@ Reglas para cada tool de este backlog:
 - **Tests**: `tests/test_llm_explanations_run.py` (reemplaza test_pdf_llm_explanations.py): disabled/jev-no-ok -> None, orden por riesgo compuesto, unavailable conservado, top-N acotado. `test_report_jev.py`: los 3 tests de PDF ahora meten `llm_explanations` en el result JSON del fixture (ya no hay parámetro). Suite verde, ruff limpio, JS validado con node --check.
 - Estado J4/J5: J4a, J4b, J4c, J5a/J5b, J5c y J5d COMPLETADOS. Cerrado el backlog Jev.
 
+### 2026-09-20 — Fase J6: opciones de AI por run (Jev y/o LLM) + explicaciones en espanol en todos los formatos (COMPLETADO)
+- **Opcion por run**: al lanzar una tool individual (picker de target) o un pipeline aparece un bloque "AI (opcional)" con un checkbox por servicio configurado — Veredictos Jev AI y/o Explicaciones LLM local (referencial) — marcado por defecto. Desmarcar aplica solo a ese run, nunca a la config global. API: `POST /api/scans` y `POST /api/pipelines` aceptan `jev`/`llm` (null = automatico si esta configurado; false = opt-out del run). Helper puro `_ai_run_flags()` en `main.py` (testado).
+- **Explicaciones en todos los formatos, siempre en espanol**: el mismo texto generado al final del run se reutiliza en: vista UI (card "Explicaciones LLM local (referencial)" bajo la tabla de veredictos), PDF (seccion), JSON (`llm_explanations` en el evento exportado), CSV (columnas `llm_resumen`/`llm_porque`/`llm_sugerencia` unidas por titulo, solo si el run las tiene). El prompt ya obliga espanol; no hay segunda generacion que pueda desincronizar idiomas.
+- **Cambios**: `main.py` (ScanCreate/PipelineCreate + jev/llm, `_ai_run_flags`, persist con opts), `report.py` (`_csv_llm_lookup` + columnas CSV condicionales, `llm_explanations` en JSON scan/pipeline), `frontend/index.html` (`_loadAiOptions`/`_readAiOpts` en picker y pipeline, `llmExplanationsHtml` en vistas de resultado, POST con opts). Sin LLM ni Jev configurados: nada cambia (byte-idéntico).
+- **Docs**: USER-GUIDE seccion 14 + tarjeta de la Guide in-app actualizadas (opcion por run + espanol en todos los formatos).
+- **Tests**: `tests/test_ai_run_flags.py` (matriz de opts) + 6 tests en `test_report_jev.py` (columnas CSV con/llm, valores en espanol, unavailable como "no disponible (reason)", JSON scan/pipeline con/sin clave). Suite verde, ruff limpio, JS validado con node --check.
+- Estado J4/J5/J6: J4a, J4b, J4c, J5a/J5b, J5c, J5d y J6 COMPLETADOS. Cerrado el backlog Jev.
+
 ## 7. Reglas y restricciones del proyecto (NO VIOLAR)
 
 1. **NO emojis, flechas de texto ni símbolos de color** en ninguna salida, nota, script o commit (regla global del usuario). Escribir las palabras.

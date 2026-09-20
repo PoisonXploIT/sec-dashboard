@@ -64,6 +64,8 @@ class ReportPDF(FPDF):
 # is byte-identical to the pre-J3 output (same rule as the J2 UI).
 
 AI_CSV_FIELDS = ("ai_verdict", "ai_confidence", "ai_severity_score", "ai_immediate_action")
+# J6: local-LLM explanation columns (Spanish values), only when the run has them.
+LLM_CSV_FIELDS = ("llm_resumen", "llm_porque", "llm_sugerencia")
 TRIAGE_CSV_FIELD = "triage"
 _AI_VALUE_KEYS = ("verdict", "verdict_confidence", "severity_score", "immediate_action")
 
@@ -104,6 +106,28 @@ def _ai_export_block(result_data: dict) -> dict | None:
         })
     return {"model": jev.get("model"), "verdicts": verdicts,
             "triage_summary": triage_summary([x["triage"] for x in verdicts])}
+
+
+def _csv_llm_lookup(result_data: dict) -> dict[str, dict] | None:
+    """J6: title -> llm explanation row for CSV joins; None if no explanations."""
+    items = _llm_explanations_from(result_data)
+    if not items:
+        return None
+    lookup: dict[str, dict] = {}
+    for it in items:
+        title = str(it.get("title") or "")
+        if not title:
+            continue
+        if it.get("status") == "unavailable":
+            resumen = f"no disponible ({str(it.get('reason') or '')[:80]})"
+            porque = sugerencia = ""
+        else:
+            resumen, porque, sugerencia = (
+                str(it.get(k) or "") for k in ("resumen", "porque", "sugerencia"))
+        lookup[title] = {"llm_resumen": resumen,
+                         "llm_porque": porque,
+                         "llm_sugerencia": sugerencia}
+    return lookup or None
 
 
 def _csv_ai_lookup(result_data: dict, findings: list[dict]) -> dict[str, dict] | None:
@@ -149,6 +173,10 @@ def generate_scan_json(scan: dict, target: dict = None) -> str:
     ai = _ai_export_block(result_data)
     if ai is not None:
         export["ai"] = ai
+    # J6: local-LLM explanations (Spanish, generated at run completion).
+    le = _llm_explanations_from(result_data)
+    if le is not None:
+        export["llm_explanations"] = le
     return json.dumps(export, indent=2, ensure_ascii=False, default=str)
 
 
@@ -179,6 +207,10 @@ def generate_pipeline_json(pipeline: dict, target: dict = None) -> str:
     ai = _ai_export_block(result_data)
     if ai is not None:
         export["ai"] = ai
+    # J6: local-LLM explanations (Spanish, generated at run completion).
+    le = _llm_explanations_from(result_data)
+    if le is not None:
+        export["llm_explanations"] = le
     return json.dumps(export, indent=2, ensure_ascii=False, default=str)
 
 
@@ -217,21 +249,26 @@ def _csv_findings_blob(findings_raw) -> list:
 
 
 def _csv_run_rows(fields: list, run_cols: list, findings: list, mid_fields=(),
-                  ai_lookup: dict | None = None) -> str:
+                  ai_lookup: dict | None = None,
+                  llm_lookup: dict | None = None) -> str:
     """Shared writer: header + one row per finding; zero findings -> one summary row.
 
     `mid_fields` are per-finding columns that sit between the run metadata and
     the standard finding fields (e.g. the pipeline per-row `tool`).
     `ai_lookup` (Fase J3): when given, appends the AI verdict columns; the
     lookup maps both finding_id and legacy index to the verdict dict.
+    `llm_lookup` (J6): when given, appends the local-LLM explanation columns
+    (Spanish), joined by finding title.
     """
     buf = StringIO()
     writer = csv.writer(buf)
     ai_cols: tuple = (AI_CSV_FIELDS + (TRIAGE_CSV_FIELD,)) if ai_lookup is not None else ()
-    writer.writerow(fields + list(ai_cols))
+    llm_cols: tuple = LLM_CSV_FIELDS if llm_lookup is not None else ()
+    writer.writerow(fields + list(ai_cols) + list(llm_cols))
+    extra = len(ai_cols) + len(llm_cols)
     if not findings:
         # Keep the event visible for SIEM even when nothing was found.
-        writer.writerow(run_cols + [""] * (len(mid_fields) + len(_FINDING_FIELDS) + len(ai_cols)))
+        writer.writerow(run_cols + [""] * (len(mid_fields) + len(_FINDING_FIELDS) + extra))
     else:
         for i, f in enumerate(findings):
             row = run_cols + [f.get(k, "") for k in mid_fields] \
@@ -241,6 +278,9 @@ def _csv_run_rows(fields: list, run_cols: list, findings: list, mid_fields=(),
                 row += [v.get(k, "") for k in _AI_VALUE_KEYS]
                 bucket = _triage_of(v)
                 row.append(BUCKET_LABELS_ES.get(bucket, "") if bucket else "")
+            if llm_lookup is not None:
+                li = llm_lookup.get(str(f.get("title") or "")) or {}
+                row += [li.get(k, "") for k in LLM_CSV_FIELDS]
             writer.writerow(row)
     return "\ufeff" + buf.getvalue()
 
@@ -263,7 +303,8 @@ def generate_scan_csv(scan: dict, target: dict = None) -> str:
     ]
     findings = _csv_findings_blob(scan.get("findings"))
     return _csv_run_rows(SCAN_CSV_FIELDS, run_cols, findings,
-                         ai_lookup=_csv_ai_lookup(result_data, findings))
+                         ai_lookup=_csv_ai_lookup(result_data, findings),
+                         llm_lookup=_csv_llm_lookup(result_data))
 
 
 def generate_pipeline_csv(pipeline: dict, target: dict = None) -> str:
@@ -286,7 +327,8 @@ def generate_pipeline_csv(pipeline: dict, target: dict = None) -> str:
     findings = _csv_findings_blob(pipeline.get("findings"))
     return _csv_run_rows(PIPELINE_CSV_FIELDS, run_cols, findings,
                          mid_fields=("tool",),
-                         ai_lookup=_csv_ai_lookup(result_data, findings))
+                         ai_lookup=_csv_ai_lookup(result_data, findings),
+                         llm_lookup=_csv_llm_lookup(result_data))
 
 
 def generate_all_json(scans: list, pipelines: list, targets: list) -> str:

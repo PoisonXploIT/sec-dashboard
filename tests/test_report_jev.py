@@ -326,3 +326,51 @@ def test_scan_pdf_without_llm_explanations_has_no_section():
     text = _pdf_text(bytes(report.generate_scan_pdf(_scan(JEV), _target()))) \
         .replace("\(", "(").replace("\)", ")")
     assert "Explicaciones LLM local" not in text
+
+
+# ── J6: llm_explanations in JSON and CSV exports (Spanish) ─────────────
+
+def _csv_rows(text):
+    import csv as _csv
+    return list(_csv.reader(io.StringIO(text)))
+
+
+def test_scan_csv_llm_columns_spanish():
+    rows = _csv_rows(report.generate_scan_csv(
+        _scan(JEV, llm_explanations=LLM_EXPLS), _target()))
+    header = rows[0]
+    assert "llm_resumen" in header and "llm_porque" in header \
+        and "llm_sugerencia" in header
+    i_title, i_sum = header.index("title"), header.index("llm_resumen")
+    by_title = {r[i_title]: r for r in rows[1:] if len(r) == len(header)}
+    assert by_title["HSTS missing"][i_sum] == "El sitio no envia HSTS."
+    # Unavailable items are shown with their reason, not as a failure.
+    assert by_title["Server banner"][i_sum].startswith("no disponible (timeout)")
+
+
+def test_scan_csv_without_llm_has_no_columns():
+    rows = _csv_rows(report.generate_scan_csv(_scan(JEV), _target()))
+    assert "llm_resumen" not in rows[0]
+
+
+def test_pipeline_csv_llm_columns():
+    rows = _csv_rows(report.generate_pipeline_csv(
+        _pipeline(JEV, llm_explanations=LLM_EXPLS), _target()))
+    assert "llm_sugerencia" in rows[0]
+
+
+def test_scan_json_includes_llm_explanations():
+    data = json.loads(report.generate_scan_json(
+        _scan(JEV, llm_explanations=LLM_EXPLS), _target()))
+    assert data["llm_explanations"][0]["resumen"] == "El sitio no envia HSTS."
+
+
+def test_pipeline_json_includes_llm_explanations():
+    data = json.loads(report.generate_pipeline_json(
+        _pipeline(JEV, llm_explanations=LLM_EXPLS), _target()))
+    assert len(data["llm_explanations"]) == 2
+
+
+def test_scan_json_without_llm_has_no_key():
+    data = json.loads(report.generate_scan_json(_scan(JEV), _target()))
+    assert "llm_explanations" not in data

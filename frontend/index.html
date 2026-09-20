@@ -963,7 +963,8 @@
 
         try {
             // Non-blocking start + poll (avoids long-held HTTP requests)
-            const start = await api.post('/scans', { target_id: targetId, tool: toolId, params: params, direct_input: directInput, wait: false });
+            const aiOpts = state.aiOpts; state.aiOpts = null;
+            const start = await api.post('/scans', { target_id: targetId, tool: toolId, params: params, direct_input: directInput, wait: false, ...(aiOpts || {}) });
             let result;
             if (start.result) {
                 result = start; // finished immediately
@@ -1483,6 +1484,33 @@
         return html;
     }
 
+    // J6: per-run AI options (Jev verdicts and/or local-LLM explanations).
+    // Shown only when the corresponding service is configured; checked by
+    // default so a configured service stays in the run unless opted out.
+    async function _loadAiOptions(container, idPrefix) {
+        try {
+            const [jc, lc] = await Promise.all([api.get('/jev'), api.get('/llm')]);
+            const jevOn = !!(jc && jc.config && jc.config.enabled);
+            const llmOn = !!(lc && lc.config && lc.config.enabled);
+            if (!jevOn && !llmOn) return;
+            const box = document.createElement('div');
+            box.style.cssText = 'margin:12px 0;padding:10px;border:1px solid var(--border);border-radius:6px;font-size:13px';
+            box.innerHTML = `
+                <div style="font-weight:600;margin-bottom:8px">AI (opcional)</div>
+                ${jevOn ? `<label style="display:block;margin-bottom:6px"><input type="checkbox" id="${idPrefix}-jev" checked> Veredictos Jev AI</label>` : ''}
+                ${llmOn ? `<label style="display:block"><input type="checkbox" id="${idPrefix}-llm" checked> Explicaciones LLM local (referencial)</label>` : ''}`;
+            const actions = container.querySelector('.modal-actions');
+            if (actions) container.insertBefore(box, actions); else container.appendChild(box);
+        } catch {}
+    }
+
+    function _readAiOpts(idPrefix) {
+        const j = document.getElementById(`${idPrefix}-jev`);
+        const l = document.getElementById(`${idPrefix}-llm`);
+        if (!j && !l) return null;
+        return { jev: j ? j.checked : true, llm: l ? l.checked : true };
+    }
+
     function showTargetPicker(toolId, targets) {
         const overlay = document.createElement('div');
         overlay.className = 'modal-overlay';
@@ -1501,11 +1529,13 @@
             </div>
         `;
         document.body.appendChild(overlay);
+        _loadAiOptions(overlay.querySelector('.modal'), 'ai-opt');
     }
 
     function selectTargetAndRun(id, name, host, toolId) {
         state.selectedTarget = {id, name, host};
         localStorage.setItem('sec_dash_target', JSON.stringify({id, name, host}));
+        state.aiOpts = _readAiOpts('ai-opt');
         document.querySelector('.modal-overlay')?.remove();
         runTool(toolId);
     }
@@ -1534,6 +1564,7 @@
                     </div>
                 </div>
                 <div id="pipeline-phases" class="hidden"></div>
+                <div id="pipeline-ai-opts"></div>
                 <div class="flex gap-8 items-center mt-16">
                     <select id="pipeline-target" style="flex:1"><option value="">Select target...</option>${(targets.targets||[]).map(t => `<option value="${t.id}">${esc(t.name)} (${esc(t.host)})</option>`).join('')}</select>
                     <button class="btn btn-primary" id="run-pipeline-btn" onclick="startPipeline()" disabled> Start Pipeline</button>
@@ -1549,6 +1580,7 @@
                 </div>
             ` : ''}
         `;
+        _loadAiOptions(document.getElementById('pipeline-ai-opts'), 'pip-ai');
     }
 
     let selectedPipelineMode = null;
@@ -1574,7 +1606,8 @@
         if (!selectedPipelineMode) return;
         const targetSelect = document.getElementById('pipeline-target');
         if (!targetSelect.value) { toast('Select a target', 'error'); return; }
-        const result = await api.post('/pipelines', { target_id: parseInt(targetSelect.value), mode: selectedPipelineMode });
+        const aiOpts = _readAiOpts('pip-ai');
+        const result = await api.post('/pipelines', { target_id: parseInt(targetSelect.value), mode: selectedPipelineMode, ...(aiOpts || {}) });
         if (result.pipeline_id) {
             state.activePipelineId = result.pipeline_id;
             toast(`Pipeline started (ID: ${result.pipeline_id})`, 'success');
@@ -1657,6 +1690,7 @@
             <div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px">Target: ${esc(data.target_name||'')} | Elapsed: ${result.elapsed_seconds||'?'}s | Tools: ${result.total_tools||'?'}</div>
             </div>
             ${jevVerdictsHtml(result)}
+            ${llmExplanationsHtml(result.llm_explanations)}
             ${phasesHtml || '<div class="empty-state"><h3>No results data</h3><p>Pipeline may still be running or failed without results.</p></div>'}`;
     }
 
@@ -2040,6 +2074,29 @@
             </div>`;
     }
 
+    // J6: persisted local-LLM explanations (Spanish, reference only).
+    function llmExplanationsHtml(expls) {
+        if (!Array.isArray(expls) || !expls.length) return '';
+        const rows = expls.map(e => `
+            <div style="border-top:1px solid var(--border);padding:10px 0">
+                <div style="font-size:13px"><strong>${esc(e.title||'')}</strong>
+                    ${e.model ? `<span style="color:var(--text-muted);font-size:11px">${esc(e.model)}</span>` : ''}</div>
+                ${e.status === 'unavailable'
+                    ? `<div style="font-size:12px;color:var(--text-muted)">no disponible (${esc(e.reason||'')})</div>`
+                    : `<div style="font-size:12px;line-height:1.6">
+                         <div><strong>Resumen:</strong> ${esc(e.resumen||'')}</div>
+                         <div><strong>Porque:</strong> ${esc(e.porque||'')}</div>
+                         <div><strong>Sugerencia:</strong> ${esc(e.sugerencia||'')}</div>
+                       </div>`}
+            </div>`).join('');
+        return `
+            <div class="card" style="margin-top:16px">
+                <div class="card-header"><div class="card-title">Explicaciones LLM local (referencial)</div>
+                    <span style="font-size:12px;color:var(--text-muted)">en espanol | solo referencia, no modifica veredictos ni scores</span></div>
+                ${rows}
+            </div>`;
+    }
+
     async function viewScanResult(id) {
         let scan;
         try { scan = await api.get(`/scans/${id}`); } catch { return; }
@@ -2050,6 +2107,7 @@
             <div class="card"><div class="card-header"><div class="card-title">${esc(scan.tool)} -- ${esc(scan.target_name||'')}</div><div class="flex gap-8"><span class="badge-status badge-${scan.status}">${scan.status}</span> <button class="btn btn-sm" onclick="downloadJSON('/api/scans/${id}/export/json', 'scan_${id}.json')">JSON</button> <button class="btn btn-sm" onclick="downloadCSV('/api/scans/${id}/export/csv', 'scan_${id}.csv')">CSV</button> <button class="btn btn-sm" onclick="downloadPDF('/api/scans/${id}/export/pdf', 'scan_${id}.pdf')">PDF</button> <button class="btn btn-sm btn-danger" onclick="deleteScan(${id})">Delete</button></div></div>
             ${result.success ? formatResult(scan.tool, result.result) : `<div class="result-panel"><pre style="color:var(--red)">${esc(result.error||'Unknown error')}</pre></div>`}
             ${jevVerdictsHtml(result)}
+            ${llmExplanationsHtml(result.llm_explanations)}
             </div>`;
     }
 
@@ -2118,7 +2176,8 @@
                     <p><strong>What Jev does.</strong> After each scan or pipeline finishes, Jev (TypeSafe System One model, pinned <code>jev-1.13.0</code>) classifies every finding: verdict (<code>true_positive</code> / <code>false_positive</code> / <code>noise</code>), confidence 0-1, severity score 0-3 and immediate-action urgency 0-1. It is enrichment only -- your findings and scores never change, and if Jev is absent or errors out everything degrades to the classic output.</p>
                     <p><strong>Setup (Jev).</strong> Sidebar <strong>Jev AI</strong>: paste your TypeSafe API key, keep model pin <code>jev-1.13.0</code> and base URL <code>https://api.typesafe.ai/v1/systemone</code>, timeout 30 s -- <strong>Save</strong> -- <strong>Test Connection</strong>. The config is in memory only: re-save it after every server restart. Cost is roughly $0.0004-$0.002 per scan (input tokens only); finding titles/descriptions/severities (truncated) go to TypeSafe, nothing else leaves the machine.</p>
                     <p><strong>Setup (local LLM explainer, optional).</strong> If you run a local model (llama.cpp or any OpenAI-compatible server on loopback), configure it in <strong>Jev AI</strong> -- <em>Explicador LLM local (referencial)</em>: base URL (loopback only: <code>127.0.0.1</code> / <code>localhost</code> / <code>::1</code>, any port), model name, timeout -- <strong>Save</strong> -- <strong>Test Connection</strong>. No API key, no defaults. <strong>No GPU or local model? Leave it disabled: nothing changes</strong> and no LLM section appears anywhere.</p>
-                    <p><strong>Explanations are generated at run completion, before you export.</strong> When the local LLM is enabled, as soon as a scan/pipeline finishes (right after Jev's verdicts) the system asks your local LLM for a plain-Spanish explanation -- <em>resumen / porque / sugerencia</em> -- of the top 5 Jev verdicts by composite risk, and stores them in the run result. Then you export in whatever format you choose (PDF, JSON, ...) and they come along: PDF renders an <em>Explicaciones LLM local (referencial)</em> section inside the AI Verdicts page, JSON exports include them in the result. Reference only: it never modifies Jev's verdict or any score. It adds about 1-2 minutes to run completion (sequential calls, hard cap 5 min) and costs $0. With the LLM disabled -- or if Jev did not run -- the run result and every export stay byte-identical to the classic output.</p>
+                    <p><strong>You choose per run (J6).</strong> When you launch an individual tool (target picker) or a pipeline, an <em>AI (opcional)</em> block appears with one checkbox per configured service -- <em>Veredictos Jev AI</em> and/or <em>Explicaciones LLM local (referencial)</em> -- checked by default. Uncheck to run that scan/pipeline without it; the option applies to that run only, never to the global config.</p>
+                    <p><strong>Explanations in every format, always in Spanish.</strong> When the local LLM is enabled and Jev ran ok, as soon as a scan/pipeline finishes (right after Jev's verdicts) the system asks your local LLM for a plain-Spanish explanation -- <em>resumen / porque / sugerencia</em> -- of the top 5 Jev verdicts by composite risk, and stores them in the run result. That same Spanish text is reused everywhere: the scan/pipeline view shows an <em>Explicaciones LLM local (referencial)</em> card, PDF renders it as a section inside the AI Verdicts page, JSON exports include <code>llm_explanations</code>, and CSV adds <code>llm_resumen</code>/<code>llm_porque</code>/<code>llm_sugerencia</code> columns. Reference only: it never modifies Jev's verdict or any score. It adds about 1-2 minutes to run completion (sequential calls, hard cap 5 min) and costs $0. With the LLM disabled -- or when you opt out for the run -- or if Jev did not run, the result and every export stay byte-identical to the classic output.</p>
                     <p><strong>Where the AI data shows up.</strong> Every scan/pipeline view gets an <em>AI Verdicts (Jev)</em> card ordered by composite risk with a triage column: <strong>ACCION INMEDIATA</strong> / <strong>ACCION PROGRAMADA</strong> / <strong>REVISION MANUAL</strong> / <strong>SIN ACCION</strong> (verdicts with confidence below 0.3 are hidden). Exports carry the same data: JSON gets an <code>ai</code> block, CSV adds AI columns, PDF gets the <em>AI Verdicts (Jev)</em> section with triage table and legend. The <strong>Jev AI</strong> page has a "Como leer los veredictos" guide and a read-only <strong>Ver query</strong> inspector (shows exactly what would be sent to TypeSafe, built from a synthetic finding; nothing is sent).</p>
                 </div>
             </div>

@@ -292,6 +292,7 @@ Two independent layers on top of your scans, both optional, both fail-safe: if e
 **Where the AI data shows up.**
 - **UI:** every scan/pipeline view gets an *AI Verdicts (Jev)* card, ordered by composite risk, with a triage column. The *Jev AI* page has a "Como leer los veredictos" guide and a read-only *Ver query* inspector (shows exactly what would be sent to TypeSafe, built from a synthetic finding; nothing is sent).
 - **Exports:** JSON exports carry an `ai` block (Splunk/SIEM compatible), CSV exports add AI columns, and PDF exports get an *AI Verdicts (Jev)* section with the verdict table, triage table and a static legend.
+- **Per-run selection (J6):** when you launch an individual tool (target picker) or a pipeline, an *AI (opcional)* block appears with one checkbox per configured service — *Veredictos Jev AI* and/or *Explicaciones LLM local (referencial)* — checked by default. Uncheck to run that scan/pipeline without it; the option applies to that run only, never to the global config.
 - **Triage buckets** (thresholds live only in `backend/triage.py`): confidence < 0.3 → hidden everywhere; 0.3–0.5 → REVISION MANUAL; trusted `true_positive` with immediate_action ≥ 0.5 or severity_score ≥ 2.0 → ACCION INMEDIATA; other trusted `true_positive` → ACCION PROGRAMADA; `false_positive`/`noise` → SIN ACCION.
 
 **Setup — Jev (cloud, per-use cost).**
@@ -305,7 +306,13 @@ Two independent layers on top of your scans, both optional, both fail-safe: if e
 2. *Jev AI* → *Explicador LLM local (referencial)*: enter base URL, model and timeout → *Save* → *Test Connection*. Loopback only (`127.0.0.1` / `localhost` / `::1`, any port); no API key; there are no defaults on purpose — you configure it.
 3. Use: per-row *Explicar* button in the AI Verdicts table → **resumen / porque / sugerencia** in Spanish. It is reference only: it never modifies Jev's verdict or any score, and with no LLM configured it simply says "explicacion no disponible".
 
-**Explanations in exports (J5d).** When the local LLM is enabled **and** Jev ran ok, the explanations are generated at run completion — before you export anything — and stored in the run result: the top 5 Jev verdicts by composite risk, each with resumen/porque/sugerencia and the model name (failed ones are listed as "no disponible (reason)"). Then whichever format you export (PDF, JSON, ...) carries them: PDF renders an *Explicaciones LLM local (referencial)* section inside the AI Verdicts page, JSON exports include `llm_explanations` in the result. There is no checkbox — the LLM enable toggle is the switch; users without a GPU or local model simply leave it disabled and get exactly the classic output. It adds about 1–2 minutes to run completion (sequential calls, hard cap 5 min) and costs $0 (local CPU). The executive *Export All* PDF is unchanged, and with the LLM disabled or Jev absent every export stays byte-identical to the pre-J5 output.
+**Explanations in every format, always in Spanish (J5d/J6).** When the local LLM is enabled **and** Jev ran ok, the explanations are generated at run completion — before you export anything — and stored in the run result: the top 5 Jev verdicts by composite risk, each with resumen/porque/sugerencia and the model name (failed ones are listed as "no disponible (reason)"). They are written **in Spanish**, and that same text is reused in every format, so they all agree:
+- **UI view:** the scan/pipeline result shows an *Explicaciones LLM local (referencial)* card below the AI Verdicts table.
+- **PDF:** an *Explicaciones LLM local (referencial)* section inside the AI Verdicts page.
+- **JSON:** `llm_explanations` in the exported event.
+- **CSV:** `llm_resumen` / `llm_porque` / `llm_sugerencia` columns joined by finding title (only when the run has explanations).
+
+There is no extra toggle — the per-run *Explicaciones LLM local* checkbox (checked by default when configured) is the switch; users without a GPU or local model simply leave it disabled and get exactly the classic output. It adds about 1–2 minutes to run completion (sequential calls, hard cap 5 min) and costs $0 (local CPU). The executive *Export All* PDF is unchanged, and with the LLM disabled — or when you opt out for a run — every export stays byte-identical to the classic output.
 
 ---
 
