@@ -22,10 +22,10 @@ async def _seed(pipelines: list[dict]) -> int:
     await db.execute("INSERT INTO targets (name, host) VALUES ('t', 'example.com')")
     for p in pipelines:
         await db.execute(
-            "INSERT INTO pipelines (target_id, mode, status, findings, score, started_at, finished_at) "
-            "VALUES (1, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO pipelines (target_id, mode, status, findings, score, result, started_at, finished_at) "
+            "VALUES (1, ?, ?, ?, ?, ?, ?, ?)",
             (p["mode"], p.get("status", "completed"), p.get("findings"), p.get("score"),
-             p["started_at"], p.get("finished_at")),
+             p.get("result"), p["started_at"], p.get("finished_at")),
         )
     await db.commit()
     await db.close()
@@ -135,6 +135,83 @@ def test_compare_delta_between_consecutive_runs(tmp_path, monkeypatch):
     assert [it["finding_id"] for it in runs[2]["new"]] == []
     assert [it["finding_id"] for it in runs[2]["fixed"]] == ["aaa111"]
     assert [it["finding_id"] for it in runs[2]["persistent"]] == ["ccc333"]
+
+
+def _jev_result(verdicts: dict, model: str = "jev-1.13.0") -> str:
+    """A persisted result JSON whose jev block succeeded (Fase J)."""
+    return json.dumps({
+        "success": True,
+        "score": 50,
+        "jev": {"status": "ok", "model": model, "verdicts": verdicts},
+    })
+
+
+def test_compare_delta_carries_ai_verdicts_when_jev_ok(tmp_path, monkeypatch):
+    import backend.main as main
+
+    monkeypatch.setattr(models, "DB_PATH", tmp_path / "compare.db")
+    _run(models.init_db())
+
+    a = _finding("aaa111", "high", "HSTS missing")
+    b = _finding("bbb222", "low", "Server banner")
+    c = _finding("ccc333", "critical", "Exposed .git")
+    jev1 = {
+        "aaa111": {"verdict": "noise", "verdict_confidence": 0.9,
+                   "severity_score": 0.5, "immediate_action": 0.1},
+        "bbb222": {"verdict": "true_positive", "verdict_confidence": 0.8,
+                   "severity_score": 1.0, "immediate_action": 0.3},
+    }
+    jev2 = {
+        "aaa111": {"verdict": "true_positive", "verdict_confidence": 0.95,
+                   "severity_score": 2.5, "immediate_action": 0.6},
+        "ccc333": {"verdict": "false_positive", "verdict_confidence": 0.6,
+                   "severity_score": 1.0, "immediate_action": 0.2},
+    }
+    _run(_seed([
+        {"mode": "fast", "findings": json.dumps([a, b]), "score": 30,
+         "result": _jev_result(jev1), "started_at": "2026-08-01T10:00:00"},
+        {"mode": "deep", "findings": json.dumps([a, c]), "score": 50,
+         "result": _jev_result(jev2), "started_at": "2026-08-02T10:00:00"},
+    ]))
+
+    res = _run(main.compare_pipelines(target_id=1))
+    runs = res["runs"]
+    assert runs[0]["new"] == [] and runs[0]["fixed"] == [] and runs[0]["persistent"] == []
+
+    # New finding c carries the current run's verdict.
+    assert runs[1]["new"][0]["ai_verdict"] == "false_positive"
+    assert runs[1]["new"][0]["ai_confidence"] == 0.6
+    # Fixed finding b carries the previous run's verdict (it is gone now).
+    assert runs[1]["fixed"][0]["ai_verdict"] == "true_positive"
+    assert runs[1]["fixed"][0]["ai_confidence"] == 0.8
+    # Persistent finding a: prev -> cur, so the UI can flag the change.
+    p = runs[1]["persistent"][0]
+    assert p["ai_verdict_prev"] == "noise" and p["ai_confidence_prev"] == 0.9
+    assert p["ai_verdict_cur"] == "true_positive" and p["ai_confidence_cur"] == 0.95
+
+
+def test_compare_delta_ai_partial_when_only_one_run_has_jev(tmp_path, monkeypatch):
+    import backend.main as main
+
+    monkeypatch.setattr(models, "DB_PATH", tmp_path / "compare.db")
+    _run(models.init_db())
+
+    a = _finding("aaa111", "high", "HSTS missing")
+    _run(_seed([
+        {"mode": "fast", "findings": json.dumps([a]), "score": 30,
+         "result": _jev_result({"aaa111": {"verdict": "noise",
+                                            "verdict_confidence": 0.9}}),
+         "started_at": "2026-08-01T10:00:00"},
+        # Second run without any result (Jev disabled): persistent item keeps
+        # the prev verdict only, never invents a cur one.
+        {"mode": "deep", "findings": json.dumps([a]), "score": 50,
+         "started_at": "2026-08-02T10:00:00"},
+    ]))
+
+    res = _run(main.compare_pipelines(target_id=1))
+    p = res["runs"][1]["persistent"][0]
+    assert p["ai_verdict_prev"] == "noise"
+    assert "ai_verdict_cur" not in p and "ai_confidence_cur" not in p
 
 
 def test_compare_delta_treats_null_and_corrupt_findings_as_empty_set(tmp_path, monkeypatch):

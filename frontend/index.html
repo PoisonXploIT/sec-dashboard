@@ -1704,9 +1704,27 @@
         if (s === 'medium' || s === 'low') return 'tag-yellow';
         return 'tag';
     }
+    // AI verdict tag for evolution delta items (Fase J3). Persistent findings
+    // carry prev/cur verdicts so a change between runs is visible; new/fixed
+    // items carry the single-run verdict. No tag when the run had no Jev data.
+    function evoAiTag(it) {
+        const cf = (x) => (x === null || x === undefined) ? '' : ' ' + Number(x).toFixed(2);
+        if (it.ai_verdict_prev !== undefined || it.ai_verdict_cur !== undefined) {
+            const p = it.ai_verdict_prev, u = it.ai_verdict_cur;
+            if (p && u) return p === u
+                ? `<span class="tag" title="AI verdict in both runs">AI: ${esc(String(p))}${cf(it.ai_confidence_cur)} (igual)</span>`
+                : `<span class="tag tag-yellow" title="AI verdict changed between runs">AI: ${esc(String(p))} -> ${esc(String(u))}${cf(it.ai_confidence_cur)} (CAMBIO)</span>`;
+            const v = p || u;
+            return v ? `<span class="tag">AI: ${esc(String(v))}</span>` : '';
+        }
+        if (it.ai_verdict) {
+            return `<span class="tag" title="Jev AI verdict">AI: ${esc(String(it.ai_verdict))}${cf(it.ai_confidence)}</span>`;
+        }
+        return '';
+    }
     function evoDeltaList(label, items) {
         const body = items.length
-            ? items.map(it => `<div style="margin:2px 0"><span class="tag ${evoSevClass(it.severity)}">${esc(String(it.severity || '').toUpperCase())}</span> <span style="font-size:12px">${esc(it.title)}</span></div>`).join('')
+            ? items.map(it => `<div style="margin:2px 0"><span class="tag ${evoSevClass(it.severity)}">${esc(String(it.severity || '').toUpperCase())}</span> <span style="font-size:12px">${esc(it.title)}</span>${evoAiTag(it) ? ' ' + evoAiTag(it) : ''}</div>`).join('')
             : '<span style="color:var(--text-muted);font-size:12px">(none)</span>';
         return `<div style="margin-bottom:8px"><strong>${label}</strong>${body}</div>`;
     }
@@ -2247,7 +2265,7 @@ search index=sec_dashboard (sourcetype=wifi:marauder OR sourcetype=m5stick:netwo
                     <p><strong>Search</strong>: Use the search bar to filter by tool name, target name, target host, or status. Filtering happens in real-time as you type.</p>
                     <p><strong>Pagination</strong>: Scan history is paginated (50 per page). Use <strong>Prev</strong> and <strong>Next</strong> buttons to navigate through older scans.</p>
                     <p><strong>Formatted pipeline results</strong>: When you click <strong>View</strong> on a pipeline, you see each tool's output formatted individually -- port tables, header grades, CVE cards, etc. -- not a raw JSON dump.</p>
-                    <p><strong>Target evolution</strong>: In the Pipelines tab, click a target name or the <strong>Evol</strong> button to open the historical comparison: every run of that target in chronological order with its score and findings count, plus a line chart of the 0-100 score across runs. Each row also shows the delta vs the previous run: how many findings are new, fixed or persistent (matched by finding_id); click it to expand the list with severity and title.</p>
+                    <p><strong>Target evolution</strong>: In the Pipelines tab, click a target name or the <strong>Evol</strong> button to open the historical comparison: every run of that target in chronological order with its score and findings count, plus a line chart of the 0-100 score across runs. Each row also shows the delta vs the previous run: how many findings are new, fixed or persistent (matched by finding_id); click it to expand the list with severity and title. When Jev AI is enabled, each item also shows its AI verdict; for a persistent finding the tag reads <code>prev -&gt; cur</code> with (CAMBIO) when the verdict changed between runs.</p>
                 </div>
             </div>
 

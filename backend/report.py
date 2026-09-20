@@ -57,6 +57,59 @@ class ReportPDF(FPDF):
         self.ln(2)
 
 
+# ── Jev AI verdicts in exports (Fase J3) ────────────────────────
+# Rendered ONLY when result.jev.status == "ok"; without Jev data every export
+# is byte-identical to the pre-J3 output (same rule as the J2 UI).
+
+AI_CSV_FIELDS = ("ai_verdict", "ai_confidence", "ai_severity_score", "ai_immediate_action")
+_AI_VALUE_KEYS = ("verdict", "verdict_confidence", "severity_score", "immediate_action")
+
+
+def _jev_ok(result_data: dict) -> dict | None:
+    """The persisted result.jev block when enrichment succeeded, else None."""
+    if not isinstance(result_data, dict):
+        return None
+    jev = result_data.get("jev")
+    if not isinstance(jev, dict) or jev.get("status") != "ok":
+        return None
+    return jev
+
+
+def _ai_export_block(result_data: dict) -> dict | None:
+    """Top-level 'ai' field for JSON/Splunk exports (None without Jev data)."""
+    jev = _jev_ok(result_data)
+    if jev is None:
+        return None
+    verdicts = []
+    for fid, v in (jev.get("verdicts") or {}).items():
+        if not isinstance(v, dict):
+            continue
+        verdicts.append({
+            "finding_id": str(fid),
+            "ai_verdict": v.get("verdict"),
+            "ai_confidence": v.get("verdict_confidence"),
+            "ai_severity_score": v.get("severity_score"),
+            "ai_immediate_action": v.get("immediate_action"),
+        })
+    return {"model": jev.get("model"), "verdicts": verdicts}
+
+
+def _csv_ai_lookup(result_data: dict, findings: list[dict]) -> dict[str, dict] | None:
+    """finding_id (and legacy index) -> verdict dict for CSV joins; None if no Jev."""
+    jev = _jev_ok(result_data)
+    if jev is None:
+        return None
+    verdicts = jev.get("verdicts") or {}
+    lookup: dict[str, dict] = {}
+    for i, f in enumerate(findings):
+        fid = str(f.get("finding_id") or i)
+        v = verdicts.get(fid)
+        if isinstance(v, dict):
+            lookup[fid] = v
+            lookup.setdefault(str(i), v)
+    return lookup
+
+
 def generate_scan_json(scan: dict, target: dict = None) -> str:
     """Generate JSON export for a single scan (Splunk-compatible)."""
     result_data = {}
@@ -81,6 +134,9 @@ def generate_scan_json(scan: dict, target: dict = None) -> str:
         "success": result_data.get("success"),
         "result": result_data.get("result", result_data),
     }
+    ai = _ai_export_block(result_data)
+    if ai is not None:
+        export["ai"] = ai
     return json.dumps(export, indent=2, ensure_ascii=False, default=str)
 
 
@@ -108,6 +164,9 @@ def generate_pipeline_json(pipeline: dict, target: dict = None) -> str:
         "total_tools": result_data.get("total_tools"),
         "phases": result_data.get("phases", {}),
     }
+    ai = _ai_export_block(result_data)
+    if ai is not None:
+        export["ai"] = ai
     return json.dumps(export, indent=2, ensure_ascii=False, default=str)
 
 
@@ -145,22 +204,30 @@ def _csv_findings_blob(findings_raw) -> list:
     return parsed if isinstance(parsed, list) else []
 
 
-def _csv_run_rows(fields: list, run_cols: list, findings: list, mid_fields=()) -> str:
+def _csv_run_rows(fields: list, run_cols: list, findings: list, mid_fields=(),
+                  ai_lookup: dict | None = None) -> str:
     """Shared writer: header + one row per finding; zero findings -> one summary row.
 
     `mid_fields` are per-finding columns that sit between the run metadata and
     the standard finding fields (e.g. the pipeline per-row `tool`).
+    `ai_lookup` (Fase J3): when given, appends the AI verdict columns; the
+    lookup maps both finding_id and legacy index to the verdict dict.
     """
     buf = StringIO()
     writer = csv.writer(buf)
-    writer.writerow(fields)
+    ai_cols: tuple = AI_CSV_FIELDS if ai_lookup is not None else ()
+    writer.writerow(fields + list(ai_cols))
     if not findings:
         # Keep the event visible for SIEM even when nothing was found.
-        writer.writerow(run_cols + [""] * (len(mid_fields) + len(_FINDING_FIELDS)))
+        writer.writerow(run_cols + [""] * (len(mid_fields) + len(_FINDING_FIELDS) + len(ai_cols)))
     else:
-        for f in findings:
-            writer.writerow(run_cols + [f.get(k, "") for k in mid_fields]
-                            + [f.get(k, "") for k in _FINDING_FIELDS])
+        for i, f in enumerate(findings):
+            row = run_cols + [f.get(k, "") for k in mid_fields] \
+                + [f.get(k, "") for k in _FINDING_FIELDS]
+            if ai_lookup is not None:
+                v = ai_lookup.get(str(f.get("finding_id") or "")) or ai_lookup.get(str(i)) or {}
+                row += [v.get(k, "") for k in _AI_VALUE_KEYS]
+            writer.writerow(row)
     return "\ufeff" + buf.getvalue()
 
 
@@ -180,7 +247,9 @@ def generate_scan_csv(scan: dict, target: dict = None) -> str:
         scan.get("started_at"), scan.get("finished_at"),
         result_data.get("elapsed_seconds"), scan.get("score"),
     ]
-    return _csv_run_rows(SCAN_CSV_FIELDS, run_cols, _csv_findings_blob(scan.get("findings")))
+    findings = _csv_findings_blob(scan.get("findings"))
+    return _csv_run_rows(SCAN_CSV_FIELDS, run_cols, findings,
+                         ai_lookup=_csv_ai_lookup(result_data, findings))
 
 
 def generate_pipeline_csv(pipeline: dict, target: dict = None) -> str:
@@ -200,9 +269,10 @@ def generate_pipeline_csv(pipeline: dict, target: dict = None) -> str:
         result_data.get("elapsed_seconds"), result_data.get("total_tools"),
         pipeline.get("score"),
     ]
-    return _csv_run_rows(PIPELINE_CSV_FIELDS, run_cols,
-                         _csv_findings_blob(pipeline.get("findings")),
-                         mid_fields=("tool",))
+    findings = _csv_findings_blob(pipeline.get("findings"))
+    return _csv_run_rows(PIPELINE_CSV_FIELDS, run_cols, findings,
+                         mid_fields=("tool",),
+                         ai_lookup=_csv_ai_lookup(result_data, findings))
 
 
 def generate_all_json(scans: list, pipelines: list, targets: list) -> str:
@@ -217,7 +287,7 @@ def generate_all_json(scans: list, pipelines: list, targets: list) -> str:
         except (json.JSONDecodeError, TypeError):
             result_data = {}
 
-        events.append({
+        event = {
             "event": "sec_dashboard_scan",
             "timestamp": scan.get("started_at"),
             "scan_id": scan.get("id"),
@@ -227,7 +297,11 @@ def generate_all_json(scans: list, pipelines: list, targets: list) -> str:
             "target_host": tgt.get("host", "") if tgt else "",
             "success": result_data.get("success"),
             "elapsed_seconds": result_data.get("elapsed_seconds"),
-        })
+        }
+        ai = _ai_export_block(result_data)
+        if ai is not None:
+            event["ai"] = ai
+        events.append(event)
 
     for pipeline in pipelines:
         tgt = target_map.get(pipeline.get("target_id"))
@@ -236,7 +310,7 @@ def generate_all_json(scans: list, pipelines: list, targets: list) -> str:
         except (json.JSONDecodeError, TypeError):
             result_data = {}
 
-        events.append({
+        event = {
             "event": "sec_dashboard_pipeline",
             "timestamp": pipeline.get("started_at"),
             "pipeline_id": pipeline.get("id"),
@@ -246,7 +320,11 @@ def generate_all_json(scans: list, pipelines: list, targets: list) -> str:
             "target_host": tgt.get("host", "") if tgt else "",
             "elapsed_seconds": result_data.get("elapsed_seconds"),
             "total_tools": result_data.get("total_tools"),
-        })
+        }
+        ai = _ai_export_block(result_data)
+        if ai is not None:
+            event["ai"] = ai
+        events.append(event)
 
     return json.dumps({
         "source": "sec-dashboard",
@@ -900,6 +978,31 @@ def executive_top_findings(findings: list[dict], limit: int = 10) -> list[dict]:
     return sorted(findings, key=_rank, reverse=True)[:limit]
 
 
+def _jev_ai_rows(findings: list[dict], jev: dict) -> list[dict]:
+    """Findings joined with AI verdicts, ordered by composite risk (J2 rule)."""
+    verdicts = jev.get("verdicts") or {}
+    rows = []
+    for i, f in enumerate(findings):
+        fid = str(f.get("finding_id") or i)
+        v = verdicts.get(fid)
+        if not isinstance(v, dict):
+            continue
+        sev = str(f.get("severity", "info")).lower()
+        try:
+            sev_score = float(v.get("severity_score") or 0)
+        except (TypeError, ValueError):
+            sev_score = 0.0
+        rows.append({
+            "risk": _SEVERITY_WEIGHT_BY_VALUE.get(sev, 0) * sev_score,
+            "severity": sev.upper(),
+            "title": str(f.get("title", "")),
+            "verdict": v.get("verdict"),
+            "confidence": v.get("verdict_confidence"),
+        })
+    rows.sort(key=lambda r: r["risk"], reverse=True)
+    return rows
+
+
 def executive_heatmap(findings: list[dict]) -> dict[str, dict[str, int]]:
     """Category x severity count matrix (fixed severity columns per row)."""
     matrix: dict[str, dict[str, int]] = {}
@@ -1015,6 +1118,51 @@ def generate_executive_pdf(pipeline: dict, target: dict = None) -> bytes:
             detail = f"{desc}" + (f"  |  evidence: {ev}" if ev else "")
             pdf.set_font("Helvetica", "I", 7)
             pdf.multi_cell(0, 4, detail, new_x="LMARGIN", new_y="NEXT")
+
+    # ── AI verdicts (Jev, Fase J3) ─────────────────────────
+    jev = _jev_ok(data)
+    if jev is not None:
+        pdf.add_page()
+        pdf.section_title("AI Verdicts (Jev)")
+        ai_rows = _jev_ai_rows(findings, jev)
+        counts: dict[str, int] = {}
+        for r in ai_rows:
+            key = str(r["verdict"] or "?")
+            counts[key] = counts.get(key, 0) + 1
+        pdf.kv_row("Model", str(jev.get("model") or ""))
+        pdf.kv_row("Findings evaluated", str(len(ai_rows)))
+        for label in ("true_positive", "false_positive", "noise"):
+            if counts.get(label):
+                pdf.kv_row(label, str(counts[label]))
+        usage = jev.get("usage") or {}
+        if isinstance(usage, dict) and usage.get("input_tokens") is not None:
+            pdf.kv_row("Input tokens", str(usage.get("input_tokens")))
+        if ai_rows:
+            pdf.ln(2)
+            pdf.set_font("Helvetica", "B", 8)
+            pdf.cell(18, 5, "Risk", border=1)
+            pdf.cell(24, 5, "Severity", border=1)
+            pdf.cell(34, 5, "AI verdict", border=1)
+            pdf.cell(16, 5, "Conf", border=1)
+            pdf.cell(98, 5, "Title", border=1, new_x="LMARGIN", new_y="NEXT")
+            for r in ai_rows[:15]:
+                if pdf.get_y() > 250:
+                    pdf.add_page()
+                conf = r["confidence"]
+                conf_s = f"{conf:.2f}" if isinstance(conf, (int, float)) else ""
+                pdf.set_font("Helvetica", "", 8)
+                pdf.cell(18, 5, f"{r['risk']:.1f}", border=1)
+                pdf.cell(24, 5, r["severity"][:10], border=1)
+                pdf.cell(34, 5, _sanitize(str(r["verdict"] or ""))[:32], border=1)
+                pdf.cell(16, 5, conf_s, border=1)
+                pdf.cell(98, 5, _sanitize(r["title"])[:70], border=1, new_x="LMARGIN", new_y="NEXT")
+            if len(ai_rows) > 15:
+                pdf.set_font("Helvetica", "I", 7)
+                pdf.cell(0, 4, f"  ... ({len(ai_rows)} verdicts total, top 15 by composite risk)",
+                         new_x="LMARGIN", new_y="NEXT")
+        else:
+            pdf.set_font("Helvetica", "", 9)
+            pdf.cell(0, 6, "Jev ran but returned no usable verdicts.", new_x="LMARGIN", new_y="NEXT")
 
     # ── Heatmap: category x severity ───────────────────────────
     pdf.add_page()

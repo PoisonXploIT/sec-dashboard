@@ -1173,7 +1173,9 @@ async def create_scan(body: ScanCreate, request: Request):
                 else:
                     # WiFi tools: send full JSON as single event
                     await splunk.index_full_results(body.tool, tool_result)
-            return {"scan_id": scan_id, "status": status, "result": result}
+            # Return `stored` (not `result`): it is the exact dict persisted
+            # above, including the Jev enrichment block when present.
+            return {"scan_id": scan_id, "status": status, "result": stored}
         except asyncio.CancelledError:
             _log.info("scan cancelled scan_id=%d tool=%s", scan_id, body.tool)
             db2 = await get_db()
@@ -1304,6 +1306,31 @@ async def pipeline_history(mode: str | None = None, status: str | None = None,
         await db.close()
 
 
+def _jev_ai_map(result_raw) -> dict[str, dict]:
+    """finding_id -> {verdict, confidence} from a persisted result.jev ({} if none).
+
+    Only runs where Jev enrichment succeeded (status == "ok") contribute; the
+    compare endpoint degrades to pre-J3 output for everything else.
+    """
+    if not result_raw:
+        return {}
+    try:
+        data = json.loads(result_raw)
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    jev = data.get("jev") if isinstance(data, dict) else None
+    if not isinstance(jev, dict) or jev.get("status") != "ok":
+        return {}
+    out: dict[str, dict] = {}
+    for fid, v in (jev.get("verdicts") or {}).items():
+        if isinstance(v, dict):
+            out[str(fid)] = {
+                "verdict": v.get("verdict"),
+                "confidence": v.get("verdict_confidence"),
+            }
+    return out
+
+
 @app.get("/api/pipelines/compare")
 async def compare_pipelines(target_id: int):
     """Historical comparison (Phase 2): all runs of one target, oldest first.
@@ -1314,6 +1341,11 @@ async def compare_pipelines(target_id: int):
     new / fixed / persistent matched by finding_id (stable since the
     deterministic id in findings.py). First run: empty lists. Legacy rows
     with NULL or corrupted findings are treated as an empty set.
+
+    Fase J3: when a run has result.jev (status ok), delta entries carry AI
+    verdict fields — new/fixed get `ai_verdict`/`ai_confidence` (from the run
+    that saw them), persistent get `ai_verdict_prev`/`ai_verdict_cur` so the
+    UI can flag a verdict change. Runs without Jev data keep the old shape.
     """
     db = await get_db()
     try:
@@ -1322,7 +1354,7 @@ async def compare_pipelines(target_id: int):
         if not target_row:
             raise HTTPException(404, "Target not found")
         cursor = await db.execute(
-            "SELECT id, mode, score, findings, started_at, finished_at "
+            "SELECT id, mode, score, findings, result, started_at, finished_at "
             "FROM pipelines WHERE target_id = ? ORDER BY started_at ASC",
             (target_id,)
         )
@@ -1332,6 +1364,7 @@ async def compare_pipelines(target_id: int):
 
     runs = []
     prev_items: list[dict] = []
+    prev_ai: dict[str, dict] = {}
     first_run = True
     for row in rows:
         try:
@@ -1350,6 +1383,16 @@ async def compare_pipelines(target_id: int):
             }
             for f in parsed if isinstance(f, dict) and f.get("finding_id")
         ]
+        ai_map = _jev_ai_map(row["result"])
+
+        def _attach(item: dict, v: dict | None) -> dict:
+            if not isinstance(v, dict):
+                return item
+            out = dict(item)
+            out["ai_verdict"] = v["verdict"]
+            out["ai_confidence"] = v["confidence"]
+            return out
+
         # First run has no previous run to compare against: empty lists.
         if first_run:
             delta = {"new": [], "fixed": [], "persistent": []}
@@ -1358,10 +1401,29 @@ async def compare_pipelines(target_id: int):
             prev_ids = {it["finding_id"] for it in prev_items}
             cur_ids = {it["finding_id"] for it in items}
             delta = {
-                "new": [it for it in items if it["finding_id"] not in prev_ids],
-                "fixed": [it for it in prev_items if it["finding_id"] not in cur_ids],
-                "persistent": [it for it in items if it["finding_id"] in prev_ids],
+                "new": [_attach(it, ai_map.get(it["finding_id"]))
+                        for it in items if it["finding_id"] not in prev_ids],
+                "fixed": [_attach(it, prev_ai.get(it["finding_id"]))
+                         for it in prev_items if it["finding_id"] not in cur_ids],
             }
+            persistent = []
+            for it in items:
+                if it["finding_id"] not in prev_ids:
+                    continue
+                pv = prev_ai.get(it["finding_id"])
+                cv = ai_map.get(it["finding_id"])
+                if isinstance(pv, dict) or isinstance(cv, dict):
+                    out = dict(it)
+                    if isinstance(pv, dict):
+                        out["ai_verdict_prev"] = pv["verdict"]
+                        out["ai_confidence_prev"] = pv["confidence"]
+                    if isinstance(cv, dict):
+                        out["ai_verdict_cur"] = cv["verdict"]
+                        out["ai_confidence_cur"] = cv["confidence"]
+                    persistent.append(out)
+                else:
+                    persistent.append(it)
+            delta["persistent"] = persistent
         score = row["score"]
         if score is not None:
             try:
@@ -1380,6 +1442,7 @@ async def compare_pipelines(target_id: int):
             "finished_at": row["finished_at"],
         })
         prev_items = items
+        prev_ai = ai_map
     return {
         "target_id": target_id,
         "target_name": target_row["name"],
