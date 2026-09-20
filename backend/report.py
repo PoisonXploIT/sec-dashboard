@@ -768,8 +768,13 @@ def generate_all_pdf(scans: list, pipelines: list, targets: list) -> bytes:
     return bytes(pdf.output())
 
 
-def generate_scan_pdf(scan: dict, target: dict = None) -> bytes:
-    """Generate PDF report for a single scan."""
+def generate_scan_pdf(scan: dict, target: dict = None,
+                      llm_explanations: list[dict] | None = None) -> bytes:
+    """Generate PDF report for a single scan.
+
+    llm_explanations (Fase J5c): optional reference-only explanations from the
+    local LLM; when provided they are rendered inside the AI Verdicts page.
+    """
     pdf = ReportPDF()
     pdf.alias_nb_pages()
     pdf.add_page()
@@ -864,7 +869,7 @@ def generate_scan_pdf(scan: dict, target: dict = None) -> bytes:
     if jev is not None:
         findings = _findings_from_json(scan.get("findings")) or \
             [f for f in (result_data.get("findings") or []) if isinstance(f, dict)]
-        _render_jev_section(pdf, findings, jev)
+        _render_jev_section(pdf, findings, jev, llm_explanations)
 
     # Raw JSON appendix
     pdf.add_page()
@@ -874,8 +879,13 @@ def generate_scan_pdf(scan: dict, target: dict = None) -> bytes:
     return bytes(pdf.output())
 
 
-def generate_pipeline_pdf(pipeline: dict, target: dict = None) -> bytes:
-    """Generate PDF report for a pipeline run."""
+def generate_pipeline_pdf(pipeline: dict, target: dict = None,
+                          llm_explanations: list[dict] | None = None) -> bytes:
+    """Generate PDF report for a pipeline run.
+
+    llm_explanations (Fase J5c): optional reference-only explanations from the
+    local LLM; see generate_scan_pdf.
+    """
     pdf = ReportPDF()
     pdf.alias_nb_pages()
     pdf.add_page()
@@ -950,7 +960,7 @@ def generate_pipeline_pdf(pipeline: dict, target: dict = None) -> bytes:
     if jev is not None:
         findings = _findings_from_json(pipeline.get("findings")) or \
             [f for f in (result_data.get("findings") or []) if isinstance(f, dict)]
-        _render_jev_section(pdf, findings, jev)
+        _render_jev_section(pdf, findings, jev, llm_explanations)
 
     # Raw JSON appendix
     pdf.add_page()
@@ -1067,12 +1077,18 @@ def _triage_rows(findings: list[dict], jev: dict) -> list[dict]:
     return rows
 
 
-def _render_jev_section(pdf, findings: list[dict], jev: dict) -> None:
+def _render_jev_section(pdf, findings: list[dict], jev: dict,
+                        llm_explanations: list[dict] | None = None) -> None:
     """Render the 'AI Verdicts (Jev)' page section (Fase J3).
 
     Shared by the executive PDF and the classic scan/pipeline PDFs so every
     export carries the same verdict table. Only called when _jev_ok() has data;
     without it the reports stay byte-identical to the pre-J3 output.
+
+    llm_explanations (Fase J5c): optional reference-only explanations from the
+    local LLM, one dict per top finding: {title, model?, resumen, porque,
+    sugerencia} or {title, status: "unavailable", reason}. Rendered after the
+    triage section; None keeps the output byte-identical to pre-J5c.
     """
     pdf.add_page()
     pdf.section_title("AI Verdicts (Jev)")
@@ -1140,6 +1156,38 @@ def _render_jev_section(pdf, findings: list[dict], jev: dict) -> None:
         pdf.set_font("Helvetica", "I", 8)
         pdf.cell(0, 4.5, "  No visible verdicts to triage (all below the review band).",
                  new_x="LMARGIN", new_y="NEXT")
+
+    # ── Local LLM explanations (Fase J5c, referencial) ─────────
+    if llm_explanations:
+        pdf.ln(2)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.cell(0, 6, "Explicaciones LLM local (referencial)", new_x="LMARGIN", new_y="NEXT")
+        pdf.set_font("Helvetica", "I", 8)
+        pdf.cell(0, 4.5,
+                 "El LLM local explica el veredicto de Jev en lenguaje plano; no lo modifica ni re-scorea.",
+                 new_x="LMARGIN", new_y="NEXT")
+        for item in llm_explanations:
+            if pdf.get_y() > 235:
+                pdf.add_page()
+            title = _sanitize(str(item.get("title") or ""))[:90]
+            pdf.set_font("Helvetica", "B", 8)
+            pdf.cell(0, 5, f"* {title}", new_x="LMARGIN", new_y="NEXT")
+            if item.get("status") == "unavailable":
+                pdf.set_font("Helvetica", "I", 8)
+                pdf.cell(0, 4.5,
+                         f"    no disponible ({_sanitize(str(item.get('reason') or ''))[:80]})",
+                         new_x="LMARGIN", new_y="NEXT")
+                continue
+            model = _sanitize(str(item.get("model") or ""))[:60]
+            pdf.set_font("Helvetica", "", 8)
+            for label, key in (("Resumen", "resumen"), ("Porque", "porque"),
+                               ("Sugerencia", "sugerencia")):
+                value = _sanitize(str(item.get(key) or ""))[:400]
+                pdf.multi_cell(0, 4.5, f"    {label}: {value}",
+                              new_x="LMARGIN", new_y="NEXT")
+            if model:
+                pdf.set_font("Helvetica", "I", 7)
+                pdf.cell(0, 4, f"    (modelo: {model})", new_x="LMARGIN", new_y="NEXT")
 
     # ── Static legend: how to read the AI data (Fase J4b) ───────
     pdf.ln(2)

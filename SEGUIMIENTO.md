@@ -617,6 +617,15 @@ Reglas para cada tool de este backlog:
 - Test: `test_jev_query_inspector_is_read_only_and_bounded` (n acotado a 3, tipos de pregunta, state sintetico).
 - Estado J4/J5: J4a, J4b, J4c y J5a/J5b COMPLETADOS. Pendiente opcional: J5c (explicaciones top N en export).
 
+### 2026-09-20 — Fase J5c: explicaciones LLM local automaticas en PDF de scan/pipeline (COMPLETADO)
+- **Diseño**: cuando el LLM local está habilitado Y Jev corrió ok, los exports PDF de scan y pipeline incluyen automáticamente una sección "Explicaciones LLM local (referencial)" con las explicaciones de los top 5 findings por riesgo compuesto (mismo orden que la UI: severity_weight x severity_score). Sin checkbox en UI (decisión del usuario: "debe añadirse su reporte al PDF"). Solo scan + pipeline; el PDF ejecutivo NO cambia (llamado sin el parámetro).
+- **report.py**: `generate_scan_pdf` / `generate_pipeline_pdf` aceptan `llm_explanations: list[dict] | None = None`; `_render_jev_section` lo recibe y renderiza la sección entre triaje y la leyenda estática. Cada item: título + Resumen/Porque/Sugerencia (multi_cell acotado 400 chars) + modelo; items `unavailable` se muestran como "no disponible (reason)". Con `None` (LLM deshabilitado o Jev no ok) el PDF es byte-idéntico al pre-J5c.
+- **main.py**: constantes `LLM_PDF_TOP_N = 5`, `LLM_PDF_TOTAL_CAP_S = 300`; helper `_pdf_llm_explanations(result_data, findings)` (async, nunca lanza): None si LLM deshabilitado o Jev no ok; ordena por riesgo compuesto, llama `local_llm.explain_finding` secuencialmente (llama.cpp --parallel 1: lo concurrente solo se encolaría), tope global de 300s. `_export_findings(row, result_data)`: columna findings primero, fallback al JSON de result.
+- **Tests**: `tests/test_report_jev.py` (+3: sección presente con contenido español y modelo, pipeline igual, ausente sin parámetro) y `tests/test_pdf_llm_explanations.py` (6: disabled/jev-no-ok -> None, orden por riesgo compuesto, unavailable conservado como item, top-N acotado a 5, `_export_findings` columna/fallback). Sin red: `explain_finding` monkeypatcheado. Suite completa verde, ruff limpio.
+- **Bug caught en E2E**: `multi_cell` sin `new_x/new_y` dejaba x al final de la línea -> "Not enough horizontal space" en el siguiente multi_cell; fix: `new_x="LMARGIN", new_y="NEXT"` (igual que `kv_row`).
+- **E2E real**: servidor :8799 con código nuevo, Jev `jev-1.13.0` + LLM `dirk-qwen3.8-27b-iq3` (:8099) reconfigurados tras restart (config en memoria). Scan 55 sobre sammideblas.com: Jev ok con 6 veredictos; PDF exportado en 51s con sección "Explicaciones LLM local (referencial)" y explicaciones reales en español (Cross-Origin-Resource-Policy, Server banner, COEP...) etiquetadas con el modelo. Coste: ~50s de CPU local por PDF, $0.
+- Estado J4/J5: J4a, J4b, J4c, J5a/J5b y J5c COMPLETADOS. Cerrado el backlog Jev.
+
 ## 7. Reglas y restricciones del proyecto (NO VIOLAR)
 
 1. **NO emojis, flechas de texto ni símbolos de color** en ninguna salida, nota, script o commit (regla global del usuario). Escribir las palabras.

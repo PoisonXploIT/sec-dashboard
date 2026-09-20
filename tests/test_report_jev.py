@@ -286,3 +286,37 @@ def test_jev_query_inspector_is_read_only_and_bounded():
     assert q0["f0_action"]["type"] == "noul"
     # Synthetic state: no real finding data can leak.
     assert res["sample_state"][0]["title"].startswith("SAMPLE_FINDING_TITLE")
+
+
+# ── J5c: local LLM explanations in scan/pipeline PDFs (referencial) ───
+
+LLM_EXPLS = [
+    {"title": "HSTS missing", "model": "dirk-test-1b",
+     "resumen": "El sitio no envia HSTS.",
+     "porque": "Jev lo marca como true positive con confianza alta.",
+     "sugerencia": "Anadir cabecera Strict-Transport-Security."},
+    {"title": "Server banner", "status": "unavailable", "reason": "timeout"},
+]
+
+
+def test_scan_pdf_llm_explanations_section():
+    text = _pdf_text(bytes(report.generate_scan_pdf(_scan(JEV), _target(), llm_explanations=LLM_EXPLS))) \
+        .replace("\(", "(").replace("\)", ")")
+    assert "Explicaciones LLM local" in text
+    assert "El sitio no envia HSTS." in text
+    assert "Anadir cabecera Strict-Transport-Security." in text
+    assert "dirk-test-1b" in text
+    # Unavailable items are shown with their reason, not as a failure.
+    assert "no disponible (timeout)" in text
+
+
+def test_pipeline_pdf_llm_explanations_section():
+    text = _pdf_text(bytes(report.generate_pipeline_pdf(_pipeline(JEV), _target(), llm_explanations=LLM_EXPLS))) \
+        .replace("\(", "(").replace("\)", ")")
+    assert "Explicaciones LLM local" in text
+
+
+def test_scan_pdf_without_llm_explanations_has_no_section():
+    text = _pdf_text(bytes(report.generate_scan_pdf(_scan(JEV), _target()))) \
+        .replace("\(", "(").replace("\)", ")")
+    assert "Explicaciones LLM local" not in text

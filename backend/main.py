@@ -27,6 +27,7 @@ from backend.report import (
     generate_scan_pdf, generate_pipeline_pdf, generate_all_pdf,
     generate_executive_pdf,
     generate_scan_csv, generate_pipeline_csv,
+    SEVERITY_WEIGHT,
 )
 from backend.validators import validate_target, is_remote_mode
 from backend.ratelimit import RateLimiter
@@ -340,6 +341,77 @@ async def export_scan_json(scan_id: int):
     finally:
         await db.close()
 
+# J5c: PDF exports automatically include local-LLM explanations (reference
+# only) when the LLM is enabled and Jev ran ok. Top-N by composite risk;
+# sequential calls with an overall cap so a slow server never blocks export.
+LLM_PDF_TOP_N = 5
+LLM_PDF_TOTAL_CAP_S = 300
+_SEV_WEIGHT_BY_VALUE = {sev.value: w for sev, w in SEVERITY_WEIGHT.items()}
+
+
+def _export_findings(row: dict, result_data: dict) -> list[dict]:
+    """Findings for a PDF export: persisted column first, result JSON fallback."""
+    try:
+        parsed = json.loads(row.get("findings") or "[]")
+        findings = [f for f in parsed if isinstance(f, dict)] if isinstance(parsed, list) else []
+    except (TypeError, json.JSONDecodeError):
+        findings = []
+    if not findings and isinstance(result_data.get("findings"), list):
+        findings = [f for f in result_data["findings"] if isinstance(f, dict)]
+    return findings
+
+
+async def _pdf_llm_explanations(result_data: dict, findings: list[dict]) -> list[dict] | None:
+    """J5c: top-N local-LLM explanations for PDF exports (reference only).
+
+    Returns None when the LLM is disabled or Jev did not run ok, so the PDF
+    stays byte-identical to the pre-J5c output. Never raises.
+    """
+    if not local_llm.get_local_llm_config().get("enabled"):
+        return None
+    jev = result_data.get("jev") if isinstance(result_data, dict) else None
+    if not (isinstance(jev, dict) and jev.get("status") == "ok"):
+        return None
+    verdicts = jev.get("verdicts") or {}
+    rows = []
+    for i, f in enumerate(findings):
+        fid = str(f.get("finding_id") or i)
+        v = verdicts.get(fid)
+        if not isinstance(v, dict):
+            continue
+        sev = str(f.get("severity", "info")).lower()
+        try:
+            sev_score = float(v.get("severity_score") or 0)
+        except (TypeError, ValueError):
+            sev_score = 0.0
+        rows.append((_SEV_WEIGHT_BY_VALUE.get(sev, 0) * sev_score, f, v))
+    rows.sort(key=lambda t: t[0], reverse=True)
+    out = []
+    start = time.monotonic()
+    for _, f, v in rows[:LLM_PDF_TOP_N]:
+        if time.monotonic() - start > LLM_PDF_TOTAL_CAP_S:
+            break
+        state = {
+            "tool": str(f.get("tool") or ""),
+            "category": str(f.get("category") or ""),
+            "severity": str(f.get("severity") or ""),
+            "title": str(f.get("title") or ""),
+            "description": str(f.get("description") or ""),
+        }
+        res = await local_llm.explain_finding(state, v)
+        item: dict[str, Any] = {"title": state["title"]}
+        if isinstance(res, dict) and res.get("status") == "ok":
+            expl = res.get("explanation") or {}
+            for k in ("resumen", "porque", "sugerencia"):
+                item[k] = str(expl.get(k) or "")
+            item["model"] = str(res.get("model") or "")
+        else:
+            item["status"] = "unavailable"
+            item["reason"] = str((res or {}).get("reason") or "")[:120]
+        out.append(item)
+    return out or None
+
+
 @app.get("/api/scans/{scan_id}/export/pdf")
 async def export_scan_pdf(scan_id: int):
     db = await get_db()
@@ -354,7 +426,14 @@ async def export_scan_pdf(scan_id: int):
             cur2 = await db.execute("SELECT * FROM targets WHERE id = ?", (scan["target_id"],))
             row = await cur2.fetchone()
             if row: target = dict(row)
-        pdf_bytes = generate_scan_pdf(scan, target)
+        try:
+            result_data = json.loads(scan.get("result") or "{}")
+        except (TypeError, json.JSONDecodeError):
+            result_data = {}
+        llm_explanations = await _pdf_llm_explanations(
+            result_data if isinstance(result_data, dict) else {},
+            _export_findings(scan, result_data if isinstance(result_data, dict) else {}))
+        pdf_bytes = generate_scan_pdf(scan, target, llm_explanations)
         return FastResponse(content=pdf_bytes, media_type="application/pdf",
             headers={"Content-Disposition": f'attachment; filename="scan_{scan_id}.pdf"'})
     finally:
@@ -414,7 +493,14 @@ async def export_pipeline_pdf_endpoint(pipeline_id: int):
             cur2 = await db.execute("SELECT * FROM targets WHERE id = ?", (pipeline["target_id"],))
             row = await cur2.fetchone()
             if row: target = dict(row)
-        pdf_bytes = generate_pipeline_pdf(pipeline, target)
+        try:
+            result_data = json.loads(pipeline.get("result") or "{}")
+        except (TypeError, json.JSONDecodeError):
+            result_data = {}
+        llm_explanations = await _pdf_llm_explanations(
+            result_data if isinstance(result_data, dict) else {},
+            _export_findings(pipeline, result_data if isinstance(result_data, dict) else {}))
+        pdf_bytes = generate_pipeline_pdf(pipeline, target, llm_explanations)
         return FastResponse(content=pdf_bytes, media_type="application/pdf",
             headers={"Content-Disposition": f'attachment; filename="pipeline_{pipeline_id}.pdf"'})
     finally:
