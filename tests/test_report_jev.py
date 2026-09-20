@@ -95,9 +95,28 @@ def test_scan_json_ai_block_when_jev_ok():
     assert by_id["a" * 12] == {
         "finding_id": "a" * 12, "ai_verdict": "true_positive",
         "ai_confidence": 0.97, "ai_severity_score": 2.5,
-        "ai_immediate_action": 0.4,
+        "ai_immediate_action": 0.4, "triage": "immediate",
     }
     assert by_id["b" * 12]["ai_verdict"] == "noise"
+    assert by_id["b" * 12]["triage"] == "none"
+
+
+def test_scan_json_ai_block_carries_triage_summary():
+    export = json.loads(report.generate_scan_json(_scan(JEV), _target()))
+    # a*12: tp conf .97 sev 2.5 -> immediate; b*12: noise conf .8 -> none.
+    assert export["ai"]["triage_summary"] == {
+        "immediate": 1, "scheduled": 0, "review": 0, "none": 1,
+    }
+
+
+def test_scan_json_low_confidence_verdict_triage_is_null():
+    jev = dict(JEV)
+    jev["verdicts"] = {"a" * 12: dict(JEV["verdicts"]["a" * 12], verdict_confidence=0.2)}
+    export = json.loads(report.generate_scan_json(_scan(jev), _target()))
+    by_id = {v["finding_id"]: v for v in export["ai"]["verdicts"]}
+    assert by_id["a" * 12]["triage"] is None
+    assert export["ai"]["triage_summary"] == {"immediate": 0, "scheduled": 0,
+                                               "review": 0, "none": 0}
 
 
 def test_scan_json_no_ai_key_without_jev():
@@ -141,11 +160,18 @@ def test_all_json_without_jev_has_no_ai_key():
 def test_scan_csv_ai_columns_when_jev_ok():
     text = report.generate_scan_csv(_scan(JEV), _target())
     rows = _rows(text)
-    assert rows[0] == list(report.SCAN_CSV_FIELDS) + list(report.AI_CSV_FIELDS)
+    assert rows[0] == list(report.SCAN_CSV_FIELDS) + list(report.AI_CSV_FIELDS) + [report.TRIAGE_CSV_FIELD]
     r0, r1 = rows[1], rows[2]
     # Values joined by finding_id, appended after the standard fields.
-    assert r0[-4:] == ["true_positive", "0.97", "2.5", "0.4"]
-    assert r1[-4:] == ["noise", "0.8", "0.5", "0.1"]
+    assert r0[-5:] == ["true_positive", "0.97", "2.5", "0.4", "ACCION INMEDIATA"]
+    assert r1[-5:] == ["noise", "0.8", "0.5", "0.1", "SIN ACCION"]
+
+
+def test_scan_csv_low_confidence_verdict_has_empty_triage():
+    jev = dict(JEV)
+    jev["verdicts"] = {"a" * 12: dict(JEV["verdicts"]["a" * 12], verdict_confidence=0.2)}
+    rows = _rows(report.generate_scan_csv(_scan(jev), _target()))
+    assert rows[1][-5:] == ["true_positive", "0.2", "2.5", "0.4", ""]
 
 
 def test_scan_csv_byte_identical_without_jev():
@@ -157,8 +183,8 @@ def test_scan_csv_byte_identical_without_jev():
 def test_pipeline_csv_ai_columns_after_mid_fields():
     text = report.generate_pipeline_csv(_pipeline(JEV), _target())
     rows = _rows(text)
-    assert rows[0] == list(report.PIPELINE_CSV_FIELDS) + list(report.AI_CSV_FIELDS)
-    assert rows[1][-4:] == ["true_positive", "0.97", "2.5", "0.4"]
+    assert rows[0] == list(report.PIPELINE_CSV_FIELDS) + list(report.AI_CSV_FIELDS) + [report.TRIAGE_CSV_FIELD]
+    assert rows[1][-5:] == ["true_positive", "0.97", "2.5", "0.4", "ACCION INMEDIATA"]
 
 
 def test_csv_ai_join_falls_back_to_index_for_legacy_ids():
@@ -171,8 +197,8 @@ def test_csv_ai_join_falls_back_to_index_for_legacy_ids():
     scan["findings"] = json.dumps(findings)
     text = report.generate_scan_csv(scan, _target())
     rows = _rows(text)
-    assert rows[1][-4:] == ["true_positive", "0.97", "2.5", "0.4"]
-    assert rows[2][-4:] == ["noise", "0.8", "0.5", "0.1"]
+    assert rows[1][-5:] == ["true_positive", "0.97", "2.5", "0.4", "ACCION INMEDIATA"]
+    assert rows[2][-5:] == ["noise", "0.8", "0.5", "0.1", "SIN ACCION"]
 
 
 # ── Executive PDF ───────────────────────────────────────────────
@@ -201,9 +227,24 @@ def test_scan_pdf_ai_section_when_jev_ok():
     assert "jev-1.13.0" in text and "true_positive" in text
 
 
+def test_scan_pdf_triage_section_and_legend_when_jev_ok():
+    text = _pdf_text(bytes(report.generate_scan_pdf(_scan(JEV), _target()))) \
+        .replace("\\(", "(").replace("\\)", ")")
+    assert "Triage: accion requerida" in text
+    assert "ACCION INMEDIATA" in text and "SIN ACCION" in text
+    # a*12 (high x 2.5, immediate) is listed before b*12 by composite risk.
+    triage_pos = text.index("Triage: accion requerida")
+    assert text.index("HSTS missing", triage_pos) < text.index("Server banner", triage_pos)
+    # Static legend (J4b).
+    assert "Como interpretar los datos AI" in text
+    assert "true_positive (real issue)" in text
+
+
 def test_scan_pdf_no_ai_section_without_jev():
     text = _pdf_text(bytes(report.generate_scan_pdf(_scan(), _target())))
     assert "AI Verdicts" not in text
+    assert "Triage: accion requerida" not in text
+    assert "Como interpretar los datos AI" not in text
 
 
 def test_pipeline_pdf_ai_section_when_jev_ok():
@@ -216,6 +257,7 @@ def test_pipeline_pdf_ai_section_when_jev_ok():
 def test_pipeline_pdf_no_ai_section_without_jev():
     text = _pdf_text(bytes(report.generate_pipeline_pdf(_pipeline(), _target())))
     assert "AI Verdicts" not in text
+    assert "Triage: accion requerida" not in text
 
 
 def test_executive_pdf_no_ai_section_without_jev():

@@ -8,6 +8,8 @@ from typing import Any
 from fpdf import FPDF
 
 from backend.findings import SEVERITY_WEIGHT, Severity
+from backend.triage import (BUCKET_LABELS_ES, IMMEDIATE, NONE, REVIEW,
+                            SCHEDULED, triage_bucket, triage_summary)
 
 
 class ReportPDF(FPDF):
@@ -62,7 +64,14 @@ class ReportPDF(FPDF):
 # is byte-identical to the pre-J3 output (same rule as the J2 UI).
 
 AI_CSV_FIELDS = ("ai_verdict", "ai_confidence", "ai_severity_score", "ai_immediate_action")
+TRIAGE_CSV_FIELD = "triage"
 _AI_VALUE_KEYS = ("verdict", "verdict_confidence", "severity_score", "immediate_action")
+
+
+def _triage_of(v: dict) -> str | None:
+    """Bucket for one stored verdict dict (None = hidden, J0 rule)."""
+    return triage_bucket(v.get("verdict"), v.get("verdict_confidence"),
+                         v.get("severity_score"), v.get("immediate_action"))
 
 
 def _jev_ok(result_data: dict) -> dict | None:
@@ -84,14 +93,17 @@ def _ai_export_block(result_data: dict) -> dict | None:
     for fid, v in (jev.get("verdicts") or {}).items():
         if not isinstance(v, dict):
             continue
+        bucket = _triage_of(v)
         verdicts.append({
             "finding_id": str(fid),
             "ai_verdict": v.get("verdict"),
             "ai_confidence": v.get("verdict_confidence"),
             "ai_severity_score": v.get("severity_score"),
             "ai_immediate_action": v.get("immediate_action"),
+            "triage": bucket,
         })
-    return {"model": jev.get("model"), "verdicts": verdicts}
+    return {"model": jev.get("model"), "verdicts": verdicts,
+            "triage_summary": triage_summary([x["triage"] for x in verdicts])}
 
 
 def _csv_ai_lookup(result_data: dict, findings: list[dict]) -> dict[str, dict] | None:
@@ -215,7 +227,7 @@ def _csv_run_rows(fields: list, run_cols: list, findings: list, mid_fields=(),
     """
     buf = StringIO()
     writer = csv.writer(buf)
-    ai_cols: tuple = AI_CSV_FIELDS if ai_lookup is not None else ()
+    ai_cols: tuple = (AI_CSV_FIELDS + (TRIAGE_CSV_FIELD,)) if ai_lookup is not None else ()
     writer.writerow(fields + list(ai_cols))
     if not findings:
         # Keep the event visible for SIEM even when nothing was found.
@@ -227,6 +239,8 @@ def _csv_run_rows(fields: list, run_cols: list, findings: list, mid_fields=(),
             if ai_lookup is not None:
                 v = ai_lookup.get(str(f.get("finding_id") or "")) or ai_lookup.get(str(i)) or {}
                 row += [v.get(k, "") for k in _AI_VALUE_KEYS]
+                bucket = _triage_of(v)
+                row.append(BUCKET_LABELS_ES.get(bucket, "") if bucket else "")
             writer.writerow(row)
     return "\ufeff" + buf.getvalue()
 
@@ -1026,6 +1040,33 @@ def _jev_ai_rows(findings: list[dict], jev: dict) -> list[dict]:
     return rows
 
 
+def _triage_rows(findings: list[dict], jev: dict) -> list[dict]:
+    """Findings with a visible triage bucket, ordered by composite risk (J2 rule)."""
+    verdicts = jev.get("verdicts") or {}
+    rows = []
+    for i, f in enumerate(findings):
+        fid = str(f.get("finding_id") or i)
+        v = verdicts.get(fid)
+        if not isinstance(v, dict):
+            continue
+        bucket = _triage_of(v)
+        if bucket is None:
+            continue  # J0 rule: low-confidence verdicts are hidden.
+        sev = str(f.get("severity", "info")).lower()
+        try:
+            sev_score = float(v.get("severity_score") or 0)
+        except (TypeError, ValueError):
+            sev_score = 0.0
+        rows.append({
+            "bucket": bucket,
+            "risk": _SEVERITY_WEIGHT_BY_VALUE.get(sev, 0) * sev_score,
+            "severity": sev.upper(),
+            "title": str(f.get("title", "")),
+        })
+    rows.sort(key=lambda r: r["risk"], reverse=True)
+    return rows
+
+
 def _render_jev_section(pdf, findings: list[dict], jev: dict) -> None:
     """Render the 'AI Verdicts (Jev)' page section (Fase J3).
 
@@ -1074,6 +1115,53 @@ def _render_jev_section(pdf, findings: list[dict], jev: dict) -> None:
     else:
         pdf.set_font("Helvetica", "", 9)
         pdf.cell(0, 6, "Jev ran but returned no usable verdicts.", new_x="LMARGIN", new_y="NEXT")
+
+    # ── Triage: accion requerida (Fase J4b) ───────────────────
+    triage_rows = _triage_rows(findings, jev)
+    summary = triage_summary([r["bucket"] for r in triage_rows])
+    pdf.ln(2)
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.cell(0, 6, "Triage: accion requerida", new_x="LMARGIN", new_y="NEXT")
+    for bucket in (IMMEDIATE, SCHEDULED, REVIEW, NONE):
+        pdf.kv_row(BUCKET_LABELS_ES[bucket], str(summary.get(bucket, 0)))
+    if triage_rows:
+        for r in triage_rows[:20]:
+            if pdf.get_y() > 255:
+                pdf.add_page()
+            pdf.set_font("Helvetica", "", 8)
+            pdf.cell(0, 4.5,
+                     f"  [{BUCKET_LABELS_ES[r['bucket']]}] {r['severity']} - {_sanitize(r['title'])[:80]}",
+                     new_x="LMARGIN", new_y="NEXT")
+        if len(triage_rows) > 20:
+            pdf.set_font("Helvetica", "I", 7)
+            pdf.cell(0, 4, f"  ... ({len(triage_rows)} triaged verdicts total, top 20 by composite risk)",
+                     new_x="LMARGIN", new_y="NEXT")
+    else:
+        pdf.set_font("Helvetica", "I", 8)
+        pdf.cell(0, 4.5, "  No visible verdicts to triage (all below the review band).",
+                 new_x="LMARGIN", new_y="NEXT")
+
+    # ── Static legend: how to read the AI data (Fase J4b) ───────
+    pdf.ln(2)
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.cell(0, 6, "Como interpretar los datos AI", new_x="LMARGIN", new_y="NEXT")
+    pdf.kv_row("AI verdict (Jev)",
+              "Per-finding call from the TypeSafe Jev model: true_positive (real issue), "
+              "false_positive (tool mistake) or noise (not actionable).")
+    pdf.kv_row("Confidence bands",
+              ">=0.5 trusted; 0.3-0.5 -> REVISION MANUAL; <0.3 hidden (validated in Fase J0).")
+    pdf.kv_row("Severity score / Immediate action",
+              "Jev composite severity 0-3 and likelihood of needing immediate response 0-1.")
+    pdf.kv_row("Triage buckets",
+              "ACCION INMEDIATA: trusted true positive with urgency or high severity. "
+              "ACCION PROGRAMADA: trusted true positive, not urgent. REVISION MANUAL: medium "
+              "confidence, a human decides. SIN ACCION: trusted false positive / noise.")
+    pdf.kv_row("Model", str(jev.get("model") or ""))
+    pdf.kv_row("Data sent to TypeSafe",
+              "tool, category, severity, title and truncated description per finding only; "
+              "evidence is never sent; hard cap max_findings (default 100) per scan.")
+    pdf.kv_row("Cost",
+              "USD 0.042/M input tokens, output free: about USD 0.0004-0.002 per scan.")
 
 
 def executive_heatmap(findings: list[dict]) -> dict[str, dict[str, int]]:

@@ -1957,6 +1957,27 @@
     const JEV_CONFIDENCE_THRESHOLD = 0.5;  // validado en J0 (pipeline 6, 2026-09-19)
     const JEV_SEV_WEIGHT = {critical:10, high:7, medium:4, low:2, info:0};
 
+    // Triage buckets (Fase J4a) — espejo de backend/triage.py; mantener sincronizado.
+    const JEV_TRIAGE = {
+        CONF_TRUST: 0.5, CONF_REVIEW: 0.3, ACTION_IMMEDIATE: 0.5, SEV_IMMEDIATE: 2.0,
+        LABELS: { immediate: 'ACCION INMEDIATA', scheduled: 'ACCION PROGRAMADA', review: 'REVISION MANUAL', none: 'SIN ACCION' },
+        CLASSES: { immediate: 'tag-red', scheduled: 'tag-accent', review: 'tag-yellow', none: '' },
+    };
+
+    function jevTriageBucket(v) {
+        const c = Number(v.verdict_confidence);
+        if (Number.isNaN(c) || c < JEV_TRIAGE.CONF_REVIEW) return null;  // oculto (regla J0)
+        if (c < JEV_TRIAGE.CONF_TRUST) return 'review';
+        const verdict = String(v.verdict || '').trim().toLowerCase();
+        if (verdict === 'true_positive') {
+            const sev = Number(v.severity_score) || 0;
+            const act = Number(v.immediate_action) || 0;
+            return (act >= JEV_TRIAGE.ACTION_IMMEDIATE || sev >= JEV_TRIAGE.SEV_IMMEDIATE) ? 'immediate' : 'scheduled';
+        }
+        if (verdict === 'false_positive' || verdict === 'noise') return 'none';
+        return 'review';  // etiqueta desconocida con confianza alta: lo mira un humano
+    }
+
     function jevBadge(verdict) {
         if (!verdict) return '';
         const c = verdict.verdict_confidence;
@@ -1981,21 +2002,29 @@
             const v = (jev.verdicts || {})[String(f.finding_id || '')] || {};
             const sev = String(f.severity||'info').toLowerCase();
             const risk = (JEV_SEV_WEIGHT[sev] ?? 0) * (v.severity_score ?? 0);
-            return {f, v, risk};
+            return {f, v, risk, bucket: jevTriageBucket(v)};
         }).sort((a, b) => b.risk - a.risk);
         if (!rows.length) return '';
-        const trs = rows.map(({f, v, risk}) => `
+        const triageCounts = rows.reduce((acc, r) => {
+            if (r.bucket) acc[r.bucket] = (acc[r.bucket] || 0) + 1;
+            return acc;
+        }, {});
+        const triageHeader = Object.entries(triageCounts)
+            .map(([b, n]) => `${JEV_TRIAGE.LABELS[b]}: ${n}`).join(' | ');
+        const trs = rows.map(({f, v, risk, bucket}) => `
             <tr>
                 <td style="font-size:12px">${risk ? risk.toFixed(1) : '<span style="color:var(--text-muted)">-</span>'}</td>
                 <td><span class="tag ${evoSevClass(f.severity)}">${esc(String(f.severity||'').toUpperCase())}</span></td>
                 <td style="font-size:12px"><strong>${esc(f.title||'')}</strong> <span style="color:var(--text-muted)">${esc(f.tool||'')}</span></td>
                 <td>${jevBadge(v)}</td>
+                <td>${bucket ? `<span class="tag ${JEV_TRIAGE.CLASSES[bucket]}">${JEV_TRIAGE.LABELS[bucket]}</span>` : '<span style="color:var(--text-muted)">-</span>'}</td>
             </tr>`).join('');
         return `
             <div class="card" style="margin-top:16px">
                 <div class="card-header"><div class="card-title">AI Verdicts (Jev)</div>
                     <span style="font-size:12px;color:var(--text-muted)">${esc(jev.model||'')} | ${jev.count} findings | riesgo = severidad x score AI</span></div>
-                <table><thead><tr><th>Risk</th><th>Sev</th><th>Finding</th><th>AI</th></tr></thead><tbody>${trs}</tbody></table>
+                ${triageHeader ? `<div style="font-size:11px;color:var(--text-muted);margin-bottom:8px">Triage — ${triageHeader}</div>` : ''}
+                <table><thead><tr><th>Risk</th><th>Sev</th><th>Finding</th><th>AI</th><th>Triage</th></tr></thead><tbody>${trs}</tbody></table>
             </div>`;
     }
 
