@@ -282,6 +282,7 @@ System tools (`netstat`/`tasklist`) and the port scanner always use direct conne
 - **Auth:** API key on every `/api/*` (401 otherwise), lockout after repeated failures per peer, failed attempts logged with truncated keys; Cloudflare Access SSO as an outer layer on the public deployment.
 - **Headers:** CSP, HSTS, `X-Content-Type-Options: nosniff`.
 - **Uploads:** RF captures are analyzed offline and kept under `data/uploads/`; capped at 200,000 frames per capture.
+- **AI controls (v2.0):** the Jev API key is in memory only, masked on read, sent only to `api.typesafe.ai` and lost on restart; the local LLM base URL is loopback-only enforced server-side (no API key); per-run AI options are plain booleans on existing endpoints (no new routes); AI text is rendered escaped in the UI and sanitized in PDF/CSV/JSON exports, reference-only, never executed. Any AI error degrades to classic output.
 
 ## 14. AI Verdicts (Jev) and local LLM explainer
 
@@ -313,6 +314,11 @@ Two independent layers on top of your scans, both optional, both fail-safe: if e
 - **CSV:** `llm_resumen` / `llm_porque` / `llm_sugerencia` columns joined by finding title (only when the run has explanations).
 
 There is no extra toggle — the per-run *Local LLM explanations* checkbox (checked by default when configured) is the switch; users without a GPU or local model simply leave it disabled and get exactly the classic output. It adds about 1–2 minutes to run completion (sequential calls, hard cap 5 min) and costs $0 (local CPU). The executive *Export All* PDF is unchanged, and with the LLM disabled — or when you opt out for a run — every export stays byte-identical to the classic output.
+
+## 15. Statistics and Delete All (v2.0)
+
+- **Statistics page** (sidebar): aggregates all history — totals and success rate, scans/pipelines by status, pipelines by mode with average elapsed time, every tool ever used, per-target scan/pipeline counts, daily activity for the last 30 days, and AI usage (runs with Jev verdicts / stored LLM explanations). Data comes from `GET /api/stats`.
+- **Delete All buttons:** every history list has one — Recent Scans, Recent Pipelines and Most Used Tools on the Dashboard, the Scan History page (Scans/Pipelines tabs), the Targets page, plus a *Reset to zero* in the Statistics danger zone. Each requires `?confirm=true` server-side (`DELETE /api/scans/all`, `/api/pipelines/all`, `/api/targets/all`; reset is `DELETE /api/reset`) and sits on the strict 5 req/hour bucket; targets cascade-delete their scans/pipelines.
 
 ---
 

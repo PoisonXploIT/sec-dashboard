@@ -651,6 +651,12 @@ Reglas para cada tool de este backlog:
 - **Obsidian**: fusionados los folders duplicados `PROYECTOS/SEC-DASHBOARD` y `PROYECTOS/SEC-DASHBOARD 1` en `PROYECTOS/SEC-DASHBOARD` (el "1" era una copia con links reescritos; se copian sus 4 notas unicas y se borra el folder). Nueva nota completa: `sec-dashboard - AI Jev y LLM local (v2.0).md` (fases, config, evaluacion de seguridad, evidencia E2E, version/release), enlazada desde el MOC `000_SEC-DASHBOARD.md`.
 - **Release**: pendiente OK del usuario para push a origin/master (CI + Railway) y GitHub Release v2.0.
 
+### 2026-09-21 — Delete All en todas las vistas de historia + pagina Statistics (COMPLETADO)
+- **Delete All por lista**: botones en Recent Scans, Recent Pipelines y Most Used Tools (dashboard), pagina History (tabs Scans/Pipelines), pagina Targets. Endpoints nuevos: `DELETE /api/scans/all`, `/api/pipelines/all`, `/api/targets/all` — todos requieren `?confirm=true`, loguean WARNING con key truncada, bucket estricto de 5 req/hora (mismo que `/api/reset`). Targets cascada a sus scans/pipelines.
+- **Pagina Statistics** (sidebar, en ingles): `GET /api/stats` agrega TODO el historial — totales + success rate, scans/pipelines por status, pipelines por modo con elapsed medio, todas las tools usadas, conteo por target, actividad diaria 30 dias, uso AI (runs con Jev ok / con llm_explanations via json_extract). Danger zone: *Reset to zero* (`DELETE /api/reset?confirm=true`).
+- **Tests**: `tests/test_bulk_delete_stats.py` (5 tests: stats completos incl. AI counts y avg por modo, confirm gate 400, delete-all scans deja pipelines/targets intactos, targets cascada a cero). Suite verde, ruff limpio, JS node --check OK.
+- **Docs**: USER-GUIDE secciones 13 (AI controls) y 15 (Statistics + Delete All).
+
 ## 7. Reglas y restricciones del proyecto (NO VIOLAR)
 
 1. **NO emojis, flechas de texto ni símbolos de color** en ninguna salida, nota, script o commit (regla global del usuario). Escribir las palabras.

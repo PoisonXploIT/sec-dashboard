@@ -346,6 +346,9 @@
             <a class="nav-item" data-page="history" onclick="navigate('history')">
                 <span class="icon"></span> History
             </a>
+            <a class="nav-item" data-page="stats" onclick="navigate('stats')">
+                <span class="icon">ST</span> Statistics
+            </a>
             <a class="nav-item" data-page="guide" onclick="navigate('guide')">
                 <span class="icon">?</span> Guide
             </a>
@@ -537,9 +540,9 @@
         document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
         const navEl = document.querySelector(`[data-page="${page}"]`);
         if (navEl) navEl.classList.add('active');
-        const titles = {dashboard:'Dashboard',tools:'Security Tools',pipeline:'Pipeline Engine',targets:'Targets',history:'Scan History',guide:'User Guide',proxy:'Proxy / Anonymity',webhooks:'Webhooks',splunk:'Splunk Integration',jev:'Jev AI'};
+        const titles = {dashboard:'Dashboard',tools:'Security Tools',pipeline:'Pipeline Engine',targets:'Targets',history:'Scan History',stats:'Statistics',guide:'User Guide',proxy:'Proxy / Anonymity',webhooks:'Webhooks',splunk:'Splunk Integration',jev:'Jev AI'};
         document.getElementById('page-title').textContent = titles[page] || page;
-        const renderers = {dashboard:renderDashboard,tools:renderTools,pipeline:renderPipelinePage,targets:renderTargets,history:renderHistoryPage,guide:renderGuide,proxy:renderProxy,webhooks:renderWebhooks,splunk:renderSplunk,jev:renderJev};
+        const renderers = {dashboard:renderDashboard,tools:renderTools,pipeline:renderPipelinePage,targets:renderTargets,history:renderHistoryPage,stats:renderStatistics,guide:renderGuide,proxy:renderProxy,webhooks:renderWebhooks,splunk:renderSplunk,jev:renderJev};
         (renderers[page] || renderDashboard)();
     }
 
@@ -582,6 +585,113 @@
     function statusBadge(s) {
         const m = {completed:'badge-completed',running:'badge-running',pending:'badge-pending',failed:'badge-failed'};
         return `<span class="badge-status ${m[s]||'badge-pending'}">${s}</span>`;
+    }
+
+    // Delete-all helpers (one per history list). confirm=true is required
+    // server-side; the browser confirm() is the first gate.
+    async function deleteAllHistory(kind) {
+        const what = kind === 'targets'
+            ? 'all targets and their scans/pipelines'
+            : `all ${kind} history`;
+        if (!confirm(`Delete ${what}? This cannot be undone.`)) return;
+        try {
+            await api.del(`/api/${kind}/all?confirm=true`);
+            toast(`${kind.charAt(0).toUpperCase() + kind.slice(1)} history deleted`, 'success');
+        } catch (e) { toast(e.message, 'error'); return; }
+        if (state.page === 'dashboard') renderDashboard();
+        else if (state.page === 'history') renderHistoryPage();
+        else if (state.page === 'targets') renderTargets();
+        else if (state.page === 'stats') renderStatistics();
+    }
+
+    async function resetToZero() {
+        if (!confirm('Reset the dashboard to zero? This deletes ALL targets, scans and pipelines. Cannot be undone.')) return;
+        try {
+            await api.del('/reset?confirm=true');
+            toast('Dashboard reset to zero', 'success');
+            navigate('dashboard');
+        } catch (e) { toast(e.message, 'error'); }
+    }
+
+    async function renderStatistics() {
+        const content = document.getElementById('content');
+        content.innerHTML = '<div class="skeleton" style="height:200px;margin-bottom:16px"></div>'.repeat(2);
+        const s = await api.get('/stats');
+        const maxTool = s.tools.length ? Math.max(...s.tools.map(t => t.count)) : 1;
+        const activeDays = s.daily_30d.filter(d => d.scans > 0 || d.pipelines > 0).reverse();
+        content.innerHTML = `
+            <div class="stats-row">
+                <div class="stat-card"><div class="value">${s.total_scans}</div><div class="label">Total Scans</div></div>
+                <div class="stat-card"><div class="value">${s.total_pipelines}</div><div class="label">Total Pipelines</div></div>
+                <div class="stat-card accent"><div class="value">${s.total_targets}</div><div class="label">Targets</div></div>
+                <div class="stat-card ${s.success_rate >= 80 ? 'green' : s.success_rate >= 50 ? 'yellow' : 'red'}"><div class="value">${s.success_rate}%</div><div class="label">Success Rate</div></div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+                <div class="card">
+                    <div class="card-header"><div class="card-title">Scans by status</div></div>
+                    ${Object.entries(s.scans_by_status).map(([k, v]) => `
+                        <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:13px">
+                            ${statusBadge(k)}<span style="font-family:monospace">${v}</span>
+                        </div>`).join('') || '<div class="empty-state" style="padding:24px"><p>No scans yet</p></div>'}
+                </div>
+                <div class="card">
+                    <div class="card-header"><div class="card-title">Pipelines by status / mode</div></div>
+                    ${Object.entries(s.pipelines_by_status).map(([k, v]) => `
+                        <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:13px">
+                            ${statusBadge(k)}<span style="font-family:monospace">${v}</span>
+                        </div>`).join('')}
+                    ${s.pipeline_modes.map(m => `
+                        <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;font-size:13px;border-top:1px solid var(--border)">
+                            <span>${esc(m.mode)} (avg)</span>
+                            <span style="font-family:monospace">${m.count} runs${m.avg_elapsed_seconds != null ? ` | ${Math.round(m.avg_elapsed_seconds)}s` : ''}</span>
+                        </div>`).join('')}
+                </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+                <div class="card">
+                    <div class="card-header"><div class="card-title">Tools used</div></div>
+                    ${s.tools.length ? s.tools.map(t => `
+                        <div style="display:flex;align-items:center;gap:12px;padding:6px 0;font-size:13px">
+                            <span style="min-width:140px;font-weight:500">${esc(t.tool)}</span>
+                            <div style="flex:1;height:8px;background:var(--bg-tertiary);border-radius:4px;overflow:hidden">
+                                <div style="height:100%;width:${Math.round(t.count / maxTool * 100)}%;background:var(--accent);border-radius:4px"></div>
+                            </div>
+                            <span style="min-width:30px;text-align:right;color:var(--text-muted);font-family:monospace">${t.count}</span>
+                        </div>`).join('') : '<div class="empty-state" style="padding:24px"><p>No scans yet</p></div>'}
+                </div>
+                <div class="card">
+                    <div class="card-header"><div class="card-title">Targets</div></div>
+                    ${s.by_target.length ? `<table><thead><tr><th>Name</th><th>Host</th><th>Scans</th><th>Pipelines</th></tr></thead><tbody>
+                        ${s.by_target.map(t => `<tr><td>${esc(t.name)}</td><td style="font-size:12px;color:var(--text-muted)">${esc(t.host)}</td><td style="font-family:monospace">${t.scans}</td><td style="font-family:monospace">${t.pipelines}</td></tr>`).join('')}
+                    </tbody></table>` : '<div class="empty-state" style="padding:24px"><p>No targets yet</p></div>'}
+                </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+                <div class="card">
+                    <div class="card-header"><div class="card-title">Activity (last 30 days)</div></div>
+                    ${activeDays.length ? activeDays.map(d => `
+                        <div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;font-size:12px">
+                            <span style="color:var(--text-muted)">${d.date}</span>
+                            <span>${d.scans ? `${d.scans} scan${d.scans > 1 ? 's' : ''}` : ''}${d.scans && d.pipelines ? ' | ' : ''}${d.pipelines ? `${d.pipelines} pipeline${d.pipelines > 1 ? 's' : ''}` : ''}</span>
+                        </div>`).join('') : '<div class="empty-state" style="padding:24px"><p>No activity in the last 30 days</p></div>'}
+                </div>
+                <div class="card">
+                    <div class="card-header"><div class="card-title">AI usage (Jev / local LLM)</div></div>
+                    <div style="display:grid;gap:10px;font-size:13px">
+                        <div style="display:flex;justify-content:space-between"><span>Scans with Jev verdicts</span><span style="font-family:monospace">${s.ai.scans_jev_ok}</span></div>
+                        <div style="display:flex;justify-content:space-between"><span>Scans with LLM explanations</span><span style="font-family:monospace">${s.ai.scans_with_llm_explanations}</span></div>
+                        <div style="display:flex;justify-content:space-between"><span>Pipelines with Jev verdicts</span><span style="font-family:monospace">${s.ai.pipelines_jev_ok}</span></div>
+                        <div style="display:flex;justify-content:space-between"><span>Pipelines with LLM explanations</span><span style="font-family:monospace">${s.ai.pipelines_with_llm_explanations}</span></div>
+                    </div>
+                </div>
+            </div>
+            <div class="card" style="border-color:var(--red)">
+                <div class="card-header"><div class="card-title" style="color:var(--red)">Danger zone</div></div>
+                <div style="display:flex;justify-content:space-between;align-items:center;font-size:13px">
+                    <span>Reset the dashboard to zero (all targets, scans and pipelines).</span>
+                    <button class="btn btn-sm btn-danger" onclick="resetToZero()">Reset to zero</button>
+                </div>
+            </div>`;
     }
 
     async function renderDashboard() {
@@ -629,7 +739,7 @@
                     <div class="card">
                         <div class="card-header">
                             <div class="card-title">Recent Scans</div>
-                            <button class="btn btn-sm" onclick="navigate('history')">View All</button>
+                            <span class="flex gap-8"><button class="btn btn-sm" onclick="navigate('history')">View All</button><button class="btn btn-sm btn-danger" onclick="deleteAllHistory('scans')">Delete all</button></span>
                         </div>
                         ${s.recent_scans?.length ? `
                             <table>
@@ -653,7 +763,7 @@
                     <div class="card">
                         <div class="card-header">
                             <div class="card-title">Recent Pipelines</div>
-                            <button class="btn btn-sm" onclick="navigate('pipeline')">New Pipeline</button>
+                            <span class="flex gap-8"><button class="btn btn-sm" onclick="navigate('pipeline')">New Pipeline</button><button class="btn btn-sm btn-danger" onclick="deleteAllHistory('pipelines')">Delete all</button></span>
                         </div>
                         ${s.recent_pipelines.map(p => `
                             <div class="target-item" style="cursor:pointer" onclick="navigate('pipeline')">
@@ -673,7 +783,7 @@
                     <!-- Most Used Tools -->
                     ${s.scans_by_tool?.length ? `
                     <div class="card">
-                        <div class="card-header"><div class="card-title">Most Used Tools</div></div>
+                        <div class="card-header"><div class="card-title">Most Used Tools</div><button class="btn btn-sm btn-danger" onclick="deleteAllHistory('scans')">Delete all</button></div>
                         ${s.scans_by_tool.map(t => `
                             <div style="display:flex;align-items:center;gap:12px;padding:6px 0;font-size:13px">
                                 <span style="min-width:140px;font-weight:500">${esc(t.tool)}</span>
@@ -1841,7 +1951,7 @@
         const data = await api.get('/targets');
         content.innerHTML = `
             <div class="card">
-                <div class="card-header"><div class="card-title"> Targets</div><button class="btn btn-primary" onclick="showAddTarget()"> Add Target</button></div>
+                <div class="card-header"><div class="card-title"> Targets</div><span class="flex gap-8"><button class="btn btn-primary" onclick="showAddTarget()"> Add Target</button><button class="btn btn-sm btn-danger" onclick="deleteAllHistory('targets')">Delete all targets</button></span></div>
                 ${data.targets?.length ? data.targets.map(t => `
                     <div class="target-item ${state.selectedTarget?.id===t.id?'active':''}">
                         <div><div class="name">${esc(t.name)}</div><div class="host">${esc(t.host)}</div></div>
@@ -1941,6 +2051,7 @@
                 <div class="flex gap-8">
                     <button class="btn btn-sm" onclick="downloadJSON('/api/export/all/json', 'sec-dashboard-export.json')">Export All (JSON)</button>
                     <button class="btn btn-sm" onclick="downloadPDF('/api/export/all/pdf', 'sec-dashboard-export.pdf')">Export All (PDF)</button>
+                    <button class="btn btn-sm btn-danger" onclick="deleteAllHistory('${activeTab==='scans'?'scans':'pipelines'}')">Delete all ${activeTab==='scans'?'scans':'pipelines'}</button>
                 </div>
             </div>
             <div class="search-bar mb-16">

@@ -4,7 +4,7 @@ import hashlib
 import json
 import os
 import time
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -152,8 +152,10 @@ def _rate_limit_bucket(method: str, path: str):
         return _mutation_limiter
     if method == "DELETE":
         # Deletes are mutations too (targets/scans/pipelines/webhooks);
-        # /api/reset gets the strict hourly bucket.
-        if path == "/api/reset":
+        # /api/reset and the bulk delete-all endpoints get the strict hourly
+        # bucket (they wipe whole tables).
+        if path in ("/api/reset", "/api/scans/all", "/api/pipelines/all",
+                     "/api/targets/all"):
             return _reset_limiter
         if path.startswith("/api/"):
             return _mutation_limiter
@@ -842,6 +844,118 @@ async def dashboard_stats():
             "categories_count": len(CATEGORIES),
             "proxy": {"enabled": proxy.get("enabled", False), "type": proxy.get("type", "none")},
             "uptime_seconds": int(time.time() - START_TIME),
+        }
+    finally:
+        await db.close()
+
+
+@app.get("/api/stats")
+async def full_stats():
+    """Full history statistics for the Statistics page (all scans/pipelines)."""
+    db = await get_db()
+    try:
+        cur = await db.execute("SELECT COUNT(*) c FROM targets")
+        total_targets = (await cur.fetchone())["c"]
+        cur = await db.execute("SELECT COUNT(*) c FROM scans")
+        total_scans = (await cur.fetchone())["c"]
+        cur = await db.execute("SELECT COUNT(*) c FROM pipelines")
+        total_pipelines = (await cur.fetchone())["c"]
+
+        cur = await db.execute("SELECT status, COUNT(*) c FROM scans GROUP BY status")
+        scans_by_status = {r["status"]: r["c"] for r in await cur.fetchall()}
+        cur = await db.execute("SELECT status, COUNT(*) c FROM pipelines GROUP BY status")
+        pipelines_by_status = {r["status"]: r["c"] for r in await cur.fetchall()}
+
+        cur = await db.execute(
+            "SELECT tool, COUNT(*) c FROM scans GROUP BY tool ORDER BY c DESC"
+        )
+        tools = [{"tool": r["tool"], "count": r["c"]} for r in await cur.fetchall()]
+
+        cur = await db.execute(
+            "SELECT t.id, t.name, t.host, "
+            "(SELECT COUNT(*) FROM scans s WHERE s.target_id = t.id) AS scans_c, "
+            "(SELECT COUNT(*) FROM pipelines p WHERE p.target_id = t.id) AS pipes_c "
+            "FROM targets t ORDER BY t.name"
+        )
+        by_target = [
+            {"id": r["id"], "name": r["name"], "host": r["host"],
+             "scans": r["scans_c"], "pipelines": r["pipes_c"]}
+            for r in await cur.fetchall()
+        ]
+
+        cur = await db.execute(
+            "SELECT mode, COUNT(*) c, "
+            "AVG(julianday(finished_at) - julianday(started_at)) * 86400.0 AS avg_s "
+            "FROM pipelines WHERE finished_at IS NOT NULL GROUP BY mode"
+        )
+        pipeline_modes = [
+            {"mode": r["mode"], "count": r["c"],
+             "avg_elapsed_seconds": round(r["avg_s"]) if r["avg_s"] is not None else None}
+            for r in await cur.fetchall()
+        ]
+
+        # Activity, last 30 days (scans and pipelines per day).
+        start = (date.today() - timedelta(days=29)).isoformat()
+        cur = await db.execute(
+            "SELECT date(started_at) d, COUNT(*) c FROM scans "
+            f"WHERE started_at >= ? GROUP BY d", (start,)
+        )
+        scan_days = {r["d"]: r["c"] for r in await cur.fetchall()}
+        cur = await db.execute(
+            "SELECT date(started_at) d, COUNT(*) c FROM pipelines "
+            f"WHERE started_at >= ? GROUP BY d", (start,)
+        )
+        pipe_days = {r["d"]: r["c"] for r in await cur.fetchall()}
+        daily = []
+        for i in range(30):
+            day = (date.today() - timedelta(days=29 - i)).isoformat()
+            daily.append({"date": day, "scans": scan_days.get(day, 0),
+                          "pipelines": pipe_days.get(day, 0)})
+
+        # AI usage (Jev verdicts ok / stored local-LLM explanations).
+        cur = await db.execute(
+            "SELECT COUNT(*) c FROM scans WHERE result IS NOT NULL "
+            "AND json_valid(result) AND json_extract(result, '$.jev.status') = 'ok'"
+        )
+        ai_scans_jev_ok = (await cur.fetchone())["c"]
+        cur = await db.execute(
+            "SELECT COUNT(*) c FROM scans WHERE result IS NOT NULL "
+            "AND json_valid(result) AND json_extract(result, '$.llm_explanations') IS NOT NULL"
+        )
+        ai_scans_llm = (await cur.fetchone())["c"]
+        cur = await db.execute(
+            "SELECT COUNT(*) c FROM pipelines WHERE result IS NOT NULL "
+            "AND json_valid(result) AND json_extract(result, '$.jev.status') = 'ok'"
+        )
+        ai_pipes_jev_ok = (await cur.fetchone())["c"]
+        cur = await db.execute(
+            "SELECT COUNT(*) c FROM pipelines WHERE result IS NOT NULL "
+            "AND json_valid(result) AND json_extract(result, '$.llm_explanations') IS NOT NULL"
+        )
+        ai_pipes_llm = (await cur.fetchone())["c"]
+
+        completed = scans_by_status.get("completed", 0)
+        failed = scans_by_status.get("failed", 0)
+        total_finished = completed + failed
+        success_rate = round(completed / total_finished * 100, 1) if total_finished > 0 else 0
+
+        return {
+            "total_targets": total_targets,
+            "total_scans": total_scans,
+            "total_pipelines": total_pipelines,
+            "scans_by_status": scans_by_status,
+            "pipelines_by_status": pipelines_by_status,
+            "tools": tools,
+            "by_target": by_target,
+            "pipeline_modes": pipeline_modes,
+            "daily_30d": daily,
+            "success_rate": success_rate,
+            "ai": {
+                "scans_jev_ok": ai_scans_jev_ok,
+                "scans_with_llm_explanations": ai_scans_llm,
+                "pipelines_jev_ok": ai_pipes_jev_ok,
+                "pipelines_with_llm_explanations": ai_pipes_llm,
+            },
         }
     finally:
         await db.close()
@@ -1909,6 +2023,65 @@ async def splunk_export_all():
 
 
 # ── Reset ──────────────────────────────────────────────────────
+@app.delete("/api/scans/all")
+async def delete_all_scans(request: Request, confirm: bool = Query(False)):
+    """Delete all scan history. Requires ?confirm=true."""
+    if not confirm:
+        raise HTTPException(400, "Confirmation required: add ?confirm=true")
+    _log.warning(
+        "delete-all scans ip=%s key=%s",
+        request.client.host if request.client else "?",
+        truncate_key(request.headers.get("X-API-Key")),
+    )
+    db = await get_db()
+    try:
+        cur = await db.execute("DELETE FROM scans")
+        await db.commit()
+        return {"deleted": True, "count": cur.rowcount}
+    finally:
+        await db.close()
+
+
+@app.delete("/api/pipelines/all")
+async def delete_all_pipelines(request: Request, confirm: bool = Query(False)):
+    """Delete all pipeline history. Requires ?confirm=true."""
+    if not confirm:
+        raise HTTPException(400, "Confirmation required: add ?confirm=true")
+    _log.warning(
+        "delete-all pipelines ip=%s key=%s",
+        request.client.host if request.client else "?",
+        truncate_key(request.headers.get("X-API-Key")),
+    )
+    db = await get_db()
+    try:
+        cur = await db.execute("DELETE FROM pipelines")
+        await db.commit()
+        return {"deleted": True, "count": cur.rowcount}
+    finally:
+        await db.close()
+
+
+@app.delete("/api/targets/all")
+async def delete_all_targets(request: Request, confirm: bool = Query(False)):
+    """Delete all targets and their history. Requires ?confirm=true."""
+    if not confirm:
+        raise HTTPException(400, "Confirmation required: add ?confirm=true")
+    _log.warning(
+        "delete-all targets ip=%s key=%s",
+        request.client.host if request.client else "?",
+        truncate_key(request.headers.get("X-API-Key")),
+    )
+    db = await get_db()
+    try:
+        await db.execute("DELETE FROM scans")
+        await db.execute("DELETE FROM pipelines")
+        cur = await db.execute("DELETE FROM targets")
+        await db.commit()
+        return {"deleted": True, "count": cur.rowcount}
+    finally:
+        await db.close()
+
+
 @app.delete("/api/reset")
 async def reset_all(request: Request, confirm: bool = Query(False)):
     """Reset all data. Requires ?confirm=true to prevent accidental wipes."""
