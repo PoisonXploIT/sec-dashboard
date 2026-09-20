@@ -119,7 +119,7 @@ def _csv_llm_lookup(result_data: dict) -> dict[str, dict] | None:
         if not title:
             continue
         if it.get("status") == "unavailable":
-            resumen = f"no disponible ({str(it.get('reason') or '')[:80]})"
+            resumen = f"unavailable ({str(it.get('reason') or '')[:80]})"
             porque = sugerencia = ""
         else:
             resumen, porque, sugerencia = (
@@ -1221,10 +1221,10 @@ def _render_jev_section(pdf, findings: list[dict], jev: dict,
     if llm_explanations:
         pdf.ln(2)
         pdf.set_font("Helvetica", "B", 10)
-        pdf.cell(0, 6, "Explicaciones LLM local (referencial)", new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(0, 6, "Local LLM Explanations (reference only)", new_x="LMARGIN", new_y="NEXT")
         pdf.set_font("Helvetica", "I", 8)
         pdf.cell(0, 4.5,
-                 "El LLM local explica el veredicto de Jev en lenguaje plano; no lo modifica ni re-scorea.",
+                 "The local LLM explains Jev's verdict in plain Spanish; it never modifies or re-scores it.",
                  new_x="LMARGIN", new_y="NEXT")
         for item in llm_explanations:
             if pdf.get_y() > 235:
@@ -1235,19 +1235,19 @@ def _render_jev_section(pdf, findings: list[dict], jev: dict,
             if item.get("status") == "unavailable":
                 pdf.set_font("Helvetica", "I", 8)
                 pdf.cell(0, 4.5,
-                         f"    no disponible ({_sanitize(str(item.get('reason') or ''))[:80]})",
+                         f"    unavailable ({_sanitize(str(item.get('reason') or ''))[:80]})",
                          new_x="LMARGIN", new_y="NEXT")
                 continue
             model = _sanitize(str(item.get("model") or ""))[:60]
             pdf.set_font("Helvetica", "", 8)
-            for label, key in (("Resumen", "resumen"), ("Porque", "porque"),
-                               ("Sugerencia", "sugerencia")):
+            for label, key in (("Summary", "resumen"), ("Why", "porque"),
+                               ("Recommendation", "sugerencia")):
                 value = _sanitize(str(item.get(key) or ""))[:400]
                 pdf.multi_cell(0, 4.5, f"    {label}: {value}",
                               new_x="LMARGIN", new_y="NEXT")
             if model:
                 pdf.set_font("Helvetica", "I", 7)
-                pdf.cell(0, 4, f"    (modelo: {model})", new_x="LMARGIN", new_y="NEXT")
+                pdf.cell(0, 4, f"    (model: {model})", new_x="LMARGIN", new_y="NEXT")
 
     # ── Static legend: how to read the AI data (Fase J4b) ───────
     pdf.ln(2)

@@ -327,7 +327,7 @@
     <div class="app">
         <nav class="sidebar">
             <div class="sidebar-header">
-                <h1> Sec-Dashboard <span class="version">v1.1</span></h1>
+                <h1> Sec-Dashboard <span class="version">v2.0</span></h1>
                 <button class="theme-toggle" onclick="toggleTheme()" id="theme-toggle-btn">Tema: <span id="theme-label"></span></button>
             </div>
             <div class="nav-section">Navigation</div>
@@ -1496,9 +1496,9 @@
             const box = document.createElement('div');
             box.style.cssText = 'margin:12px 0;padding:10px;border:1px solid var(--border);border-radius:6px;font-size:13px';
             box.innerHTML = `
-                <div style="font-weight:600;margin-bottom:8px">AI (opcional)</div>
-                ${jevOn ? `<label style="display:block;margin-bottom:6px"><input type="checkbox" id="${idPrefix}-jev" checked> Veredictos Jev AI</label>` : ''}
-                ${llmOn ? `<label style="display:block"><input type="checkbox" id="${idPrefix}-llm" checked> Explicaciones LLM local (referencial)</label>` : ''}`;
+                <div style="font-weight:600;margin-bottom:8px">AI (optional, per run)</div>
+                ${jevOn ? `<label style="display:block;margin-bottom:6px"><input type="checkbox" id="${idPrefix}-jev" checked> Jev AI verdicts</label>` : ''}
+                ${llmOn ? `<label style="display:block"><input type="checkbox" id="${idPrefix}-llm" checked> Local LLM explanations (reference only)</label>` : ''}`;
             const actions = container.querySelector('.modal-actions');
             if (actions) container.insertBefore(box, actions); else container.appendChild(box);
         } catch {}
@@ -2082,17 +2082,17 @@
                 <div style="font-size:13px"><strong>${esc(e.title||'')}</strong>
                     ${e.model ? `<span style="color:var(--text-muted);font-size:11px">${esc(e.model)}</span>` : ''}</div>
                 ${e.status === 'unavailable'
-                    ? `<div style="font-size:12px;color:var(--text-muted)">no disponible (${esc(e.reason||'')})</div>`
+                    ? `<div style="font-size:12px;color:var(--text-muted)">unavailable (${esc(e.reason||'')})</div>`
                     : `<div style="font-size:12px;line-height:1.6">
-                         <div><strong>Resumen:</strong> ${esc(e.resumen||'')}</div>
-                         <div><strong>Porque:</strong> ${esc(e.porque||'')}</div>
-                         <div><strong>Sugerencia:</strong> ${esc(e.sugerencia||'')}</div>
+                         <div><strong>Summary:</strong> ${esc(e.resumen||'')}</div>
+                         <div><strong>Why:</strong> ${esc(e.porque||'')}</div>
+                         <div><strong>Recommendation:</strong> ${esc(e.sugerencia||'')}</div>
                        </div>`}
             </div>`).join('');
         return `
             <div class="card" style="margin-top:16px">
-                <div class="card-header"><div class="card-title">Explicaciones LLM local (referencial)</div>
-                    <span style="font-size:12px;color:var(--text-muted)">en espanol | solo referencia, no modifica veredictos ni scores</span></div>
+                <div class="card-header"><div class="card-title">Local LLM Explanations (reference only)</div>
+                    <span style="font-size:12px;color:var(--text-muted)">Spanish content | never modifies verdicts or scores</span></div>
                 ${rows}
             </div>`;
     }
@@ -2176,9 +2176,25 @@
                     <p><strong>What Jev does.</strong> After each scan or pipeline finishes, Jev (TypeSafe System One model, pinned <code>jev-1.13.0</code>) classifies every finding: verdict (<code>true_positive</code> / <code>false_positive</code> / <code>noise</code>), confidence 0-1, severity score 0-3 and immediate-action urgency 0-1. It is enrichment only -- your findings and scores never change, and if Jev is absent or errors out everything degrades to the classic output.</p>
                     <p><strong>Setup (Jev).</strong> Sidebar <strong>Jev AI</strong>: paste your TypeSafe API key, keep model pin <code>jev-1.13.0</code> and base URL <code>https://api.typesafe.ai/v1/systemone</code>, timeout 30 s -- <strong>Save</strong> -- <strong>Test Connection</strong>. The config is in memory only: re-save it after every server restart. Cost is roughly $0.0004-$0.002 per scan (input tokens only); finding titles/descriptions/severities (truncated) go to TypeSafe, nothing else leaves the machine.</p>
                     <p><strong>Setup (local LLM explainer, optional).</strong> If you run a local model (llama.cpp or any OpenAI-compatible server on loopback), configure it in <strong>Jev AI</strong> -- <em>Explicador LLM local (referencial)</em>: base URL (loopback only: <code>127.0.0.1</code> / <code>localhost</code> / <code>::1</code>, any port), model name, timeout -- <strong>Save</strong> -- <strong>Test Connection</strong>. No API key, no defaults. <strong>No GPU or local model? Leave it disabled: nothing changes</strong> and no LLM section appears anywhere.</p>
-                    <p><strong>You choose per run (J6).</strong> When you launch an individual tool (target picker) or a pipeline, an <em>AI (opcional)</em> block appears with one checkbox per configured service -- <em>Veredictos Jev AI</em> and/or <em>Explicaciones LLM local (referencial)</em> -- checked by default. Uncheck to run that scan/pipeline without it; the option applies to that run only, never to the global config.</p>
-                    <p><strong>Explanations in every format, always in Spanish.</strong> When the local LLM is enabled and Jev ran ok, as soon as a scan/pipeline finishes (right after Jev's verdicts) the system asks your local LLM for a plain-Spanish explanation -- <em>resumen / porque / sugerencia</em> -- of the top 5 Jev verdicts by composite risk, and stores them in the run result. That same Spanish text is reused everywhere: the scan/pipeline view shows an <em>Explicaciones LLM local (referencial)</em> card, PDF renders it as a section inside the AI Verdicts page, JSON exports include <code>llm_explanations</code>, and CSV adds <code>llm_resumen</code>/<code>llm_porque</code>/<code>llm_sugerencia</code> columns. Reference only: it never modifies Jev's verdict or any score. It adds about 1-2 minutes to run completion (sequential calls, hard cap 5 min) and costs $0. With the LLM disabled -- or when you opt out for the run -- or if Jev did not run, the result and every export stay byte-identical to the classic output.</p>
+                    <p><strong>You choose per run (J6).</strong> When you launch an individual tool (target picker) or a pipeline, an <em>AI (optional, per run)</em> block appears with one checkbox per configured service -- <em>Jev AI verdicts</em> and/or <em>Local LLM explanations (reference only)</em> -- checked by default. Uncheck to run that scan/pipeline without it; the option applies to that run only, never to the global config.</p>
+                    <p><strong>Explanations in every format, always in Spanish.</strong> When the local LLM is enabled and Jev ran ok, as soon as a scan/pipeline finishes (right after Jev's verdicts) the system asks your local LLM for a plain-Spanish explanation -- <em>resumen / porque / sugerencia</em> -- of the top 5 Jev verdicts by composite risk, and stores them in the run result. That same Spanish text is reused everywhere: the scan/pipeline view shows a <em>Local LLM Explanations (reference only)</em> card, PDF renders it as a section inside the AI Verdicts page, JSON exports include <code>llm_explanations</code>, and CSV adds <code>llm_resumen</code>/<code>llm_porque</code>/<code>llm_sugerencia</code> columns. Reference only: it never modifies Jev's verdict or any score. It adds about 1-2 minutes to run completion (sequential calls, hard cap 5 min) and costs $0. With the LLM disabled -- or when you opt out for the run -- or if Jev did not run, the result and every export stay byte-identical to the classic output.</p>
                     <p><strong>Where the AI data shows up.</strong> Every scan/pipeline view gets an <em>AI Verdicts (Jev)</em> card ordered by composite risk with a triage column: <strong>ACCION INMEDIATA</strong> / <strong>ACCION PROGRAMADA</strong> / <strong>REVISION MANUAL</strong> / <strong>SIN ACCION</strong> (verdicts with confidence below 0.3 are hidden). Exports carry the same data: JSON gets an <code>ai</code> block, CSV adds AI columns, PDF gets the <em>AI Verdicts (Jev)</em> section with triage table and legend. The <strong>Jev AI</strong> page has a "Como leer los veredictos" guide and a read-only <strong>Ver query</strong> inspector (shows exactly what would be sent to TypeSafe, built from a synthetic finding; nothing is sent).</p>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header"><div class="card-title">Security of this dashboard (v2.0)</div></div>
+                <div style="font-size:13px;line-height:1.8">
+                    <p><strong>Existing controls.</strong> API-key authentication (<code>X-API-Key</code>, constant-time compare); SSRF protection blocks cloud metadata endpoints, private/loopback/link-local/reserved IP ranges and internal hostnames for scan targets, webhook URLs, the Splunk endpoint and AI base URLs; webhook/Splunk secrets are in memory only, masked on read, never persisted; audit log with truncated keys; cancel endpoints for running scans/pipelines.</p>
+                    <p><strong>New AI controls (v2.0).</strong></p>
+                    <ul style="margin:8px 0;padding-left:20px;font-size:13px;line-height:1.7">
+                        <li><strong>Jev API key:</strong> in memory only, masked on read, sent only to <code>api.typesafe.ai</code>; lost on restart. Data sent: finding titles/descriptions/severities (truncated). Cost ~$0.0004-0.002 per scan.</li>
+                        <li><strong>Local LLM:</strong> server-side loopback-only enforcement (<code>127.0.0.1</code>/<code>localhost</code>/<code>::1</code>, any port); no API key; explanations are generated locally and never leave the machine.</li>
+                        <li><strong>Per-run options:</strong> plain booleans on the existing create endpoints; no new routes, no new attack surface.</li>
+                        <li><strong>AI text handling:</strong> verdicts and explanations are rendered escaped in the UI (XSS-safe) and sanitized in PDF/CSV/JSON exports. They are reference data -- never executed, never re-scored.</li>
+                        <li><strong>Known accepted surface:</strong> findings come from scanned targets, so a malicious target could embed instructions in finding text that reaches the Jev query or the local LLM prompt. Output is display-only (escaped/sanitized) and reference-only; no code path executes it.</li>
+                        <li><strong>Fail-safe:</strong> any AI error degrades to classic output; a scan/pipeline never fails because of AI.</li>
+                    </ul>
                 </div>
             </div>
 

@@ -644,6 +644,13 @@ Reglas para cada tool de este backlog:
 - **Tests**: `tests/test_ai_run_flags.py` (matriz de opts) + 6 tests en `test_report_jev.py` (columnas CSV con/llm, valores en espanol, unavailable como "no disponible (reason)", JSON scan/pipeline con/sin clave). Suite verde, ruff limpio, JS validado con node --check.
 - Estado J4/J5/J6: J4a, J4b, J4c, J5a/J5b, J5c, J5d y J6 COMPLETADOS. Cerrado el backlog Jev.
 
+### 2026-09-20 — Ronda v2.0: etiquetas en ingles + tarjeta Security en la Guide + version v2.0 (COMPLETADO)
+- **Idioma**: la UI esta en ingles; las etiquetas nuevas de J6 pasan a ingles (el CONTENIDO de las explicaciones sigue en espanol, como pide el usuario): bloque *AI (optional, per run)*, checkboxes *Jev AI verdicts* / *Local LLM explanations (reference only)*, card y seccion PDF *Local LLM Explanations (reference only)*, labels Summary/Why/Recommendation, "unavailable (reason)". Columnas CSV (`llm_resumen`/`llm_porque`/`llm_sugerencia`) y clave JSON (`llm_explanations`) no cambian: son identificadores estables para SIEM.
+- **Seguridad en la UI**: nueva tarjeta *Security of this dashboard (v2.0)* en la Guide in-app: controles existentes (auth, SSRF `validators.py`, rate limits, secrets en memoria, audit truncado) + controles nuevos de AI (key Jev solo en memoria/masked/solo a api.typesafe.ai, LLM loopback-only server-side, opciones por run sin rutas nuevas, texto AI escapado/sanitizado y referencial, superficie aceptada de prompt injection documentada, fail-safe).
+- **Version**: sidebar v1.1 → v2.0 (mayor: nueva capa de AI con endpoints y exports nuevos).
+- **Obsidian**: fusionados los folders duplicados `PROYECTOS/SEC-DASHBOARD` y `PROYECTOS/SEC-DASHBOARD 1` en `PROYECTOS/SEC-DASHBOARD` (el "1" era una copia con links reescritos; se copian sus 4 notas unicas y se borra el folder). Nueva nota completa: `sec-dashboard - AI Jev y LLM local (v2.0).md` (fases, config, evaluacion de seguridad, evidencia E2E, version/release), enlazada desde el MOC `000_SEC-DASHBOARD.md`.
+- **Release**: pendiente OK del usuario para push a origin/master (CI + Railway) y GitHub Release v2.0.
+
 ## 7. Reglas y restricciones del proyecto (NO VIOLAR)
 
 1. **NO emojis, flechas de texto ni símbolos de color** en ninguna salida, nota, script o commit (regla global del usuario). Escribir las palabras.

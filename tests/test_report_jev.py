@@ -308,24 +308,24 @@ LLM_EXPLS = [
 def test_scan_pdf_llm_explanations_section():
     text = _pdf_text(bytes(report.generate_scan_pdf(_scan(JEV, llm_explanations=LLM_EXPLS), _target()))) \
         .replace("\(", "(").replace("\)", ")")
-    assert "Explicaciones LLM local" in text
+    assert "Local LLM Explanations" in text
     assert "El sitio no envia HSTS." in text
     assert "Anadir cabecera Strict-Transport-Security." in text
     assert "dirk-test-1b" in text
     # Unavailable items are shown with their reason, not as a failure.
-    assert "no disponible (timeout)" in text
+    assert "unavailable (timeout)" in text
 
 
 def test_pipeline_pdf_llm_explanations_section():
     text = _pdf_text(bytes(report.generate_pipeline_pdf(_pipeline(JEV, llm_explanations=LLM_EXPLS), _target()))) \
         .replace("\(", "(").replace("\)", ")")
-    assert "Explicaciones LLM local" in text
+    assert "Local LLM Explanations" in text
 
 
 def test_scan_pdf_without_llm_explanations_has_no_section():
     text = _pdf_text(bytes(report.generate_scan_pdf(_scan(JEV), _target()))) \
         .replace("\(", "(").replace("\)", ")")
-    assert "Explicaciones LLM local" not in text
+    assert "Local LLM Explanations" not in text
 
 
 # ── J6: llm_explanations in JSON and CSV exports (Spanish) ─────────────
@@ -345,7 +345,7 @@ def test_scan_csv_llm_columns_spanish():
     by_title = {r[i_title]: r for r in rows[1:] if len(r) == len(header)}
     assert by_title["HSTS missing"][i_sum] == "El sitio no envia HSTS."
     # Unavailable items are shown with their reason, not as a failure.
-    assert by_title["Server banner"][i_sum].startswith("no disponible (timeout)")
+    assert by_title["Server banner"][i_sum].startswith("unavailable (timeout)")
 
 
 def test_scan_csv_without_llm_has_no_columns():
