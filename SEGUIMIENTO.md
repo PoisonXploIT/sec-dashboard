@@ -656,6 +656,9 @@ Reglas para cada tool de este backlog:
 - **Pagina Statistics** (sidebar, en ingles): `GET /api/stats` agrega TODO el historial — totales + success rate, scans/pipelines por status, pipelines por modo con elapsed medio, todas las tools usadas, conteo por target, actividad diaria 30 dias, uso AI (runs con Jev ok / con llm_explanations via json_extract). Danger zone: *Reset to zero* (`DELETE /api/reset?confirm=true`).
 - **Tests**: `tests/test_bulk_delete_stats.py` (5 tests: stats completos incl. AI counts y avg por modo, confirm gate 400, delete-all scans deja pipelines/targets intactos, targets cascada a cero). Suite verde, ruff limpio, JS node --check OK.
 - **Docs**: USER-GUIDE secciones 13 (AI controls) y 15 (Statistics + Delete All).
+- **Bug de orden de rutas (fix)**: FastAPI matchea por orden de registro; `/api/{targets,scans,pipelines}/all` quedaba DEPUES de `/{id}` y "all" se parseaba como int (422). Movidos antes de sus rutas `{id}`.
+- **E2E en vivo (:8799)**: `GET /api/stats` real (7 targets/44 scans/5 pipelines; ai: 13 scans Jev ok, 3 con llm_explanations, 5 pipes Jev ok, 4 con llm; modos fast avg 44s / nuclear avg 279s). `DELETE /api/scans/all` sin confirm = 400. `DELETE /api/targets/all?confirm=true` borra 7 targets (cascada) y stats a cero. Bucle completo: nuevo target + scan clasico (`jev:false, llm:false`) -> stats 1/1/0 con tools=[header_analyzer] y ai=0.
+- **Nota**: la historia local de pruebas se limpio en el E2E (recuperable desde `data/backups/sec_*.db`).
 
 ## 7. Reglas y restricciones del proyecto (NO VIOLAR)
 
