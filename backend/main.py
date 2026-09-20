@@ -1066,6 +1066,30 @@ async def create_target(body: TargetCreate):
         await db.close()
 
 
+@app.delete("/api/targets/all")
+async def delete_all_targets(request: Request, confirm: bool = Query(False)):
+    """Delete all targets and their history. Requires ?confirm=true.
+
+    Registered BEFORE /api/targets/{target_id} so FastAPI does not match
+    "all" as a target id."""
+    if not confirm:
+        raise HTTPException(400, "Confirmation required: add ?confirm=true")
+    _log.warning(
+        "delete-all targets ip=%s key=%s",
+        request.client.host if request.client else "?",
+        truncate_key(request.headers.get("X-API-Key")),
+    )
+    db = await get_db()
+    try:
+        await db.execute("DELETE FROM scans")
+        await db.execute("DELETE FROM pipelines")
+        cur = await db.execute("DELETE FROM targets")
+        await db.commit()
+        return {"deleted": True, "count": cur.rowcount}
+    finally:
+        await db.close()
+
+
 @app.delete("/api/targets/{target_id}")
 async def delete_target(target_id: int):
     db = await get_db()
@@ -1461,6 +1485,28 @@ async def get_scan(scan_id: int):
         await db.close()
 
 
+@app.delete("/api/scans/all")
+async def delete_all_scans(request: Request, confirm: bool = Query(False)):
+    """Delete all scan history. Requires ?confirm=true.
+
+    Registered BEFORE /api/scans/{scan_id} so FastAPI does not match
+    "all" as a scan id."""
+    if not confirm:
+        raise HTTPException(400, "Confirmation required: add ?confirm=true")
+    _log.warning(
+        "delete-all scans ip=%s key=%s",
+        request.client.host if request.client else "?",
+        truncate_key(request.headers.get("X-API-Key")),
+    )
+    db = await get_db()
+    try:
+        cur = await db.execute("DELETE FROM scans")
+        await db.commit()
+        return {"deleted": True, "count": cur.rowcount}
+    finally:
+        await db.close()
+
+
 @app.delete("/api/scans/{scan_id}")
 async def delete_scan(scan_id: int):
     db = await get_db()
@@ -1798,6 +1844,28 @@ async def pipeline_result(pipeline_id: int):
         await db.close()
 
 
+@app.delete("/api/pipelines/all")
+async def delete_all_pipelines(request: Request, confirm: bool = Query(False)):
+    """Delete all pipeline history. Requires ?confirm=true.
+
+    Registered BEFORE /api/pipelines/{pipeline_id} so FastAPI does not
+    match "all" as a pipeline id."""
+    if not confirm:
+        raise HTTPException(400, "Confirmation required: add ?confirm=true")
+    _log.warning(
+        "delete-all pipelines ip=%s key=%s",
+        request.client.host if request.client else "?",
+        truncate_key(request.headers.get("X-API-Key")),
+    )
+    db = await get_db()
+    try:
+        cur = await db.execute("DELETE FROM pipelines")
+        await db.commit()
+        return {"deleted": True, "count": cur.rowcount}
+    finally:
+        await db.close()
+
+
 @app.delete("/api/pipelines/{pipeline_id}")
 async def delete_pipeline(pipeline_id: int):
     db = await get_db()
@@ -2023,65 +2091,6 @@ async def splunk_export_all():
 
 
 # ── Reset ──────────────────────────────────────────────────────
-@app.delete("/api/scans/all")
-async def delete_all_scans(request: Request, confirm: bool = Query(False)):
-    """Delete all scan history. Requires ?confirm=true."""
-    if not confirm:
-        raise HTTPException(400, "Confirmation required: add ?confirm=true")
-    _log.warning(
-        "delete-all scans ip=%s key=%s",
-        request.client.host if request.client else "?",
-        truncate_key(request.headers.get("X-API-Key")),
-    )
-    db = await get_db()
-    try:
-        cur = await db.execute("DELETE FROM scans")
-        await db.commit()
-        return {"deleted": True, "count": cur.rowcount}
-    finally:
-        await db.close()
-
-
-@app.delete("/api/pipelines/all")
-async def delete_all_pipelines(request: Request, confirm: bool = Query(False)):
-    """Delete all pipeline history. Requires ?confirm=true."""
-    if not confirm:
-        raise HTTPException(400, "Confirmation required: add ?confirm=true")
-    _log.warning(
-        "delete-all pipelines ip=%s key=%s",
-        request.client.host if request.client else "?",
-        truncate_key(request.headers.get("X-API-Key")),
-    )
-    db = await get_db()
-    try:
-        cur = await db.execute("DELETE FROM pipelines")
-        await db.commit()
-        return {"deleted": True, "count": cur.rowcount}
-    finally:
-        await db.close()
-
-
-@app.delete("/api/targets/all")
-async def delete_all_targets(request: Request, confirm: bool = Query(False)):
-    """Delete all targets and their history. Requires ?confirm=true."""
-    if not confirm:
-        raise HTTPException(400, "Confirmation required: add ?confirm=true")
-    _log.warning(
-        "delete-all targets ip=%s key=%s",
-        request.client.host if request.client else "?",
-        truncate_key(request.headers.get("X-API-Key")),
-    )
-    db = await get_db()
-    try:
-        await db.execute("DELETE FROM scans")
-        await db.execute("DELETE FROM pipelines")
-        cur = await db.execute("DELETE FROM targets")
-        await db.commit()
-        return {"deleted": True, "count": cur.rowcount}
-    finally:
-        await db.close()
-
-
 @app.delete("/api/reset")
 async def reset_all(request: Request, confirm: bool = Query(False)):
     """Reset all data. Requires ?confirm=true to prevent accidental wipes."""
