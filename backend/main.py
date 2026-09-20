@@ -1725,6 +1725,30 @@ async def test_jev_endpoint():
     return await jev.test_jev()
 
 
+@app.get("/api/jev/query")
+async def get_jev_query(n: int = 1):
+    """Read-only inspector (J4c): the exact query template that would be sent
+    to TypeSafe for n findings, built with a synthetic finding. It never
+    sends anything and never stores state; it exists so an auditor can see
+    exactly what leaves the machine."""
+    n = max(1, min(int(n or 1), 3))
+    sample_state = jev._finding_state([{
+        "tool": "sample_tool",
+        "category": "sample_category",
+        "severity": "sample_severity",
+        "title": "SAMPLE_FINDING_TITLE (never sent)",
+        "description": "SAMPLE_FINDING_DESCRIPTION (never sent)",
+    }])
+    return {
+        "note": "Read-only preview. Nothing is sent to TypeSafe by this call.",
+        "model": jev.get_jev_config().get("model"),
+        "state_truncation": {"title": 200, "description": 300},
+        "sample_state": sample_state[:1],
+        "questions_for_finding_0": jev._build_questions(1),
+        "questions_template_repeated_per_finding": n,
+    }
+
+
 # ── Local LLM explainer (Fase J5): reference layer over Jev verdicts ──
 class LocalLlmConfig(BaseModel):
     enabled: bool = False

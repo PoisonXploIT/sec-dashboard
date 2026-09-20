@@ -611,6 +611,12 @@ Reglas para cada tool de este backlog:
 - **E2E real**: scan 54 (header_analyzer, example.com) + Jev `jev-1.13.0` + LLM local llama.cpp `dirk-qwen3.8-27b-iq3` en :8099 -> `POST /api/llm/explain` devolvio explicacion en espanol acotada y correcta (HSTS). Coste Jev inalterado; J5 = $0 local.
 - Siguiente: J4c (guia UI + inspector "Ver query") y, opcional, J5c (explicaciones top N en export).
 
+### 2026-09-20 — Fase J4c: guia de lectura + inspector de query (COMPLETADO)
+- **Guia UI** (pagina Jev AI, tarjeta "Como leer los veredictos"): significado de veredicto/confianza/severity_score/immediate_action, los 4 buckets de triaje con sus reglas (umbral 0.5 en `backend/triage.py`), coste por scan y privacidad (que datos salen; con LLM local no sale nada).
+- **Inspector "Ver query"** (`GET /api/jev/query`, solo lectura): devuelve la plantilla EXACTA que se enviaria a TypeSafe construida en local con un finding sintetico (choice + criteria, score 0-3 + niveles, noul), truncacion de state (200/300) y modelo pin. No envia nada ni guarda estado; para auditoria. Boton "Ver query" en la pagina Jev AI con panel <pre>.
+- Test: `test_jev_query_inspector_is_read_only_and_bounded` (n acotado a 3, tipos de pregunta, state sintetico).
+- Estado J4/J5: J4a, J4b, J4c y J5a/J5b COMPLETADOS. Pendiente opcional: J5c (explicaciones top N en export).
+
 ## 7. Reglas y restricciones del proyecto (NO VIOLAR)
 
 1. **NO emojis, flechas de texto ni símbolos de color** en ninguna salida, nota, script o commit (regla global del usuario). Escribir las palabras.

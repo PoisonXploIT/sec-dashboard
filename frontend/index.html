@@ -2750,6 +2750,28 @@ search index=sec_dashboard | timechart count</pre></div>
                 </div>
             </div>
             <div class="card">
+                <div class="card-header"><div class="card-title">Como leer los veredictos (guia)</div></div>
+                <div style="font-size:13px;line-height:1.8">
+                    <p><strong>Veredicto:</strong> <code>true_positive</code> = exposicion real; <code>false_positive</code> = artefacto del scanner; <code>noise</code> = output informativo sin riesgo.</p>
+                    <p><strong>Confianza (0-1):</strong> >= 0.5 se confia en el veredicto; 0.3-0.5 va a REVISION MANUAL; < 0.3 se oculta del todo (regla J0).</p>
+                    <p><strong>severity_score (0-3) e immediate_action (0-1):</strong> alimentan el bucket de triaje y el orden por riesgo compuesto (severidad x severity_score).</p>
+                    <p><strong>Buckets de triaje</strong> (umbral 0.5, configurable solo en codigo — <code>backend/triage.py</code>):
+                        ACCION INMEDIATA (tp + conf>=0.5 + (action>=0.5 o sev>=2)) | ACCION PROGRAMADA (tp + conf>=0.5) |
+                        REVISION MANUAL (conf 0.3-0.5) | SIN ACCION (noise/fp con conf>=0.5).</p>
+                    <p><strong>Coste:</strong> una sola llamada por scan (~$0.0004-0.002, solo tokens de entrada). El explicador LLM local es $0 y no cambia nada de esto.</p>
+                    <p><strong>Privacidad:</strong> salen solo tool/category/severidad/titulo/descripcion truncados; nunca evidence ni payloads. Con el LLM local no sale nada de la maquina.</p>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header"><div class="card-title">Inspector: query exacta a TypeSafe (solo lectura)</div></div>
+                <p style="font-size:13px;color:var(--text-secondary);margin-bottom:8px">
+                    Muestra la plantilla EXACTA que se enviaria por finding, construida en local con un finding
+                    sintetico. Esta llamada NO envia nada a TypeSafe; es para auditoria.
+                </p>
+                <button class="btn" onclick="showJevQuery()">Ver query</button>
+                <div id="jev-query-panel" style="margin-top:12px"></div>
+            </div>
+            <div class="card">
                 <div class="card-header"><div class="card-title">Explicador LLM local (referencial)</div>
                     <span class="badge-status ${llm.enabled?'badge-completed':'badge-pending'}">${llm.enabled?'Enabled':'Disabled'}</span>
                 </div>
@@ -2813,6 +2835,18 @@ search index=sec_dashboard | timechart count</pre></div>
         } catch (e) {
             resultDiv.innerHTML = `<div class="finding-card vuln"><strong>Error:</strong> ${esc(e.message)}</div>`;
             toast('Test failed: ' + e.message, 'error');
+        }
+    }
+
+    async function showJevQuery() {
+        const panel = document.getElementById('jev-query-panel');
+        if (!panel) return;
+        panel.innerHTML = '<div class="skeleton" style="width:200px"></div>';
+        try {
+            const data = await api.get('/jev/query');
+            panel.innerHTML = `<pre style="font-size:11px;overflow:auto;max-height:420px;padding:12px;border:1px solid var(--border);border-radius:6px;background:var(--bg-tertiary)">${esc(JSON.stringify(data, null, 2))}</pre>`;
+        } catch (e) {
+            panel.innerHTML = `<div style="font-size:13px;color:var(--text-muted)">no disponible (${esc(e.message)})</div>`;
         }
     }
 

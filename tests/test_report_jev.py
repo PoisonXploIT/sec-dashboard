@@ -267,3 +267,22 @@ def test_executive_pdf_no_ai_section_without_jev():
 def test_executive_pdf_skipped_jev_is_treated_as_absent():
     jev = dict(JEV, status="skipped", reason="no_api_key")
     assert "AI Verdicts" not in _exec_text(_pipeline(jev))
+
+
+# ── J4c: read-only query inspector (GET /api/jev/query) ───────────────
+
+def test_jev_query_inspector_is_read_only_and_bounded():
+    import asyncio
+
+    import backend.main as main
+
+    res = asyncio.run(main.get_jev_query(n=99))  # bounded to 3
+    assert "Nothing is sent" in res["note"]
+    assert res["questions_template_repeated_per_finding"] == 3
+    q0 = res["questions_for_finding_0"]
+    assert set(q0.keys()) == {"f0_verdict", "f0_sev", "f0_action"}
+    assert q0["f0_verdict"]["type"] == "choice"
+    assert q0["f0_sev"]["type"] == "score"
+    assert q0["f0_action"]["type"] == "noul"
+    # Synthetic state: no real finding data can leak.
+    assert res["sample_state"][0]["title"].startswith("SAMPLE_FINDING_TITLE")
