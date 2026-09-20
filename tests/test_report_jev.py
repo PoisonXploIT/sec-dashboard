@@ -194,6 +194,30 @@ def test_executive_pdf_ai_section_when_jev_ok():
     assert text.index("HSTS missing", ai_pos) < text.index("Server banner", ai_pos)
 
 
+def test_scan_pdf_ai_section_when_jev_ok():
+    text = _pdf_text(bytes(report.generate_scan_pdf(_scan(JEV), _target()))) \
+        .replace("\\(", "(").replace("\\)", ")")
+    assert "AI Verdicts (Jev)" in text
+    assert "jev-1.13.0" in text and "true_positive" in text
+
+
+def test_scan_pdf_no_ai_section_without_jev():
+    text = _pdf_text(bytes(report.generate_scan_pdf(_scan(), _target())))
+    assert "AI Verdicts" not in text
+
+
+def test_pipeline_pdf_ai_section_when_jev_ok():
+    text = _pdf_text(bytes(report.generate_pipeline_pdf(_pipeline(JEV), _target()))) \
+        .replace("\\(", "(").replace("\\)", ")")
+    assert "AI Verdicts (Jev)" in text
+    assert "jev-1.13.0" in text and "noise" in text
+
+
+def test_pipeline_pdf_no_ai_section_without_jev():
+    text = _pdf_text(bytes(report.generate_pipeline_pdf(_pipeline(), _target())))
+    assert "AI Verdicts" not in text
+
+
 def test_executive_pdf_no_ai_section_without_jev():
     assert "AI Verdicts" not in _exec_text(_pipeline())
 

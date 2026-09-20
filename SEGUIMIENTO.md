@@ -581,6 +581,7 @@ Reglas para cada tool de este backlog:
 - **Tests**: nuevo `tests/test_report_jev.py` (13 tests: JSON/CSV/PDF con y sin jev, fallback a indice para ids legacy, orden por riesgo compuesto) + 2 en `test_compare_endpoint.py` (AI en delta con status ok; parcial cuando solo un run tiene jev). Suite completa: **398 tests passed**; ruff OK.
 - **E2E con API real** (server local :8799, key SOLO por env `TYPESAFE_API_KEY` mapeada de la user-env `TYPESAFE_API_KEY_PI`; `base_url` `https://api.typesafe.ai/v1/systemone` segun docs oficiales de TypeSafe): scan header_analyzer contra example.com -> jev ok, 11 verdicts (4.288 tok entrada); export JSON con bloque ai (11) + CSV con columnas AI; 2 pipelines "fast" sobre el mismo target -> compare muestra 4 persistentes con prev/cur (noise->noise, true_positive->true_positive); PDF ejecutivo renderiza "AI Verdicts (Jev)". Coste total $0.0003 (7.686 tok entrada).
 - **Deploy Railway**: sin cambios; Jev sigue deshabilitado por defecto. Habilitarlo en publico solo con env `TYPESAFE_API_KEY`, bajo responsabilidad individual (regla 6 de J1: no habilitarlo alli mientras se escanean targets sensibles de terceros).
+- **J3 follow-up (2026-09-20)**: los PDFs normales (boton "PDF" de scan/pipeline) tambien llevan ahora la seccion "AI Verdicts (Jev)"; antes solo la llevaba el ejecutivo. Helper comun `_render_jev_section` en report.py (mismo bloque en los tres PDFs). Suite: 402 tests.
 
 ## 7. Reglas y restricciones del proyecto (NO VIOLAR)
 

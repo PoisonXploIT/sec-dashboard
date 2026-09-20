@@ -845,6 +845,13 @@ def generate_scan_pdf(scan: dict, target: dict = None) -> bytes:
         pdf.set_font("Helvetica", "", 9)
         pdf.multi_cell(0, 6, str(result_data.get("error", "")))
 
+    # AI verdicts (Jev, Fase J3): same section as the executive PDF.
+    jev = _jev_ok(result_data)
+    if jev is not None:
+        findings = _findings_from_json(scan.get("findings")) or \
+            [f for f in (result_data.get("findings") or []) if isinstance(f, dict)]
+        _render_jev_section(pdf, findings, jev)
+
     # Raw JSON appendix
     pdf.add_page()
     pdf.section_title("Raw JSON Output")
@@ -924,6 +931,13 @@ def generate_pipeline_pdf(pipeline: dict, target: dict = None) -> bytes:
                     pdf.set_text_color(0, 0, 0)
                 pdf.ln(1)
 
+    # AI verdicts (Jev, Fase J3): same section as the executive PDF.
+    jev = _jev_ok(result_data)
+    if jev is not None:
+        findings = _findings_from_json(pipeline.get("findings")) or \
+            [f for f in (result_data.get("findings") or []) if isinstance(f, dict)]
+        _render_jev_section(pdf, findings, jev)
+
     # Raw JSON appendix
     pdf.add_page()
     pdf.section_title("Raw JSON Output")
@@ -978,6 +992,15 @@ def executive_top_findings(findings: list[dict], limit: int = 10) -> list[dict]:
     return sorted(findings, key=_rank, reverse=True)[:limit]
 
 
+def _findings_from_json(raw) -> list[dict]:
+    """Parse a persisted findings JSON column (legacy/corrupt -> [])."""
+    try:
+        parsed = json.loads(raw or "[]")
+    except (TypeError, json.JSONDecodeError):
+        return []
+    return [f for f in parsed if isinstance(f, dict)] if isinstance(parsed, list) else []
+
+
 def _jev_ai_rows(findings: list[dict], jev: dict) -> list[dict]:
     """Findings joined with AI verdicts, ordered by composite risk (J2 rule)."""
     verdicts = jev.get("verdicts") or {}
@@ -1001,6 +1024,56 @@ def _jev_ai_rows(findings: list[dict], jev: dict) -> list[dict]:
         })
     rows.sort(key=lambda r: r["risk"], reverse=True)
     return rows
+
+
+def _render_jev_section(pdf, findings: list[dict], jev: dict) -> None:
+    """Render the 'AI Verdicts (Jev)' page section (Fase J3).
+
+    Shared by the executive PDF and the classic scan/pipeline PDFs so every
+    export carries the same verdict table. Only called when _jev_ok() has data;
+    without it the reports stay byte-identical to the pre-J3 output.
+    """
+    pdf.add_page()
+    pdf.section_title("AI Verdicts (Jev)")
+    ai_rows = _jev_ai_rows(findings, jev)
+    counts: dict[str, int] = {}
+    for r in ai_rows:
+        key = str(r["verdict"] or "?")
+        counts[key] = counts.get(key, 0) + 1
+    pdf.kv_row("Model", str(jev.get("model") or ""))
+    pdf.kv_row("Findings evaluated", str(len(ai_rows)))
+    for label in ("true_positive", "false_positive", "noise"):
+        if counts.get(label):
+            pdf.kv_row(label, str(counts[label]))
+    usage = jev.get("usage") or {}
+    if isinstance(usage, dict) and usage.get("input_tokens") is not None:
+        pdf.kv_row("Input tokens", str(usage.get("input_tokens")))
+    if ai_rows:
+        pdf.ln(2)
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.cell(18, 5, "Risk", border=1)
+        pdf.cell(24, 5, "Severity", border=1)
+        pdf.cell(34, 5, "AI verdict", border=1)
+        pdf.cell(16, 5, "Conf", border=1)
+        pdf.cell(98, 5, "Title", border=1, new_x="LMARGIN", new_y="NEXT")
+        for r in ai_rows[:15]:
+            if pdf.get_y() > 250:
+                pdf.add_page()
+            conf = r["confidence"]
+            conf_s = f"{conf:.2f}" if isinstance(conf, (int, float)) else ""
+            pdf.set_font("Helvetica", "", 8)
+            pdf.cell(18, 5, f"{r['risk']:.1f}", border=1)
+            pdf.cell(24, 5, r["severity"][:10], border=1)
+            pdf.cell(34, 5, _sanitize(str(r["verdict"] or ""))[:32], border=1)
+            pdf.cell(16, 5, conf_s, border=1)
+            pdf.cell(98, 5, _sanitize(r["title"])[:70], border=1, new_x="LMARGIN", new_y="NEXT")
+        if len(ai_rows) > 15:
+            pdf.set_font("Helvetica", "I", 7)
+            pdf.cell(0, 4, f"  ... ({len(ai_rows)} verdicts total, top 15 by composite risk)",
+                     new_x="LMARGIN", new_y="NEXT")
+    else:
+        pdf.set_font("Helvetica", "", 9)
+        pdf.cell(0, 6, "Jev ran but returned no usable verdicts.", new_x="LMARGIN", new_y="NEXT")
 
 
 def executive_heatmap(findings: list[dict]) -> dict[str, dict[str, int]]:
@@ -1122,47 +1195,7 @@ def generate_executive_pdf(pipeline: dict, target: dict = None) -> bytes:
     # ── AI verdicts (Jev, Fase J3) ─────────────────────────
     jev = _jev_ok(data)
     if jev is not None:
-        pdf.add_page()
-        pdf.section_title("AI Verdicts (Jev)")
-        ai_rows = _jev_ai_rows(findings, jev)
-        counts: dict[str, int] = {}
-        for r in ai_rows:
-            key = str(r["verdict"] or "?")
-            counts[key] = counts.get(key, 0) + 1
-        pdf.kv_row("Model", str(jev.get("model") or ""))
-        pdf.kv_row("Findings evaluated", str(len(ai_rows)))
-        for label in ("true_positive", "false_positive", "noise"):
-            if counts.get(label):
-                pdf.kv_row(label, str(counts[label]))
-        usage = jev.get("usage") or {}
-        if isinstance(usage, dict) and usage.get("input_tokens") is not None:
-            pdf.kv_row("Input tokens", str(usage.get("input_tokens")))
-        if ai_rows:
-            pdf.ln(2)
-            pdf.set_font("Helvetica", "B", 8)
-            pdf.cell(18, 5, "Risk", border=1)
-            pdf.cell(24, 5, "Severity", border=1)
-            pdf.cell(34, 5, "AI verdict", border=1)
-            pdf.cell(16, 5, "Conf", border=1)
-            pdf.cell(98, 5, "Title", border=1, new_x="LMARGIN", new_y="NEXT")
-            for r in ai_rows[:15]:
-                if pdf.get_y() > 250:
-                    pdf.add_page()
-                conf = r["confidence"]
-                conf_s = f"{conf:.2f}" if isinstance(conf, (int, float)) else ""
-                pdf.set_font("Helvetica", "", 8)
-                pdf.cell(18, 5, f"{r['risk']:.1f}", border=1)
-                pdf.cell(24, 5, r["severity"][:10], border=1)
-                pdf.cell(34, 5, _sanitize(str(r["verdict"] or ""))[:32], border=1)
-                pdf.cell(16, 5, conf_s, border=1)
-                pdf.cell(98, 5, _sanitize(r["title"])[:70], border=1, new_x="LMARGIN", new_y="NEXT")
-            if len(ai_rows) > 15:
-                pdf.set_font("Helvetica", "I", 7)
-                pdf.cell(0, 4, f"  ... ({len(ai_rows)} verdicts total, top 15 by composite risk)",
-                         new_x="LMARGIN", new_y="NEXT")
-        else:
-            pdf.set_font("Helvetica", "", 9)
-            pdf.cell(0, 6, "Jev ran but returned no usable verdicts.", new_x="LMARGIN", new_y="NEXT")
+        _render_jev_section(pdf, findings, jev)
 
     # ── Heatmap: category x severity ───────────────────────────
     pdf.add_page()
