@@ -1656,6 +1656,7 @@
             <div class="card"><div class="card-header"><div class="card-title">Pipeline #${id} -- ${esc(data.mode||'')}</div><div class="flex gap-8"><span class="badge-status badge-${data.status}">${data.status}</span> <button class="btn btn-sm" onclick="downloadJSON('/api/pipelines/${id}/export/json', 'pipeline_${id}.json')">JSON</button> <button class="btn btn-sm" onclick="downloadCSV('/api/pipelines/${id}/export/csv', 'pipeline_${id}.csv')">CSV</button> <button class="btn btn-sm" onclick="downloadPDF('/api/pipelines/${id}/export/pdf', 'pipeline_${id}.pdf')">PDF</button> <button class="btn btn-sm" onclick="downloadPDF('/api/pipelines/${id}/executive-pdf', 'pipeline_${id}_executive.pdf')">Exec</button> <button class="btn btn-sm" title="Evolucion del target entre scans" onclick="showTargetEvolution(${data.target_id})">Evol</button> <button class="btn btn-sm btn-danger" onclick="deletePipeline(${id})">Delete</button></div></div>
             <div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px">Target: ${esc(data.target_name||'')} | Elapsed: ${result.elapsed_seconds||'?'}s | Tools: ${result.total_tools||'?'}</div>
             </div>
+            ${jevVerdictsHtml(result)}
             ${phasesHtml || '<div class="empty-state"><h3>No results data</h3><p>Pipeline may still be running or failed without results.</p></div>'}`;
     }
 
@@ -1934,6 +1935,52 @@
         `;
     }
 
+    // ── Jev AI verdicts (Fase J2) ─────────────────────
+    const JEV_CONFIDENCE_THRESHOLD = 0.5;  // validado en J0 (pipeline 6, 2026-09-19)
+    const JEV_SEV_WEIGHT = {critical:10, high:7, medium:4, low:2, info:0};
+
+    function jevBadge(verdict) {
+        if (!verdict) return '';
+        const c = verdict.verdict_confidence;
+        if (c === null || c === undefined) return '';
+        if (c >= JEV_CONFIDENCE_THRESHOLD) {
+            const map = {
+                true_positive: ['tag-red', 'AI: true positive'],
+                false_positive: ['tag-green', 'AI: false positive'],
+                noise: ['tag', 'AI: noise'],
+            };
+            const [cls, label] = map[verdict.verdict] || ['tag', 'AI: ' + (verdict.verdict||'?')];
+            return `<span class="tag ${cls}" title="confidence ${c}">${label} (${c})</span>`;
+        }
+        if (c >= 0.3) return `<span class="tag tag-yellow" title="confidence ${c}">AI: revisar (${c})</span>`;
+        return '';
+    }
+
+    function jevVerdictsHtml(result) {
+        const jev = result && result.jev;
+        if (!jev || jev.status !== 'ok' || !Array.isArray(result.findings)) return '';
+        const rows = result.findings.map(f => {
+            const v = (jev.verdicts || {})[String(f.finding_id || '')] || {};
+            const sev = String(f.severity||'info').toLowerCase();
+            const risk = (JEV_SEV_WEIGHT[sev] ?? 0) * (v.severity_score ?? 0);
+            return {f, v, risk};
+        }).sort((a, b) => b.risk - a.risk);
+        if (!rows.length) return '';
+        const trs = rows.map(({f, v, risk}) => `
+            <tr>
+                <td style="font-size:12px">${risk ? risk.toFixed(1) : '<span style="color:var(--text-muted)">-</span>'}</td>
+                <td><span class="tag ${evoSevClass(f.severity)}">${esc(String(f.severity||'').toUpperCase())}</span></td>
+                <td style="font-size:12px"><strong>${esc(f.title||'')}</strong> <span style="color:var(--text-muted)">${esc(f.tool||'')}</span></td>
+                <td>${jevBadge(v)}</td>
+            </tr>`).join('');
+        return `
+            <div class="card" style="margin-top:16px">
+                <div class="card-header"><div class="card-title">AI Verdicts (Jev)</div>
+                    <span style="font-size:12px;color:var(--text-muted)">${esc(jev.model||'')} | ${jev.count} findings | riesgo = severidad x score AI</span></div>
+                <table><thead><tr><th>Risk</th><th>Sev</th><th>Finding</th><th>AI</th></tr></thead><tbody>${trs}</tbody></table>
+            </div>`;
+    }
+
     async function viewScanResult(id) {
         let scan;
         try { scan = await api.get(`/scans/${id}`); } catch { return; }
@@ -1943,6 +1990,7 @@
         content.innerHTML = `<button class="btn mb-16" onclick="renderHistoryPage()">Back</button>
             <div class="card"><div class="card-header"><div class="card-title">${esc(scan.tool)} -- ${esc(scan.target_name||'')}</div><div class="flex gap-8"><span class="badge-status badge-${scan.status}">${scan.status}</span> <button class="btn btn-sm" onclick="downloadJSON('/api/scans/${id}/export/json', 'scan_${id}.json')">JSON</button> <button class="btn btn-sm" onclick="downloadCSV('/api/scans/${id}/export/csv', 'scan_${id}.csv')">CSV</button> <button class="btn btn-sm" onclick="downloadPDF('/api/scans/${id}/export/pdf', 'scan_${id}.pdf')">PDF</button> <button class="btn btn-sm btn-danger" onclick="deleteScan(${id})">Delete</button></div></div>
             ${result.success ? formatResult(scan.tool, result.result) : `<div class="result-panel"><pre style="color:var(--red)">${esc(result.error||'Unknown error')}</pre></div>`}
+            ${jevVerdictsHtml(result)}
             </div>`;
     }
 
