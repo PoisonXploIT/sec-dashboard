@@ -595,7 +595,8 @@
             : `all ${kind} history`;
         if (!confirm(`Delete ${what}? This cannot be undone.`)) return;
         try {
-            await api.del(`/api/${kind}/all?confirm=true`);
+            // Note: api.del already prefixes /api (same as the single deletes).
+            await api.del(`/${kind}/all?confirm=true`);
             toast(`${kind.charAt(0).toUpperCase() + kind.slice(1)} history deleted`, 'success');
         } catch (e) { toast(e.message, 'error'); return; }
         if (state.page === 'dashboard') renderDashboard();
