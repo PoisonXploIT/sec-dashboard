@@ -16,6 +16,7 @@
 - **Último commit de código**: `0ae4c44` (bunker plan de seguridad 2.1/2.3/2.4/2.5) tras `c13e01a` (export PDF latin-1).
 - **Fecha del commit**: 2026-08-27.
 - **Plan de seguridad (bunker)**: `0ae4c44` — hecho 2.1 (lockout auth + rate limit por API key + logs truncados), 2.3 (purge/backup DB), 2.4 (audit log + alertas fallo encadenado), 2.5 (non-root Docker, pip-audit CI, dependabot); pendiente: network policies (egress, lado deploy) y encriptación DB en reposo (opcional, fuera de MVP). Ver sección 6.
+- **Fase Jev (TypeSafe)**: J1 implementado el 2026-09-19 (`backend/jev.py` + endpoints `/api/jev*` + pagina UI "Jev AI" + hooks no bloqueantes en persist de scans/pipelines). Deshabilitado por defecto; key por UI o env `TYPESAFE_API_KEY`. Pendiente J0 (validacion con datos propios) y J2 (UI riesgo compuesto). Backup pre-cambio: tag `pre-jev-20260919`.
 - **Estado del plan**: Fase 1 COMPLETA de verdad (F1-FAVICON `912676b`). **Fase 2 COMPLETA**: Full Depth pipeline (`a0cf16a`), reporte ejecutivo PDF (`10ed28f`), comparativa histórica en History (`165af5d`). **Fase 3 / 3E CERRADA**: sub-micro-pasos 1 (CLI headless, `3da329e`), 2 (modo light dedicado, `6f230b0`) y 3 (búsqueda en History, `85f51f3`) completos. **CLI enrichment completa** (`8ef2853`): `--tool TOOL_ID --target HOST` (run_tool directo), `--list-tools`, `--list-pipelines`, mutua exclusión `--tool`/`--pipeline`. **Cola de micro-pasos fijada por el usuario** (2026-08-26, antes de hardware/TUI): rate limiting → paginación server-side → F1-FAVICON → export CSV → logging estructurado; luego hardware/TUI con capturas reales. **Rate limiting COMPLETO** (`6df6c70`); **paginación server-side COMPLETA** (`e528101`); **F1-FAVICON COMPLETA** (`912676b`); **EXPORT CSV COMPLETO** (`993ab45`); **LOGGING ESTRUCTURADO COMPLETO** (`6e8e8c1`, cierra la cola de micro-pasos); **WAYBACK_URLS COMPLETA** (`a7762e3`); **EXPLOITDB_SEARCH COMPLETA** (`2a9dc52`); **SHODAN_LOOKUP EXTENDIDA** (`15c101c`, dsearch con key + fallback /host), cola principal OSINT CERRADA (publicwww_search COMPLETO `15e5b25`; pendientes alternativas a eleccion).
 
 ### Comandos de referencia (siempre desde el repo)
@@ -551,6 +552,23 @@ Reglas para cada tool de este backlog:
   - Escaneo masivo no autorizado → rotar API key + revisar logs para patrón.
   - Railway cae → health check + alerta vía CI/deploy hooks.
   - Finding con secret real filtrado → revocar/rotar inmediatamente las keys afectadas.
+
+### 2026-09-19 — Fase Jev: integracion de TypeSafe Jev como capa de veredictos (J1 implementado)
+- **Backup previo**: commit `4f69696` + tag `pre-jev-20260919` empujados a origin; zip en `Destino/PROYECTOS/SEC-DASHBOARD-backup-code-20260919-pre-jev.zip`.
+- **Brainstorming y plan**: `Destino/TYPESAFE AI - JEV/TYPESAFE AI - JEV - Brainstorming Integraciones SEC-DASHBOARD y LOGVIEWER.md` (planes J0-J3 / L0-L3, tabla de validacion pendiente).
+- **Implementado (J1)**:
+  - `backend/jev.py`: config in-memory (mismo patron que splunk.py), key por UI o env `TYPESAFE_API_KEY`, model pinnado `jev-1.13.0`, `enrich_findings()` no bloqueante (degrada a scoring clasico, nunca rompe scan), `test_jev()`. Una sola llamada `/v1/systemone` por scan con preguntas en paralelo por finding: Choice verdict (true_positive/false_positive/noise) + Score severidad 0-3 + Noul "immediate action".
+  - `backend/main.py`: endpoints `GET/POST /api/jev` (key mascarada como la password de Splunk), `POST /api/jev/test`; hooks de enrichment en `_persist_scan_result` y `_persist_pipeline_result` (el veredicto se guarda dentro de `result["jev"]`, sin migrar schema).
+  - `frontend/index.html`: pagina "Jev AI" (nav + form + test), mismo patron que la pagina Splunk.
+- **Mejoras de seguridad incorporadas con el cambio**:
+  1. Key solo en memoria, nunca a disco; GET `/api/jev` devuelve `***` (mismo rule que password Splunk); fallback env para deploys sin teclear key en UI.
+  2. Minimizacion de datos: por finding se envian SOLO tool/category/severity/title/description truncados; evidence NUNCA; cap duro `max_findings` (default 100) = cap de coste y de data.
+  3. SSRF: si `base_url` difiere del endpoint publico por defecto, pasa el mismo `_validate_webhook_url` que los webhooks (en remote mode bloquea private/loopback/metadata).
+  4. Fail-safe total: cualquier error (timeout, 429/529 con retry/backoff, HTTP != 200) degrada a scoring clasico; el scan/pipeline nunca falla por Jev.
+  5. Auditabilidad: se guarda en `result["jev"]` el `model` reportado por la API (version real, no el alias pedido) + usage; logs con `truncate_key` ya existente.
+  6. Responsabilidad individual documentada en la propia UI: en el deploy publico (Railway), habilitarlo envia findings a un tercero; la pagina lo advierte y la regla es NO habilitarlo alli mientras se escanean targets sensibles de terceros.
+- **Verificado**: compileall OK, ruff OK, 383 tests passed, import de `backend.main` OK. Sin key configurada el sistema se comporta exactamente igual que antes (skipped).
+- **Pendiente (J0/J2)**: J0 = llamada real con findings de un scan y comparar contra juicio humano (rellenar tabla de validacion en la nota de brainstorming); J2 = badge "AI" + orden por riesgo compuesto en UI; J3 = export Splunk/PDF con veredicto. Deploy Railway: solo con env `TYPESAFE_API_KEY` si se decide habilitar, bajo responsabilidad individual.
 
 ## 7. Reglas y restricciones del proyecto (NO VIOLAR)
 

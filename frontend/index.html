@@ -358,6 +358,9 @@
             <a class="nav-item" data-page="splunk" onclick="navigate('splunk')">
                 <span class="icon">SP</span> Splunk
             </a>
+            <a class="nav-item" data-page="jev" onclick="navigate('jev')">
+                <span class="icon">Jv</span> Jev AI
+            </a>
             <div class="nav-section" style="margin-top: 16px;">Categories</div>
             <a class="nav-item" onclick="filterCategory('Network Recon')">
                 <span class="icon"></span> Network Recon
@@ -534,9 +537,9 @@
         document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
         const navEl = document.querySelector(`[data-page="${page}"]`);
         if (navEl) navEl.classList.add('active');
-        const titles = {dashboard:'Dashboard',tools:'Security Tools',pipeline:'Pipeline Engine',targets:'Targets',history:'Scan History',guide:'User Guide',proxy:'Proxy / Anonymity',webhooks:'Webhooks',splunk:'Splunk Integration'};
+        const titles = {dashboard:'Dashboard',tools:'Security Tools',pipeline:'Pipeline Engine',targets:'Targets',history:'Scan History',guide:'User Guide',proxy:'Proxy / Anonymity',webhooks:'Webhooks',splunk:'Splunk Integration',jev:'Jev AI'};
         document.getElementById('page-title').textContent = titles[page] || page;
-        const renderers = {dashboard:renderDashboard,tools:renderTools,pipeline:renderPipelinePage,targets:renderTargets,history:renderHistoryPage,guide:renderGuide,proxy:renderProxy,webhooks:renderWebhooks,splunk:renderSplunk};
+        const renderers = {dashboard:renderDashboard,tools:renderTools,pipeline:renderPipelinePage,targets:renderTargets,history:renderHistoryPage,guide:renderGuide,proxy:renderProxy,webhooks:renderWebhooks,splunk:renderSplunk,jev:renderJev};
         (renderers[page] || renderDashboard)();
     }
 
@@ -2566,6 +2569,105 @@ search index=sec_dashboard | timechart count</pre></div>
             } else {
                 resultDiv.innerHTML = `<div class="finding-card vuln"><strong>Connection failed:</strong> ${esc(result.error||'Unknown')}</div>`;
                 toast('Splunk test failed', 'error');
+            }
+        } catch (e) {
+            resultDiv.innerHTML = `<div class="finding-card vuln"><strong>Error:</strong> ${esc(e.message)}</div>`;
+            toast('Test failed: ' + e.message, 'error');
+        }
+    }
+
+    // ── Jev AI (Fase J) ─────────────────────
+    async function renderJev() {
+        const content = document.getElementById('content');
+        content.innerHTML = '<div class="skeleton" style="height:200px;margin-bottom:16px"></div>';
+        let config = {enabled: false, api_key: '', model: 'jev-1.13.0', base_url: 'https://api.typesafe.ai/v1/systemone', timeout: 30, max_findings: 100};
+        try {
+            const data = await api.get('/jev');
+            config = data.config || config;
+        } catch (e) { /* use defaults */ }
+
+        content.innerHTML = `
+            <div class="card">
+                <div class="card-header"><div class="card-title">Jev AI — Verdict Layer</div>
+                    <span class="badge-status ${config.enabled?'badge-completed':'badge-pending'}">${config.enabled?'Enabled':'Disabled'}</span>
+                </div>
+                <p style="font-size:13px;color:var(--text-secondary);margin-bottom:16px">
+                    Optional AI verdicts over scan and pipeline findings (TypeSafe Jev). When enabled, every
+                    finished scan/pipeline gets per-finding verdicts (true positive / false positive / noise),
+                    a 0-3 severity score and an "immediate action" probability. Non-blocking: if the API fails,
+                    classic scoring is used as-is. Findings data leaves this machine to api.typesafe.ai only
+                    when you enable it — on the public deploy that is your individual responsibility.
+                </p>
+                <div class="flex gap-8 mb-16">
+                    <button class="btn btn-primary" onclick="saveJev()">Save Settings</button>
+                    <button class="btn" onclick="testJev()">Test Connection</button>
+                </div>
+                <div id="jev-result" class="mt-16"></div>
+            </div>
+            <div class="card">
+                <div class="card-header"><div class="card-title">Configuration</div></div>
+                <div class="input-group"><label>API Key (in-memory; or env TYPESAFE_API_KEY)</label>
+                    <input type="password" id="jev-key" value="${config.api_key?'***':''}" placeholder="ts-...">
+                </div>
+                <div class="input-group"><label>Model (pinned for stable thresholds)</label>
+                    <input type="text" id="jev-model" value="${esc(config.model)}" placeholder="jev-1.13.0">
+                </div>
+                <div class="input-group"><label>Endpoint</label>
+                    <input type="text" id="jev-url" value="${esc(config.base_url)}" placeholder="https://api.typesafe.ai/v1/systemone">
+                </div>
+                <div class="input-group"><label>Timeout (s)</label>
+                    <input type="number" id="jev-timeout" value="${config.timeout}" min="5" max="120">
+                </div>
+                <div class="input-group"><label>Max findings per call (cost cap)</label>
+                    <input type="number" id="jev-max" value="${config.max_findings}" min="10" max="500">
+                </div>
+                <div class="input-group"><label>Enable AI Verdicts</label>
+                    <select id="jev-enabled">
+                        <option value="0" ${!config.enabled?'selected':''}>Disabled</option>
+                        <option value="1" ${config.enabled?'selected':''}>Enabled</option>
+                    </select>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header"><div class="card-title">How it works / security</div></div>
+                <div style="font-size:13px;line-height:1.8">
+                    <p><strong>What is sent:</strong> per finding only tool, category, severity, title and description (truncated). Evidence payloads are never sent. Capped at <em>max findings per call</em>.</p>
+                    <p><strong>Key handling:</strong> the key lives in memory only (never written to disk) and is masked in this UI. Env <code>TYPESAFE_API_KEY</code> works as fallback for deploys.</p>
+                    <p><strong>Fail-safe:</strong> any error degrades silently to classic severity scoring; scans never fail because of Jev.</p>
+                    <p><strong>Remote deploy:</strong> enabling it on sec.sammideblas.com sends findings to a third party under your individual responsibility. Do not enable it there while scanning sensitive third-party targets.</p>
+                </div>
+            </div>
+        `;
+    }
+
+    async function saveJev() {
+        const config = {
+            enabled: document.getElementById('jev-enabled').value === '1',
+            api_key: document.getElementById('jev-key').value,
+            model: document.getElementById('jev-model').value.trim(),
+            base_url: document.getElementById('jev-url').value.trim(),
+            timeout: parseInt(document.getElementById('jev-timeout').value, 10) || 30,
+            max_findings: parseInt(document.getElementById('jev-max').value, 10) || 100,
+        };
+        try {
+            await api.post('/jev', config);
+            toast('Jev settings saved', 'success');
+        } catch (e) { toast('Save failed: ' + e.message, 'error'); }
+    }
+
+    async function testJev() {
+        const resultDiv = document.getElementById('jev-result');
+        resultDiv.innerHTML = '<div class="skeleton" style="width:200px"></div>';
+        try {
+            // Save first so test uses new config
+            await saveJev();
+            const result = await api.post('/jev/test', {});
+            if (result.ok) {
+                resultDiv.innerHTML = `<div class="finding-card safe"><strong>Connected!</strong> Model: ${esc(result.model||'')} | probe=${result.answer ?? ''}</div>`;
+                toast('Jev connection OK', 'success');
+            } else {
+                resultDiv.innerHTML = `<div class="finding-card vuln"><strong>Connection failed:</strong> ${esc(result.error||'Unknown')}</div>`;
+                toast('Jev test failed', 'error');
             }
         } catch (e) {
             resultDiv.innerHTML = `<div class="finding-card vuln"><strong>Error:</strong> ${esc(e.message)}</div>`;

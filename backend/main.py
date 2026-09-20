@@ -34,6 +34,7 @@ from backend.authguard import FailedAuthTracker, truncate_key
 from backend.maintenance import purge_old_runs, backup_db
 from backend import webhooks
 from backend import splunk
+from backend import jev
 from backend.applog import get_logger, setup_logging
 
 # Structured logging: rotating file (data/logs) + stdout, before anything runs.
@@ -949,6 +950,13 @@ async def list_scans(target_id: int = None, page: int = 1, per_page: int = 50):
 
 async def _persist_scan_result(scan_id: int, status: str, result: dict):
     """Persist a finished scan's result plus normalized findings and score (Fase 0.4)."""
+    # Fase J: optional Jev enrichment (non-blocking; degrades to classic scoring).
+    try:
+        jev_info = await jev.enrich_findings(result.get("findings", []))
+        if jev_info.get("status") == "ok":
+            result["jev"] = jev_info
+    except Exception as e:
+        _log.warning("jev enrichment failed scan=%d: %s", scan_id, e)
     db = await get_db()
     try:
         findings_json = json.dumps(result.get("findings", []))
@@ -968,6 +976,13 @@ async def _persist_scan_result(scan_id: int, status: str, result: dict):
 
 async def _persist_pipeline_result(pipeline_id: int, status: str, result: dict):
     """Persist a finished pipeline's result plus aggregated findings and score (Fase 0.4)."""
+    # Fase J: optional Jev enrichment (non-blocking; degrades to classic scoring).
+    try:
+        jev_info = await jev.enrich_findings(result.get("findings", []))
+        if jev_info.get("status") == "ok":
+            result["jev"] = jev_info
+    except Exception as e:
+        _log.warning("jev enrichment failed pipeline=%d: %s", pipeline_id, e)
     db = await get_db()
     try:
         findings_json = json.dumps(result.get("findings", []))
@@ -1607,6 +1622,43 @@ async def update_splunk(body: SplunkConfig):
 @app.post("/api/splunk/test")
 async def test_splunk():
     return await splunk.test_splunk_connection()
+
+
+# ── Jev AI (Fase J): optional verdict layer over findings ──────────
+class JevConfig(BaseModel):
+    enabled: bool = False
+    api_key: str = ""
+    model: str = "jev-1.13.0"
+    base_url: str = "https://api.typesafe.ai/v1/systemone"
+    timeout: int = 30
+    max_findings: int = 100
+
+
+@app.get("/api/jev")
+async def get_jev():
+    config = jev.get_jev_config()
+    # Never return the key (same masking rule as Splunk password).
+    config["api_key"] = "***" if config.get("api_key") else ""
+    return {"config": config}
+
+
+@app.post("/api/jev")
+async def update_jev(body: JevConfig):
+    config = body.dict()
+    # Don't overwrite the key if masked
+    if config.get("api_key") == "***":
+        config["api_key"] = jev.get_jev_config().get("api_key", "")
+    # C-JEV: base_url is an outbound target; when it leaves the default public
+    # endpoint it must pass the same SSRF checks as webhook URLs.
+    if config["enabled"] and config["base_url"] != jev.DEFAULT_BASE_URL:
+        _validate_webhook_url(config["base_url"])
+    jev.set_jev_config(config)
+    return {"status": "updated", "enabled": config["enabled"]}
+
+
+@app.post("/api/jev/test")
+async def test_jev_endpoint():
+    return await jev.test_jev()
 
 
 @app.post("/api/splunk/export-all")
