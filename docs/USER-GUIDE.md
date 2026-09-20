@@ -204,7 +204,7 @@ Splunk sourcetypes for these tools (section 9): `powershell:audit` (one event pe
 - **Exports**:
   - *JSON (per scan/pipeline)* — Splunk-compatible format with `event`, `timestamp`, `target`, `result` fields. Ready for SIEM ingestion.
   - *JSON (Export All)* — bulk export of everything, single file with an `events[]` array. Use for backup or batch import into Splunk/ELK.
-  - *PDF (per scan/pipeline)* — formatted report: metadata, results summary, raw JSON appendix. For documentation or sharing.
+  - *PDF (per scan/pipeline)* — formatted report: metadata, results summary, raw JSON appendix. For documentation or sharing. When Jev AI ran and the local LLM is enabled, scan/pipeline PDFs also carry the AI verdicts and automatic local-LLM explanations — see section 14.
   - *PDF (Export All)* — full PDF report: summary, targets table, all scans and pipelines in tabular form.
   - *CSV* — one row per finding, for spreadsheets/SIEM (`/api/scans/{id}/export/csv` and the pipeline equivalent).
 
@@ -282,6 +282,30 @@ System tools (`netstat`/`tasklist`) and the port scanner always use direct conne
 - **Auth:** API key on every `/api/*` (401 otherwise), lockout after repeated failures per peer, failed attempts logged with truncated keys; Cloudflare Access SSO as an outer layer on the public deployment.
 - **Headers:** CSP, HSTS, `X-Content-Type-Options: nosniff`.
 - **Uploads:** RF captures are analyzed offline and kept under `data/uploads/`; capped at 200,000 frames per capture.
+
+## 14. AI Verdicts (Jev) and local LLM explainer
+
+Two independent layers on top of your scans, both optional, both fail-safe: if either one is missing or errors out, every scan, export and score stays exactly as it was before.
+
+**What Jev does.** Jev (TypeSafe System One model, pinned `jev-1.13.0`) reads each finding after a scan/pipeline finishes and classifies it: verdict (`true_positive` / `false_positive` / `noise`), confidence 0-1, severity score 0-3 and an immediate-action urgency 0-1. It is enrichment only — the classic findings and score never change.
+
+**Where the AI data shows up.**
+- **UI:** every scan/pipeline view gets an *AI Verdicts (Jev)* card, ordered by composite risk, with a triage column. The *Jev AI* page has a "Como leer los veredictos" guide and a read-only *Ver query* inspector (shows exactly what would be sent to TypeSafe, built from a synthetic finding; nothing is sent).
+- **Exports:** JSON exports carry an `ai` block (Splunk/SIEM compatible), CSV exports add AI columns, and PDF exports get an *AI Verdicts (Jev)* section with the verdict table, triage table and a static legend.
+- **Triage buckets** (thresholds live only in `backend/triage.py`): confidence < 0.3 → hidden everywhere; 0.3–0.5 → REVISION MANUAL; trusted `true_positive` with immediate_action ≥ 0.5 or severity_score ≥ 2.0 → ACCION INMEDIATA; other trusted `true_positive` → ACCION PROGRAMADA; `false_positive`/`noise` → SIN ACCION.
+
+**Setup — Jev (cloud, per-use cost).**
+1. Get an API key from typesafe.ai.
+2. Sidebar *Jev AI*: paste the key, keep model pin `jev-1.13.0` and base URL `https://api.typesafe.ai/v1/systemone`, timeout 30 s → *Save* → *Test Connection* (a probe verdict comes back).
+3. The config is **in memory only**: it is lost on every server restart, so re-save it after restarting.
+4. Cost: roughly $0.0004–0.002 per scan (input tokens only). Privacy: finding titles/descriptions/severities (truncated) go to TypeSafe; nothing else leaves the machine.
+
+**Setup — local LLM explainer (reference-only, $0).**
+1. Run any OpenAI-compatible server on loopback, e.g. llama.cpp on `http://127.0.0.1:8099`. Reasoning models work as-is: the app already sends `max_tokens 2048` and `reasoning_effort low`, temp 0, bounded JSON output.
+2. *Jev AI* → *Explicador LLM local (referencial)*: enter base URL, model and timeout → *Save* → *Test Connection*. Loopback only (`127.0.0.1` / `localhost` / `::1`, any port); no API key; there are no defaults on purpose — you configure it.
+3. Use: per-row *Explicar* button in the AI Verdicts table → **resumen / porque / sugerencia** in Spanish. It is reference only: it never modifies Jev's verdict or any score, and with no LLM configured it simply says "explicacion no disponible".
+
+**Automatic explanations in PDF exports (J5c).** When the local LLM is enabled **and** Jev ran ok, the *PDF* export of a scan or pipeline automatically appends an *Explicaciones LLM local (referencial)* section: the top 5 findings by composite risk, each with resumen/porque/sugerencia and the model name (failed ones are listed as "no disponible (reason)"). There is no checkbox — the LLM enable toggle is the switch. It adds about 1–2 minutes to PDF generation (sequential calls, hard cap 5 min) and costs $0 (local CPU). The executive *Export All* PDF is unchanged, and with the LLM disabled or Jev absent the PDF is byte-identical to the pre-J5c output.
 
 ---
 
