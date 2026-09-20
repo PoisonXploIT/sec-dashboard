@@ -1,12 +1,12 @@
-"""Fase J5c: local LLM explanations auto-included in PDF exports.
+"""Fase J5d: local-LLM explanations generated at run completion (before any
+export), reference only.
 
 No network: local_llm.explain_finding is monkeypatched. Rules under test:
-- LLM disabled or Jev not ok -> None (PDF stays byte-identical to pre-J5c).
+- LLM disabled or Jev not ok -> None (run result byte-identical to pre-J5).
 - Enabled + Jev ok -> top-N findings by composite risk, sequential calls,
   unavailable explanations kept as items, never raises.
 """
 import asyncio
-import json
 
 import pytest
 
@@ -47,14 +47,14 @@ def _llm_enabled(monkeypatch):
 def test_disabled_returns_none(monkeypatch):
     monkeypatch.setattr(local_llm, "get_local_llm_config",
                         lambda: {"enabled": False})
-    assert _run(main._pdf_llm_explanations({"jev": JEV_OK}, FINDINGS)) is None
+    assert _run(main._llm_explanations_for({"jev": JEV_OK,
+                                           "findings": FINDINGS})) is None
 
 
 def test_jev_not_ok_returns_none():
-    assert _run(main._pdf_llm_explanations(
-        {"jev": {"status": "skipped"}}, FINDINGS)) is None
-    assert _run(main._pdf_llm_explanations({}, FINDINGS)) is None
-    assert _run(main._pdf_llm_explanations(None, FINDINGS)) is None
+    assert _run(main._llm_explanations_for(
+        {"jev": {"status": "skipped"}, "findings": FINDINGS})) is None
+    assert _run(main._llm_explanations_for({"findings": FINDINGS})) is None
 
 
 def test_top_n_by_composite_risk(monkeypatch):
@@ -68,7 +68,8 @@ def test_top_n_by_composite_risk(monkeypatch):
             "sugerencia": f"S {state['title']}"}}
 
     monkeypatch.setattr(local_llm, "explain_finding", fake_explain)
-    out = _run(main._pdf_llm_explanations({"jev": JEV_OK}, FINDINGS))
+    out = _run(main._llm_explanations_for(
+        {"jev": JEV_OK, "findings": FINDINGS}))
     # high x 2.5 before low x 0.5 (same composite-risk rule as the UI).
     assert calls == ["HSTS missing", "Server banner"]
     assert out[0]["title"] == "HSTS missing"
@@ -81,7 +82,8 @@ def test_unavailable_explanation_kept_as_item(monkeypatch):
         return {"status": "unavailable", "reason": "timeout"}
 
     monkeypatch.setattr(local_llm, "explain_finding", fake_explain)
-    out = _run(main._pdf_llm_explanations({"jev": JEV_OK}, FINDINGS))
+    out = _run(main._llm_explanations_for(
+        {"jev": JEV_OK, "findings": FINDINGS}))
     assert len(out) == 2
     assert all(i["status"] == "unavailable" and i["reason"] == "timeout"
                for i in out)
@@ -100,14 +102,7 @@ def test_top_n_capped(monkeypatch):
             "resumen": "r", "porque": "p", "sugerencia": "s"}}
 
     monkeypatch.setattr(local_llm, "explain_finding", fake_explain)
-    out = _run(main._pdf_llm_explanations({"jev": jev}, many))
-    assert len(out) == main.LLM_PDF_TOP_N == 5
+    out = _run(main._llm_explanations_for(
+        {"jev": jev, "findings": many}))
+    assert len(out) == main.LLM_EXPLAIN_TOP_N == 5
     assert len(calls) == 5
-
-
-def test_export_findings_column_first_result_fallback():
-    row = {"findings": json.dumps(FINDINGS)}
-    assert main._export_findings(row, {}) == FINDINGS
-    assert main._export_findings(
-        {"findings": "not json"}, {"findings": FINDINGS}) == FINDINGS
-    assert main._export_findings({}, {}) == []

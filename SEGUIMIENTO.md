@@ -626,6 +626,16 @@ Reglas para cada tool de este backlog:
 - **E2E real**: servidor :8799 con código nuevo, Jev `jev-1.13.0` + LLM `dirk-qwen3.8-27b-iq3` (:8099) reconfigurados tras restart (config en memoria). Scan 55 sobre sammideblas.com: Jev ok con 6 veredictos; PDF exportado en 51s con sección "Explicaciones LLM local (referencial)" y explicaciones reales en español (Cross-Origin-Resource-Policy, Server banner, COEP...) etiquetadas con el modelo. Coste: ~50s de CPU local por PDF, $0.
 - Estado J4/J5: J4a, J4b, J4c, J5a/J5b y J5c COMPLETADOS. Cerrado el backlog Jev.
 
+### 2026-09-20 — Fase J5d: explicaciones LLM al final del run (antes de exportar) + Guide en la UI (COMPLETADO)
+- **Rediseño pedido por el usuario** sobre J5c:
+  - Las explicaciones del LLM local se generan **al terminar el scan/pipeline** (junto al veredicto de Jev, en `_persist_scan_result` / `_persist_pipeline_result`), NO durante el export. El resultado persistido lleva `llm_explanations`; luego el usuario saca PDF, JSON o el formato que elija y todos llevan los mismos datos (PDF: sección "Explicaciones LLM local (referencial)"; JSON: `llm_explanations` en el result). El export vuelve a ser instantáneo.
+  - Solo si el usuario tiene LLM local configurado (usuarios sin GPU no ven nada ni esperan nada): LLM deshabilitado o Jev no ok -> sin clave `llm_explanations` -> exports byte-idénticos al pre-J5. Sin checkbox: el toggle del LLM es el interruptor.
+  - La explicación cubre el veredicto de Jev de cada top finding (cualquier tipo de veredicto: true_positive, false_positive, noise), no solo "errores".
+- **Cambios**: `main.py` — helper `_llm_explanations_for(result)` (top 5 por riesgo compuesto, secuencial, tope global 300s, nunca lanza) llamado tras el enriquecimiento Jev; se retiran `_pdf_llm_explanations`/`_export_findings` y los endpoints de PDF vuelven a ser simples. `report.py` — `generate_scan_pdf`/`generate_pipeline_pdf` ya no toman parámetro: leen `llm_explanations` del result persistido (helper `_llm_explanations_from`, acotado a 10 items). Constantes renombradas `LLM_EXPLAIN_TOP_N` / `LLM_EXPLAIN_TOTAL_CAP_S`.
+- **Guide en la UI** (`frontend/index.html`, `renderGuide()`): nueva tarjeta "AI Verdicts (Jev) + Local LLM Explainer" — qué hace Jev, setup de Jev (config en memoria, coste, privacidad), setup del LLM local (loopback-only, sin defaults; "No GPU? déjalo deshabilitado: no cambia nada"), que las explicaciones se generan al final del run y salen en el formato que elijas, buckets de triaje, dónde aparece los datos AI. `docs/USER-GUIDE.md` sección 14 actualizada al mismo comportamiento.
+- **Tests**: `tests/test_llm_explanations_run.py` (reemplaza test_pdf_llm_explanations.py): disabled/jev-no-ok -> None, orden por riesgo compuesto, unavailable conservado, top-N acotado. `test_report_jev.py`: los 3 tests de PDF ahora meten `llm_explanations` en el result JSON del fixture (ya no hay parámetro). Suite verde, ruff limpio, JS validado con node --check.
+- Estado J4/J5: J4a, J4b, J4c, J5a/J5b, J5c y J5d COMPLETADOS. Cerrado el backlog Jev.
+
 ## 7. Reglas y restricciones del proyecto (NO VIOLAR)
 
 1. **NO emojis, flechas de texto ni símbolos de color** en ninguna salida, nota, script o commit (regla global del usuario). Escribir las palabras.

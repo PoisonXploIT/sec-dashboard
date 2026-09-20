@@ -341,37 +341,29 @@ async def export_scan_json(scan_id: int):
     finally:
         await db.close()
 
-# J5c: PDF exports automatically include local-LLM explanations (reference
-# only) when the LLM is enabled and Jev ran ok. Top-N by composite risk;
-# sequential calls with an overall cap so a slow server never blocks export.
-LLM_PDF_TOP_N = 5
-LLM_PDF_TOTAL_CAP_S = 300
+# J5d: when the local LLM is enabled, its reference-only explanations of the
+# top Jev verdicts are generated at run completion (before any export) and
+# stored in the result. Top-N by composite risk; sequential calls with an
+# overall cap so a slow server never blocks the run.
+LLM_EXPLAIN_TOP_N = 5
+LLM_EXPLAIN_TOTAL_CAP_S = 300
 _SEV_WEIGHT_BY_VALUE = {sev.value: w for sev, w in SEVERITY_WEIGHT.items()}
 
 
-def _export_findings(row: dict, result_data: dict) -> list[dict]:
-    """Findings for a PDF export: persisted column first, result JSON fallback."""
-    try:
-        parsed = json.loads(row.get("findings") or "[]")
-        findings = [f for f in parsed if isinstance(f, dict)] if isinstance(parsed, list) else []
-    except (TypeError, json.JSONDecodeError):
-        findings = []
-    if not findings and isinstance(result_data.get("findings"), list):
-        findings = [f for f in result_data["findings"] if isinstance(f, dict)]
-    return findings
+async def _llm_explanations_for(result: dict) -> list[dict] | None:
+    """J5d: top-N local-LLM explanations of Jev's verdicts (reference only).
 
-
-async def _pdf_llm_explanations(result_data: dict, findings: list[dict]) -> list[dict] | None:
-    """J5c: top-N local-LLM explanations for PDF exports (reference only).
-
-    Returns None when the LLM is disabled or Jev did not run ok, so the PDF
-    stays byte-identical to the pre-J5c output. Never raises.
+    Called at scan/pipeline completion, before the result is persisted and
+    before any export. Returns None when the LLM is disabled or Jev did not
+    run ok, so runs without a local LLM stay byte-identical to pre-J5 output.
+    Never raises.
     """
     if not local_llm.get_local_llm_config().get("enabled"):
         return None
-    jev = result_data.get("jev") if isinstance(result_data, dict) else None
+    jev = result.get("jev") if isinstance(result, dict) else None
     if not (isinstance(jev, dict) and jev.get("status") == "ok"):
         return None
+    findings = [f for f in (result.get("findings") or []) if isinstance(f, dict)]
     verdicts = jev.get("verdicts") or {}
     rows = []
     for i, f in enumerate(findings):
@@ -388,8 +380,8 @@ async def _pdf_llm_explanations(result_data: dict, findings: list[dict]) -> list
     rows.sort(key=lambda t: t[0], reverse=True)
     out = []
     start = time.monotonic()
-    for _, f, v in rows[:LLM_PDF_TOP_N]:
-        if time.monotonic() - start > LLM_PDF_TOTAL_CAP_S:
+    for _, f, v in rows[:LLM_EXPLAIN_TOP_N]:
+        if time.monotonic() - start > LLM_EXPLAIN_TOTAL_CAP_S:
             break
         state = {
             "tool": str(f.get("tool") or ""),
@@ -426,14 +418,7 @@ async def export_scan_pdf(scan_id: int):
             cur2 = await db.execute("SELECT * FROM targets WHERE id = ?", (scan["target_id"],))
             row = await cur2.fetchone()
             if row: target = dict(row)
-        try:
-            result_data = json.loads(scan.get("result") or "{}")
-        except (TypeError, json.JSONDecodeError):
-            result_data = {}
-        llm_explanations = await _pdf_llm_explanations(
-            result_data if isinstance(result_data, dict) else {},
-            _export_findings(scan, result_data if isinstance(result_data, dict) else {}))
-        pdf_bytes = generate_scan_pdf(scan, target, llm_explanations)
+        pdf_bytes = generate_scan_pdf(scan, target)
         return FastResponse(content=pdf_bytes, media_type="application/pdf",
             headers={"Content-Disposition": f'attachment; filename="scan_{scan_id}.pdf"'})
     finally:
@@ -493,14 +478,7 @@ async def export_pipeline_pdf_endpoint(pipeline_id: int):
             cur2 = await db.execute("SELECT * FROM targets WHERE id = ?", (pipeline["target_id"],))
             row = await cur2.fetchone()
             if row: target = dict(row)
-        try:
-            result_data = json.loads(pipeline.get("result") or "{}")
-        except (TypeError, json.JSONDecodeError):
-            result_data = {}
-        llm_explanations = await _pdf_llm_explanations(
-            result_data if isinstance(result_data, dict) else {},
-            _export_findings(pipeline, result_data if isinstance(result_data, dict) else {}))
-        pdf_bytes = generate_pipeline_pdf(pipeline, target, llm_explanations)
+        pdf_bytes = generate_pipeline_pdf(pipeline, target)
         return FastResponse(content=pdf_bytes, media_type="application/pdf",
             headers={"Content-Disposition": f'attachment; filename="pipeline_{pipeline_id}.pdf"'})
     finally:
@@ -1042,6 +1020,14 @@ async def _persist_scan_result(scan_id: int, status: str, result: dict):
         jev_info = await jev.enrich_findings(result.get("findings", []))
         if jev_info.get("status") == "ok":
             result["jev"] = jev_info
+            # J5d: local-LLM explanations of the top verdicts, generated here
+            # (before any export) when the user has a local LLM configured.
+            try:
+                llm_expl = await _llm_explanations_for(result)
+                if llm_expl:
+                    result["llm_explanations"] = llm_expl
+            except Exception as e:
+                _log.warning("llm explanations failed scan=%d: %s", scan_id, e)
     except Exception as e:
         _log.warning("jev enrichment failed scan=%d: %s", scan_id, e)
     db = await get_db()
@@ -1068,6 +1054,14 @@ async def _persist_pipeline_result(pipeline_id: int, status: str, result: dict):
         jev_info = await jev.enrich_findings(result.get("findings", []))
         if jev_info.get("status") == "ok":
             result["jev"] = jev_info
+            # J5d: local-LLM explanations of the top verdicts, generated here
+            # (before any export) when the user has a local LLM configured.
+            try:
+                llm_expl = await _llm_explanations_for(result)
+                if llm_expl:
+                    result["llm_explanations"] = llm_expl
+            except Exception as e:
+                _log.warning("llm explanations failed pipeline=%d: %s", pipeline_id, e)
     except Exception as e:
         _log.warning("jev enrichment failed pipeline=%d: %s", pipeline_id, e)
     db = await get_db()

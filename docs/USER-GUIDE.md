@@ -204,7 +204,7 @@ Splunk sourcetypes for these tools (section 9): `powershell:audit` (one event pe
 - **Exports**:
   - *JSON (per scan/pipeline)* — Splunk-compatible format with `event`, `timestamp`, `target`, `result` fields. Ready for SIEM ingestion.
   - *JSON (Export All)* — bulk export of everything, single file with an `events[]` array. Use for backup or batch import into Splunk/ELK.
-  - *PDF (per scan/pipeline)* — formatted report: metadata, results summary, raw JSON appendix. For documentation or sharing. When Jev AI ran and the local LLM is enabled, scan/pipeline PDFs also carry the AI verdicts and automatic local-LLM explanations — see section 14.
+  - *PDF (per scan/pipeline)* — formatted report: metadata, results summary, raw JSON appendix. For documentation or sharing. When Jev AI ran, exports carry the AI verdicts; with a local LLM configured they also carry its reference-only explanations (generated at run completion) — see section 14.
   - *PDF (Export All)* — full PDF report: summary, targets table, all scans and pipelines in tabular form.
   - *CSV* — one row per finding, for spreadsheets/SIEM (`/api/scans/{id}/export/csv` and the pipeline equivalent).
 
@@ -305,7 +305,7 @@ Two independent layers on top of your scans, both optional, both fail-safe: if e
 2. *Jev AI* → *Explicador LLM local (referencial)*: enter base URL, model and timeout → *Save* → *Test Connection*. Loopback only (`127.0.0.1` / `localhost` / `::1`, any port); no API key; there are no defaults on purpose — you configure it.
 3. Use: per-row *Explicar* button in the AI Verdicts table → **resumen / porque / sugerencia** in Spanish. It is reference only: it never modifies Jev's verdict or any score, and with no LLM configured it simply says "explicacion no disponible".
 
-**Automatic explanations in PDF exports (J5c).** When the local LLM is enabled **and** Jev ran ok, the *PDF* export of a scan or pipeline automatically appends an *Explicaciones LLM local (referencial)* section: the top 5 findings by composite risk, each with resumen/porque/sugerencia and the model name (failed ones are listed as "no disponible (reason)"). There is no checkbox — the LLM enable toggle is the switch. It adds about 1–2 minutes to PDF generation (sequential calls, hard cap 5 min) and costs $0 (local CPU). The executive *Export All* PDF is unchanged, and with the LLM disabled or Jev absent the PDF is byte-identical to the pre-J5c output.
+**Explanations in exports (J5d).** When the local LLM is enabled **and** Jev ran ok, the explanations are generated at run completion — before you export anything — and stored in the run result: the top 5 Jev verdicts by composite risk, each with resumen/porque/sugerencia and the model name (failed ones are listed as "no disponible (reason)"). Then whichever format you export (PDF, JSON, ...) carries them: PDF renders an *Explicaciones LLM local (referencial)* section inside the AI Verdicts page, JSON exports include `llm_explanations` in the result. There is no checkbox — the LLM enable toggle is the switch; users without a GPU or local model simply leave it disabled and get exactly the classic output. It adds about 1–2 minutes to run completion (sequential calls, hard cap 5 min) and costs $0 (local CPU). The executive *Export All* PDF is unchanged, and with the LLM disabled or Jev absent every export stays byte-identical to the pre-J5 output.
 
 ---
 

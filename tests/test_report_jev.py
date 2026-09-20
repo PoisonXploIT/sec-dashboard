@@ -50,10 +50,12 @@ JEV = {
 }
 
 
-def _scan(jev=None):
+def _scan(jev=None, llm_explanations=None):
     result = {"success": True, "elapsed_seconds": 4.2, "result": {"grade": "C"}}
     if jev is not None:
         result["jev"] = jev
+    if llm_explanations is not None:
+        result["llm_explanations"] = llm_explanations
     return {
         "id": 7, "tool": "header_analyzer", "status": "completed",
         "target_id": 1, "started_at": "2026-08-27T10:00:00",
@@ -63,11 +65,13 @@ def _scan(jev=None):
     }
 
 
-def _pipeline(jev=None):
+def _pipeline(jev=None, llm_explanations=None):
     result = {"total_tools": 2, "elapsed_seconds": 60.0, "score": 42,
               "phases": {}, "findings": FINDINGS}
     if jev is not None:
         result["jev"] = jev
+    if llm_explanations is not None:
+        result["llm_explanations"] = llm_explanations
     return {
         "id": 9, "mode": "fast", "status": "completed", "target_id": 1,
         "started_at": "2026-08-27T10:00:00", "finished_at": "2026-08-27T10:01:00",
@@ -288,7 +292,9 @@ def test_jev_query_inspector_is_read_only_and_bounded():
     assert res["sample_state"][0]["title"].startswith("SAMPLE_FINDING_TITLE")
 
 
-# ── J5c: local LLM explanations in scan/pipeline PDFs (referencial) ───
+# ── J5d: local LLM explanations in scan/pipeline PDFs (referencial) ───
+# Generated at run completion and persisted in the result JSON; the PDF
+# renders whatever the result carries.
 
 LLM_EXPLS = [
     {"title": "HSTS missing", "model": "dirk-test-1b",
@@ -300,7 +306,7 @@ LLM_EXPLS = [
 
 
 def test_scan_pdf_llm_explanations_section():
-    text = _pdf_text(bytes(report.generate_scan_pdf(_scan(JEV), _target(), llm_explanations=LLM_EXPLS))) \
+    text = _pdf_text(bytes(report.generate_scan_pdf(_scan(JEV, llm_explanations=LLM_EXPLS), _target()))) \
         .replace("\(", "(").replace("\)", ")")
     assert "Explicaciones LLM local" in text
     assert "El sitio no envia HSTS." in text
@@ -311,7 +317,7 @@ def test_scan_pdf_llm_explanations_section():
 
 
 def test_pipeline_pdf_llm_explanations_section():
-    text = _pdf_text(bytes(report.generate_pipeline_pdf(_pipeline(JEV), _target(), llm_explanations=LLM_EXPLS))) \
+    text = _pdf_text(bytes(report.generate_pipeline_pdf(_pipeline(JEV, llm_explanations=LLM_EXPLS), _target()))) \
         .replace("\(", "(").replace("\)", ")")
     assert "Explicaciones LLM local" in text
 

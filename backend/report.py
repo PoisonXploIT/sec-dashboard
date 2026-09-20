@@ -768,12 +768,11 @@ def generate_all_pdf(scans: list, pipelines: list, targets: list) -> bytes:
     return bytes(pdf.output())
 
 
-def generate_scan_pdf(scan: dict, target: dict = None,
-                      llm_explanations: list[dict] | None = None) -> bytes:
+def generate_scan_pdf(scan: dict, target: dict = None) -> bytes:
     """Generate PDF report for a single scan.
 
-    llm_explanations (Fase J5c): optional reference-only explanations from the
-    local LLM; when provided they are rendered inside the AI Verdicts page.
+    When the run's result carries llm_explanations (Fase J5d: local LLM was
+    enabled at run completion), they are rendered inside the AI Verdicts page.
     """
     pdf = ReportPDF()
     pdf.alias_nb_pages()
@@ -800,6 +799,8 @@ def generate_scan_pdf(scan: dict, target: dict = None,
             result_data = json.loads(scan["result"])
         except (json.JSONDecodeError, TypeError):
             result_data = {"raw": scan["result"]}
+    # J5d: local LLM explanations generated at run completion (reference only).
+    llm_explanations = _llm_explanations_from(result_data)
     # fpdf core fonts are latin-1; sanitize every dynamic string before it hits the PDF.
     result_data = _sanitize_dict(result_data)
 
@@ -879,12 +880,11 @@ def generate_scan_pdf(scan: dict, target: dict = None,
     return bytes(pdf.output())
 
 
-def generate_pipeline_pdf(pipeline: dict, target: dict = None,
-                          llm_explanations: list[dict] | None = None) -> bytes:
+def generate_pipeline_pdf(pipeline: dict, target: dict = None) -> bytes:
     """Generate PDF report for a pipeline run.
 
-    llm_explanations (Fase J5c): optional reference-only explanations from the
-    local LLM; see generate_scan_pdf.
+    When the run's result carries llm_explanations (Fase J5d), they are
+    rendered inside the AI Verdicts page; see generate_scan_pdf.
     """
     pdf = ReportPDF()
     pdf.alias_nb_pages()
@@ -910,6 +910,9 @@ def generate_pipeline_pdf(pipeline: dict, target: dict = None,
             result_data = json.loads(pipeline["result"])
         except (json.JSONDecodeError, TypeError):
             result_data = {}
+
+    # J5d: local LLM explanations generated at run completion (reference only).
+    llm_explanations = _llm_explanations_from(result_data)
 
     if result_data:
         pdf.kv_row("Total Tools", str(result_data.get("total_tools", "")))
@@ -1075,6 +1078,21 @@ def _triage_rows(findings: list[dict], jev: dict) -> list[dict]:
         })
     rows.sort(key=lambda r: r["risk"], reverse=True)
     return rows
+
+
+def _llm_explanations_from(result_data: dict) -> list[dict] | None:
+    """J5d: local-LLM explanations persisted in the result at run completion.
+
+    Reference only; generated before any export so PDF/JSON (and whatever
+    format the user picks) all carry the same data. Bounded for rendering.
+    """
+    if not isinstance(result_data, dict):
+        return None
+    items = result_data.get("llm_explanations")
+    if not isinstance(items, list):
+        return None
+    items = [x for x in items if isinstance(x, dict)][:10]
+    return items or None
 
 
 def _render_jev_section(pdf, findings: list[dict], jev: dict,
