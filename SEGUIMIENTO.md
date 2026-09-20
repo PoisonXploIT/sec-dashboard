@@ -583,6 +583,21 @@ Reglas para cada tool de este backlog:
 - **Deploy Railway**: sin cambios; Jev sigue deshabilitado por defecto. Habilitarlo en publico solo con env `TYPESAFE_API_KEY`, bajo responsabilidad individual (regla 6 de J1: no habilitarlo alli mientras se escanean targets sensibles de terceros).
 - **J3 follow-up (2026-09-20)**: los PDFs normales (boton "PDF" de scan/pipeline) tambien llevan ahora la seccion "AI Verdicts (Jev)"; antes solo la llevaba el ejecutivo. Helper comun `_render_jev_section` en report.py (mismo bloque en los tres PDFs). Suite: 402 tests.
 
+### 2026-09-20 — J4/J5: triaje accionable + interpretacion en reportes + segunda opinion LLM local (APROBADO)
+- **J4 (deterministico, $0)**: funcion `triage()` con 4 buckets a partir de los campos de Jev (verdict, verdict_confidence, severity_score, immediate_action):
+  - ACCION INMEDIATA: tp Y conf>=0.5 Y (immediate_action>=0.5 O severity_score>=2)
+  - ACCION PROGRAMADA: tp Y conf>=0.5 (resto)
+  - REVISION MANUAL: 0.3<=conf<0.5 (cualquier veredicto)
+  - SIN ACCION: noise/fp con conf>=0.5; conf<0.3 se oculta (regla J0)
+  Se aplica en UI (etiqueta + conteos), CSV (columna `triage`), JSON (campo `triage` + resumen) y PDF (seccion "Triage: accion requerida" con conteos y lista por bucket). Umbral de confianza configurable (default 0.5, validado J0).
+- **J4b — Leyenda en PDFs**: seccion estatica "Como interpretar los datos AI": significado de cada campo, buckets, umbrales, version del modelo, que datos se envian (privacidad) y coste. Sin LLM.
+- **J4c — Guia UI**: pagina Jev AI ampliada con como leer veredictos/buckets/umbrales/coste/privacidad + inspector "Ver query" de solo lectura (muestra la plantilla exacta que se envia a TypeSafe sin enviar nada, para auditoria).
+- **J5 (LLM local, $0)**: explicador del veredicto de Jev, NO segundo oraculo: no cambia veredicto ni bucket. Mismo patron que el visor de logs: llama.cpp local SIN default (decision del usuario 2026-09-20): el usuario configura a mano la URL+puerto del servidor que este levantado en ese momento y el nombre de modelo; sin ambos, J5 queda deshabilitado. Config en memoria como jev/splunk (enabled, base_url solo loopback, model, timeout), sin key. `POST /api/llm/explain`: prompt fijo, temp 0, salida JSON acotada {resumen, porque, sugerencia}; fallo -> "explicacion no disponible" (no rompe nada). UI: boton "Explicar (LLM local)" por finding en la tarjeta AI Verdicts, etiquetado "referencial — el veredicto oficial es el de Jev". J5c (opcional): checkbox al exportar para incluir explicaciones top N en PDF/JSON.
+- **Decision de calibracion**: la query de JEV queda FIJA y centralizada en `backend/jev.py` (constantes auditables, diseno original). Sin UI de edicion libre: seria fuente de deriva y problemas de auditoria sin beneficio. Ajustable sin tocar codigo: enabled, max_findings, timeout, model pin, umbral de confianza.
+- **Orden**: J4a triage+tests -> J4b exports/UI/leyenda -> J4c guia+inspector -> J5a endpoint -> J5b UI -> (J5c export opcional). E2E con API real + modelo local en cada paso. Coste Jev inalterado; J4/J5 son $0.
+- **Riesgos**: LLM offline degrada a sin explicacion; update de modelo local -> pin de nombre en config y salida etiquetada referencial; separacion visual oficial (Jev) vs referencial (LLM) en UI y PDFs.
+- Estado: APROBADO (2026-09-20) con el ajuste de LLM manual. Empezando J4a (funcion triage + tests).
+
 ## 7. Reglas y restricciones del proyecto (NO VIOLAR)
 
 1. **NO emojis, flechas de texto ni símbolos de color** en ninguna salida, nota, script o commit (regla global del usuario). Escribir las palabras.
