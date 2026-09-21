@@ -660,6 +660,16 @@ Reglas para cada tool de este backlog:
 - **E2E en vivo (:8799)**: `GET /api/stats` real (7 targets/44 scans/5 pipelines; ai: 13 scans Jev ok, 3 con llm_explanations, 5 pipes Jev ok, 4 con llm; modos fast avg 44s / nuclear avg 279s). `DELETE /api/scans/all` sin confirm = 400. `DELETE /api/targets/all?confirm=true` borra 7 targets (cascada) y stats a cero. Bucle completo: nuevo target + scan clasico (`jev:false, llm:false`) -> stats 1/1/0 con tools=[header_analyzer] y ai=0.
 - **Nota**: la historia local de pruebas se limpio en el E2E (recuperable desde `data/backups/sec_*.db`).
 
+### 2026-09-21 — PS Security Audit: amenazas -> findings estandar (Jev + LLM aplican como en cualquier tool) (COMPLETADO)
+- **Objetivo**: que la capa AI de v2.0 cubra el audit empresarial de Windows (`ps_security_audit`), no solo las tools de red/web.
+- **Cambios**:
+  - `backend/tools/audit.py`: `_threats_to_findings()` lee `AMENAZAS_DETECTADAS.json` (glob, primero match; soporta objeto único vs array — quirk ConvertTo-Json PS 5.1), cap 100, severidad mayus->minus. Mismo archivo: `-Headless` en el cmd del script (sin prompts Read-Host/ReadKey que colgaban o daban ERROR CRITICO en modo no interactivo) y kill del PowerShell huérfano también al cancelar la task (scanner timeout) — antes solo se mataba en timeout interno.
+  - `backend/findings.py`: adapter `@register("ps_security_audit")` — threats -> findings (`ThreatType`->title, `Description`, `Details`->evidence, confidence 0.9, category "Enterprise Audit"); sin amenazas -> finding INFO "Auditoria completada sin amenazas detectadas"; error/result vacio -> [].
+- **Tests**: `tests/test_audit_findings_adapter.py` (7: mapeo completo + finding_id estable, objeto único PS5.1, sin archivo -> INFO, error -> [], folder ausente -> fallback, severidad desconocida -> medium, cap 100). Suite verde, ruff limpio.
+- **E2E en vivo (:8799)**: scan 65 real (target local-audit) — audit completo ~4 min con `-Headless` (el primer intento sin Headless timeout a 600s y dejo PowerShell huérfano; matado). Maquina limpia -> 1 finding INFO -> **Jev ok** (verdict noise/0.98, triage none) -> **llm_explanations: 1** (espanol, LLM local :8099). Export JSON: bloque `ai` con verdict + `llm_explanations`; CSV: 3 columnas llm_.
+- **Docs**: USER-GUIDE §14 (cobertura PS Security Audit). Obsidian: nueva nota de proyecto `PROYECTOS/AUDITING-POWERSHELL/000_AUDITING-POWERSHELL.md` enlazada desde la MOC de SEC-DASHBOARD.
+- **Commits**: `1eb9625` (adapter + helper + tests), `61f39b2` (-Headless + kill huérfano).
+
 ## 7. Reglas y restricciones del proyecto (NO VIOLAR)
 
 1. **NO emojis, flechas de texto ni símbolos de color** en ninguna salida, nota, script o commit (regla global del usuario). Escribir las palabras.
