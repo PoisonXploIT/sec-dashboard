@@ -16,6 +16,7 @@ import hashlib
 import time
 from dataclasses import asdict, dataclass, field
 from enum import Enum
+from pathlib import Path
 
 
 class Severity(str, Enum):
@@ -1238,6 +1239,50 @@ def _adapt_pcap_analyzer(result: dict, target: str) -> list[Finding]:
             target=target, confidence=0.7,
         ))
     return out[:6]
+
+
+@register("ps_security_audit")
+def _adapt_ps_security_audit(result: dict, target: str) -> list[Finding]:
+    """Enterprise audit threats (AMENAZAS_DETECTADAS.json) -> findings.
+
+    The wrapper (backend/tools/audit.py) runs Invoke-SecurityAudit.ps1 and
+    returns output_folder; the script exports every Add-ThreatDetection as
+    {Timestamp, ThreatType, Severity, Description, Details}. Mapped here so
+    the AI layer (Jev verdicts + local LLM explanations) treats the audit
+    like any other tool.
+    """
+    if not result or "error" in result:
+        return []
+    folder = str(result.get("output_folder", ""))
+    if not folder:
+        return _fallback_findings("ps_security_audit", result, target)
+    from backend.tools.audit import _threats_to_findings
+    try:
+        raw = _threats_to_findings(Path(folder))
+    except Exception:
+        raw = []
+    if not raw:
+        return [Finding(
+            tool="ps_security_audit", category="Enterprise Audit",
+            severity=Severity.INFO,
+            title="Auditoria completada sin amenazas detectadas",
+            description=f"Modules found: {result.get('modules_found', 0)}.",
+            target=target, confidence=1.0,
+        )]
+    out: list[Finding] = []
+    for r in raw:
+        try:
+            sev = Severity(str(r.get("severity", "medium")).lower())
+        except ValueError:
+            sev = Severity.MEDIUM
+        out.append(Finding(
+            tool="ps_security_audit", category="Enterprise Audit",
+            severity=sev, title=r["title"],
+            description=str(r.get("description", "")),
+            evidence=r.get("evidence") or None,
+            target=target, confidence=0.9,
+        ))
+    return out
 
 
 def extract_findings(tool: str, result: dict, target: str = "") -> list[Finding]:

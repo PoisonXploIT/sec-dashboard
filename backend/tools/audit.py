@@ -48,6 +48,57 @@ def _find_wrapper() -> str | None:
     return None
 
 
+# Cap for derived findings; Jev truncates to its own max_findings anyway.
+_MAX_AUDIT_FINDINGS = 100
+_SEVERITY_MAP = {"CRITICAL": "critical", "HIGH": "high", "MEDIUM": "medium", "LOW": "low"}
+
+
+def _threats_to_findings(audit_folder: Path) -> list[dict]:
+    """Convert AMENAZAS_DETECTADAS.json threats into standard findings.
+
+    Threat shape (PowerShell Add-ThreatDetection):
+      {Timestamp, ThreatType, Severity, Description, Details}
+    with uppercase Severity. Normalized to the lowercase severity scale and
+    finding fields used by the rest of the dashboard so the AI layer (Jev
+    verdicts + local LLM explanations) applies like any other tool.
+    Returns [] when the file is missing/unreadable (classic output unchanged).
+    """
+    findings: list[dict] = []
+    candidates = sorted(audit_folder.glob("AMENAZAS_DETECTADAS*.json"))
+    if not candidates:
+        return findings
+    try:
+        data = json.loads(candidates[0].read_text(encoding="utf-8-sig", errors="replace"))
+    except (OSError, json.JSONDecodeError):
+        return findings
+    # PowerShell 5.1 ConvertTo-Json: a single threat serializes as an object,
+    # several as an array.
+    if isinstance(data, dict):
+        data = [data]
+    if not isinstance(data, list):
+        return findings
+    for t in data[:_MAX_AUDIT_FINDINGS]:
+        if not isinstance(t, dict):
+            continue
+        severity = str(t.get("Severity", "")).strip().upper()
+        title = str(t.get("ThreatType", "")).strip() or "Amenaza sin tipo"
+        description = str(t.get("Description", "")).strip()
+        details = t.get("Details")
+        evidence: dict = {}
+        if isinstance(details, dict):
+            evidence = {k: v for k, v in list(details.items())[:8] if v is not None}
+        findings.append({
+            "tool": "ps_security_audit",
+            "category": "Enterprise Audit",
+            "severity": _SEVERITY_MAP.get(severity, "medium"),
+            "title": title[:200],
+            "description": (description or title)[:300],
+            "evidence": evidence,
+            "timestamp": str(t.get("Timestamp", "")),
+        })
+    return findings
+
+
 async def ps_security_audit(**kw) -> dict:
     """Run the PowerShell security audit script and return a summary.
 
@@ -191,6 +242,9 @@ async def ps_security_audit(**kw) -> dict:
     if log_file.exists():
         log_text = log_file.read_text(encoding="utf-8-sig", errors="replace")[:2000]
 
+    # Note: normalized findings are derived by the ps_security_audit adapter
+    # in backend/findings.py (it reads output_folder via _threats_to_findings)
+    # so the AI layer (Jev + local LLM) applies like any other tool.
     return {
         "status": "completed",
         "script": script_path,
