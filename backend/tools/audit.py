@@ -133,14 +133,18 @@ async def ps_security_audit(**kw) -> dict:
     # The script creates Auditoria_<timestamp>/ with 10 subfolders of JSON/CSV/TXT
     # Use run-audit.ps1 wrapper if available (bypasses AMSI false positive blocking)
     run_script = _find_wrapper() or script_path
+    # -Headless: skip the interactive Read-Host prompts (open folder /
+    # press-any-key) that hang or crash under -NonInteractive.
     cmd = [
         "powershell",
         "-NoProfile",
         "-NonInteractive",
         "-ExecutionPolicy", "Bypass",
         "-File", run_script,
+        "-Headless",
     ]
 
+    proc = None
     try:
         # M3: snapshot existing output folders BEFORE running so we pick
         # the folder created by THIS run, not a concurrent/previous one
@@ -161,15 +165,25 @@ async def ps_security_audit(**kw) -> dict:
         stderr_text = stderr.decode("utf-8", errors="replace")
     except asyncio.TimeoutError:
         # M3: kill the orphaned PowerShell process before returning
-        try:
-            proc.kill()
-            await proc.wait()
-        except Exception:
-            pass
+        if proc is not None:
+            try:
+                proc.kill()
+                await proc.wait()
+            except Exception:
+                pass
         return {
             "error": "Audit timed out after 600s",
             "script": script_path,
         }
+    except asyncio.CancelledError:
+        # Scanner-level timeout cancels this task; kill the orphaned
+        # PowerShell process before propagating the cancellation.
+        if proc is not None:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+        raise
     except Exception as e:
         return {
             "error": f"Failed to execute script: {e}",
