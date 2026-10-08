@@ -75,7 +75,7 @@ def test_build_checks_hsts_present_and_cert_ok():
     hsts = {"present": True, "max_age": 100000,
             "include_subdomains": True, "preload": False}
     cert = {"self_signed": False, "expired": False, "days_left": 200,
-            "not_after": "Jan 01 00:00:00 2027 GMT"}
+            "not_after": _futuro_gmt()}
     versions = {"1.0": False, "1.1": False, "1.2": True, "1.3": True,
                 "negotiated": None}
     ocsp = {"stapling": "yes", "responder": None}
@@ -348,11 +348,22 @@ def test_cn_from_text_name_shape():
     assert network._cn_from_text_name(None) == ""
 
 
+def _futuro_gmt(dias: int = 730) -> str:
+    """Fecha futura en formato OpenSSL ('%b %d %H:%M:%S %Y GMT').
+
+    Los tests usaban fechas fijas ('Sep 30 23:59:59 2026 GMT') que caducaban: cuando la fecha pasaba,
+    el certificado de prueba aparecia como expirado y el test fallaba sin que hubiera nada roto.
+    """
+    from datetime import datetime, timedelta, timezone
+    f = datetime.now(timezone.utc) + timedelta(days=dias)
+    return f"{f.strftime('%b')} {f.day:2d}{f.strftime(' %H:%M:%S %Y')} GMT"
+
+
 def test_cert_facts_text_form_path():
     text = {
         "subject": ((("commonName", "github.com"),),),
         "issuer": ((("commonName", "DigiCert"),),),
-        "notAfter": "Sep 30 23:59:59 2026 GMT",
+        "notAfter": _futuro_gmt(),
         "subjectAltName": [("DNS", "github.com")],
         "OCSP": ["http://ocsp.example"],
     }

@@ -709,3 +709,7 @@ Estado: todo el backlog OSINT cerrado. Plan de seguridad (bunker) desplegado en 
 Siguiente micro-paso: según decisión del usuario — hardware con capturas reales (B WiFi Marauder v6/CYD reutiliza `wifi.py`; C Bruce y D HackRF/BusPirate requieren capturas) o backlog pendiente (`--save` CLI, TUI, tests de integración end-to-end, config por env).
 
 Reglas: MVP sin dependencias nuevas, tests sin red, commits feat:/fix: largos y descriptivos, push solo con suite verde y confirmado, sin emojis ni símbolos de color. Comandos: .venv\Scripts\python.exe -m pytest -q (~1.3s), -m ruff check backend tests, -m compileall -q backend. Al cerrar sesión: añadir entrada al FINAL de la sección 6 (append-only) y actualizar el footer con el siguiente micro-paso.
+
+---
+
+**NOTA 2026-10-08**: las cifras historicas de este documento (35/40 herramientas, 6 categorias) estan superadas. El estado real es **52 herramientas en 7 categorias** (ver README). El contador del sidebar ya es dinamico: se rellena desde el endpoint /api/tools, asi que no vuelve a desfasarse.
