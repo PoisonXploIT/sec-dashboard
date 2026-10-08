@@ -76,28 +76,38 @@ Open http://127.0.0.1:8444 in your browser.
 ```
 sec-dashboard/
 ├── backend/
-│   ├── main.py          # FastAPI app, routes, WebSocket
-│   ├── config.py        # Tool definitions, pipeline configs, categories
-│   ├── scanner.py       # Tool dispatcher and executor
-│   ├── pipeline.py      # Multi-phase pipeline engine
-│   ├── report.py        # JSON and PDF report generators
-│   ├── proxy.py         # TOR/SOCKS5 proxy management
-│   ├── models.py        # SQLite schema
-│   ├── validators.py    # SSRF protection / target validation
-│   ├── webhooks.py      # Discord/Slack/generic webhook notifications
-│   ├── splunk.py        # Splunk REST API auto-indexing
-│   └── tools/
-│       ├── network.py   # Port scanner, DNS, subdomain, SSL, etc.
-│       ├── web.py       # Headers, tech detection, SQLi, XSS, etc.
-│       ├── vuln.py      # CVE search, hash checker, password audit
-│       ├── system.py    # Network connections, processes, system info
-│       └── osint.py     # ASN, reverse DNS, CT logs, Shodan, geolocation
+│   ├── main.py          # FastAPI: rutas, WebSocket /ws, CORS
+│   ├── config.py        # Definicion de las 52 herramientas y los pipelines
+│   ├── scanner.py       # Ejecutor de herramientas (dispatcher)
+│   ├── pipeline.py      # Motor de pipelines por fases
+│   ├── report.py        # Informes JSON y PDF (fpdf2)
+│   ├── models.py        # Esquema SQLite (data/sec.db)
+│   ├── validators.py    # Validacion del objetivo / proteccion SSRF
+│   ├── authguard.py     # Autenticacion por clave de API
+│   ├── ratelimit.py     # Limites de peticiones
+│   ├── triage.py        # Triage de hallazgos
+│   ├── findings.py      # Modelo y normalizacion de hallazgos
+│   ├── jev.py           # Clasificacion con Jev (TypeSafe)
+│   ├── local_llm.py     # LLM local (:8099), solo loopback
+│   ├── proxy.py         # TOR / SOCKS5
+│   ├── splunk.py        # Auto-indexado en Splunk (REST)
+│   ├── webhooks.py      # Discord / Slack / HTTP
+│   ├── maintenance.py   # Tareas de mantenimiento
+│   ├── applog.py        # Logging
+│   ├── cli.py           # CLI
+│   └── tools/           # Implementacion por familia
+│       ├── network.py  web.py  vuln.py  system.py  osint.py
+│       ├── emailsec.py  favicon.py  audit.py  wifi.py
+│       └── pcap.py  rf.py  rf_parser.py
 ├── frontend/
-│   ├── index.html       # Single-page application (vanilla JS)
-│   └── static/          # Icons, assets
+│   └── index.html       # SPA en JavaScript puro (sin build, sin framework)
+├── docs/
+│   └── USER-GUIDE.md
+├── tests/               # pytest
 ├── data/
-│   └── sec.db           # SQLite database (auto-created)
-├── requirements.txt
+│   └── sec.db           # SQLite (se crea sola)
+├── Dockerfile  ·  docker-compose.yml  ·  start.bat
+├── requirements.txt  ·  requirements-dev.txt  ·  ruff.toml  ·  pytest.ini
 └── README.md
 ```
 
@@ -110,6 +120,7 @@ sec-dashboard/
 | GET | `/api/status` | Health check and version |
 | GET | `/api/dashboard/stats` | Dashboard overview stats |
 | GET | `/api/tools` | List all available tools |
+| GET | `/api/stats` | Aggregate usage stats |
 | POST | `/api/tools/{id}/run` | Run a single tool |
 | GET | `/api/targets` | List targets |
 | POST | `/api/targets` | Create target (SSRF-validated in remote mode) |
@@ -120,6 +131,8 @@ sec-dashboard/
 | POST | `/api/scans/{id}/cancel` | Cancel a running scan |
 | GET | `/api/scans/{id}/export/json` | Export scan as JSON |
 | GET | `/api/scans/{id}/export/pdf` | Export scan as PDF |
+| GET | `/api/scans/{id}/export/csv` | Export scan as CSV |
+| DELETE | `/api/scans/all` | Delete all scans |
 | GET | `/api/pipelines` | List pipeline configurations |
 | POST | `/api/pipelines` | Execute a pipeline |
 | GET | `/api/pipelines/history` | Pipeline execution history |
@@ -127,6 +140,24 @@ sec-dashboard/
 | GET | `/api/pipelines/{id}/result` | Get pipeline result |
 | GET | `/api/pipelines/{id}/export/json` | Export pipeline as JSON |
 | GET | `/api/pipelines/{id}/export/pdf` | Export pipeline as PDF |
+| GET | `/api/pipelines/{id}/export/csv` | Export pipeline as CSV |
+| GET | `/api/pipelines/{id}/executive-pdf` | Executive summary PDF |
+| GET | `/api/pipelines/compare` | Compare two pipeline runs |
+| DELETE | `/api/pipelines/all` | Delete all pipeline runs |
+| GET | `/api/jev` | AI layer status (Jev + local LLM) |
+| GET | `/api/jev/query` | Query a verdict for a finding |
+| POST | `/api/jev` | Classify findings with Jev |
+| POST | `/api/jev/test` | Test the Jev connection |
+| GET | `/api/llm` | Local LLM status (loopback only) |
+| POST | `/api/llm` | Save local LLM settings |
+| POST | `/api/llm/explain` | Explain a finding in plain language |
+| POST | `/api/llm/test` | Test the local LLM endpoint |
+| GET | `/api/proxy` | Proxy (TOR/SOCKS5) status |
+| POST | `/api/proxy` | Start/stop the proxy |
+| GET | `/api/proxy/tor-ip` | Current TOR exit IP |
+| GET | `/api/proxy/tor-install` | Install TOR helper |
+| POST | `/api/upload/cff` | Upload a HackRF .cff capture (offline analysis) |
+| POST | `/api/upload/pcap` | Upload a WiFi .pcap capture (offline analysis) |
 | GET | `/api/webhooks` | List webhooks |
 | POST | `/api/webhooks` | Create webhook |
 | PUT | `/api/webhooks/{id}` | Update webhook |
