@@ -1,6 +1,6 @@
 # Sec-Dashboard
 
-Local-first security dashboard for reconnaissance, vulnerability assessment, and monitoring. 35 tools across 6 categories, multi-phase pipeline engine, real-time WebSocket updates, and export in JSON/PDF.
+Local-first security dashboard for reconnaissance, vulnerability assessment, and monitoring. 52 tools across 7 categories, multi-phase pipeline engine, real-time WebSocket updates, and export in JSON/PDF.
 
 Built with FastAPI + vanilla JS. No cloud dependencies, no accounts — runs entirely on your machine.
 
@@ -8,19 +8,20 @@ Built with FastAPI + vanilla JS. No cloud dependencies, no accounts — runs ent
 
 ## Features
 
-**35 Security Tools** organized in 6 categories:
+**52 Security Tools** organized in 7 categories:
 
 | Category | Tools |
 |----------|-------|
-| Network Recon | Port Scanner, DNS Recon, Subdomain Enum, HTTP Probe, Whois Lookup, Ping Sweep, Traceroute, SSL Analyzer, CAA Checker |
-| Web Security | Header Analyzer, Dir Fuzzer, SQLi Scanner, XSS Scanner, CORS Checker, CSP Analyzer, Tech Detector, Open Redirect, HTTP Methods, Robots.txt Analyzer |
-| Vulnerability | CVE Search, Hash Checker, Password Audit |
-| System | Network Connections, Process Monitor, System Info, PS Security Audit, WiFi Marauder Scan, M5Stick Networks |
-| OSINT | ASN Lookup, Reverse DNS, Certificate Transparency, Shodan Lookup, IP Geolocation |
-| Email Security | DNSSEC Checker, Email Security (SPF/DKIM/DMARC) |
+| Network Recon | Port Scanner, DNS Recon, Subdomain Enum, HTTP Probe, Whois Lookup, Ping Sweep, Traceroute, SSL/TLS Analyzer, SSL Deep Analyzer, CAA Checker |
+| Web Security | Header Analyzer, Directory Fuzzer, SQLi Scanner, XSS Scanner, CORS Checker, Tech Detector, CSP Analyzer, Open Redirect, Secret Leak Scan, Favicon Fingerprint, HTTP Methods, Robots.txt Analyzer |
+| Vulnerability | CVE Search, CVE Correlation, Subdomain Takeover, Hash Lookup, Password Audit, ExploitDB Search, Vulners Search |
+| System | Net Connections, Process Monitor, System Info, PS Security Audit, WiFi Marauder Scan, M5Stick Networks |
+| OSINT | ASN/BGP Lookup, Reverse DNS, CT Logs, Shodan Lookup, IP Geolocation, Wayback URLs, DNSDumpster Enum, PublicWWW Search, URLScan Lookup, GreyNoise Lookup, Hunter Email Finder, Grep.app Code Search |
+| Email Security | DNSSEC Checker, Email Security, DNS Zone Hygiene |
+| RF Hardware | HackRF CFF Analyzer, WiFi 802.11 Pcap Analyzer |
 
 **Special tools** (don't require a target domain/IP):
-- **Hash Checker**: input a file hash (MD5/SHA-1/SHA-256) to check reputation
+- **Hash Lookup**: input a file hash (MD5/SHA-1/SHA-256) to check reputation
 - **Password Audit**: input a password to check strength and breach status
 - **CVE Search**: input a keyword or CVE ID to search NIST NVD
 - **System tools**: run on the local machine, no target needed
