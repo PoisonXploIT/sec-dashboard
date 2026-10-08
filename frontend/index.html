@@ -2937,6 +2937,18 @@ search index=sec_dashboard | timechart count</pre></div>
                         <option value="1" ${config.enabled?'selected':''}>Enabled</option>
                     </select>
                 </div>
+                <div class="input-group"><label>Backend (juez)</label>
+                    <select id="jev-backend">
+                        <option value="cloud" ${(config.backend||'cloud')!=='local'?'selected':''}>Jev (cloud, default)</option>
+                        <option value="local" ${config.backend==='local'?'selected':''}>LAY\u00c1 (local, 2\u00aa opini\u00f3n)</option>
+                    </select>
+                </div>
+                <div class="input-group"><label>LAY\u00c1 local: endpoint (loopback)</label>
+                    <input type="text" id="jev-laya-url" value="${esc(config.laya_base_url||'http://127.0.0.1:8787/v1/systemone')}" placeholder="http://127.0.0.1:8787/v1/systemone">
+                </div>
+                <div class="input-group"><label>LAY\u00c1 local: modelo</label>
+                    <input type="text" id="jev-laya-model" value="${esc(config.laya_model||'multilingual')}" placeholder="multilingual">
+                </div>
             </div>
             <div class="card">
                 <div class="card-header"><div class="card-title">How it works / security</div></div>
@@ -3081,6 +3093,9 @@ search index=sec_dashboard | timechart count</pre></div>
             base_url: document.getElementById('jev-url').value.trim(),
             timeout: parseInt(document.getElementById('jev-timeout').value, 10) || 30,
             max_findings: parseInt(document.getElementById('jev-max').value, 10) || 100,
+            backend: document.getElementById('jev-backend').value,
+            laya_base_url: document.getElementById('jev-laya-url').value.trim(),
+            laya_model: document.getElementById('jev-laya-model').value.trim(),
         };
         try {
             await api.post('/jev', config);

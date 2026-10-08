@@ -1991,6 +1991,10 @@ class JevConfig(BaseModel):
     base_url: str = "https://api.typesafe.ai/v1/systemone"
     timeout: int = 30
     max_findings: int = 100
+    # LAY\u00c1 local (laya-serve): segunda opcion conmutable (cloud|local).
+    backend: str = "cloud"
+    laya_base_url: str = "http://127.0.0.1:8787/v1/systemone"
+    laya_model: str = "multilingual"
 
 
 @app.get("/api/jev")
@@ -2009,8 +2013,11 @@ async def update_jev(body: JevConfig):
         config["api_key"] = jev.get_jev_config().get("api_key", "")
     # C-JEV: base_url is an outbound target; when it leaves the default public
     # endpoint it must pass the same SSRF checks as webhook URLs.
-    if config["enabled"] and config["base_url"] != jev.DEFAULT_BASE_URL:
+    if (config["enabled"] and config["backend"] != "local"
+            and config["base_url"] != jev.DEFAULT_BASE_URL):
         _validate_webhook_url(config["base_url"])
+    if config.get("backend") == "local" and config.get("laya_base_url"):
+        _validate_webhook_url(config["laya_base_url"])
     jev.set_jev_config(config)
     return {"status": "updated", "enabled": config["enabled"]}
 
