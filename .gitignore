@@ -39,3 +39,7 @@ node_modules/
 .env
 .env.local
 tool_test_results.json
+
+# Artefactos locales (2026-10-08)
+nul
+tmp_*.log
